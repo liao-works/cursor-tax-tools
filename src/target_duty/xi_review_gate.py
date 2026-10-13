@@ -32,7 +32,7 @@ def evaluate(audit: dict, min_chapters: int = 12) -> dict:
     high_priority = []
     for entry in entries:
         code = entry.get("code", "")
-        if not isinstance(code, str) or not re.fullmatch(r"\\d{10}", code) or code in seen:
+        if not isinstance(code, str) or not re.fullmatch(r"\d{10}", code) or code in seen:
             raise ValueError("Duplicate or malformed commodity code in XI evidence")
         seen.add(code)
         chapters.add(code[:2])
@@ -100,7 +100,7 @@ def render_markdown(report: dict) -> str:
         text.append("|---|---|---|---|")
         for row in report["manual_review_items"]:
             values = (row["code"], row["legacy"], row["candidate"], row["comparison"])
-            escaped = [str(v if v is not None else "—").replace("|", "\\|") for v in values]
+            escaped = [str(v if v is not None else "—").replace("|", "\|") for v in values]
             text.append("| " + " | ".join(escaped) + " |")
     else:
         text.append("None detected in this small sample; UI semantics still need review.")
