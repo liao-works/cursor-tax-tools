@@ -13,6 +13,8 @@ import hashlib
 import json
 import os
 import re
+import sqlite3
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -61,6 +63,36 @@ def sign_review(preview_zip: str, output: str, key_id: str, private_seed_hex: st
         artifact.get("sha256") != hashlib.sha256(db_bytes).hexdigest()):
         raise ValueError("Preview manifest does not match DB file")
 
+    # Signing is a trust boundary. Independently recheck the source DB,
+    # including that nobody has silently marked legacy XI Other as verified.
+    source = unsigned.get("source") or {}
+    quality = unsigned.get("quality") or {}
+    if (source.get("measure_type") != "103" or
+        source.get("geographical_area") != "1011" or
+        not isinstance(quality.get("record_count"), int)):
+        raise ValueError("Source cannot be certified as focused GB 103/1011")
+    with tempfile.TemporaryDirectory() as directory:
+        path = Path(directory) / "candidate.db"
+        path.write_bytes(db_bytes)
+        with sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True) as conn:
+            if conn.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise ValueError("SQLite integrity check failed before signing")
+            counts = conn.execute(
+                """SELECT COUNT(*),
+                    SUM(CASE WHEN uk_rate_status='verified' AND TRIM(rate)!=''
+                         THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN uk_rate_status='conditional' AND TRIM(rate)=''
+                         THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN ni_rate_status IN ('stale','pending')
+                         THEN 1 ELSE 0 END)
+                    FROM tariffs""").fetchone()
+    total, verified, conditional, untrusted_ni = counts
+    if (total < 100 or verified + conditional != total or untrusted_ni != total or
+        quality.get("record_count") != total or
+        quality.get("gb_verified") != verified or
+        quality.get("gb_conditional") != conditional or
+        quality.get("ni_unverified") != untrusted_ni):
+        raise ValueError("Quality gate failed before signing (NI must remain unverified)")
     signed = {**unsigned, "channel": "signed-shadow-review",
               "signed": True, "production_eligible": False,
               "signature_alg": "ed25519", "key_id": key_id}

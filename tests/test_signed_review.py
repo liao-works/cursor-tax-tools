@@ -1,5 +1,6 @@
 import hashlib
 import json
+import sqlite3
 import tempfile
 import unittest
 import zipfile
@@ -12,11 +13,22 @@ from src.target_duty.signed_review import sign_review, verify_review
 
 class SignedReviewTests(unittest.TestCase):
     def create_preview(self, target):
-        body = b"test-sqlite-bytes-no-need-for-real-file-for-envelope-only"
+        db_file = target.with_suffix(".db")
+        with sqlite3.connect(db_file) as connection:
+            connection.execute("CREATE TABLE tariffs (code TEXT PRIMARY KEY,rate TEXT,"
+                               "uk_rate_status TEXT,ni_rate_status TEXT)")
+            connection.executemany(
+                "INSERT INTO tariffs VALUES (?,?,'verified','pending')",
+                [(f"{i:010}", "0%") for i in range(120)])
+        body = db_file.read_bytes()
         unsigned = {
             "schema_version": 2, "channel": "shadow-preview",
             "release_id": "target-duty-test-001",
             "signed": False, "production_eligible": False,
+            "source": {"measure_type": "103", "geographical_area": "1011"},
+            "as_of": "2026-10-13",
+            "quality": {"record_count": 120, "gb_verified": 120,
+                        "gb_conditional": 0, "ni_unverified": 120},
             "artifact": {"name": "target-duty.db",
                          "size": len(body),
                          "sha256": hashlib.sha256(body).hexdigest()}
