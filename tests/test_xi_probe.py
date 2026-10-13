@@ -1,5 +1,5 @@
 import unittest
-from src.target_duty.xi_probe import summarize_response, fetch_commodity
+from src.target_duty.xi_probe import summarize_response, fetch_commodity, fetch_public_commodity
 
 
 class XIProbeTest(unittest.TestCase):
@@ -26,6 +26,8 @@ class XIProbeTest(unittest.TestCase):
         self.assertEqual(len(report["candidates"]), 1)
         self.assertEqual(report["candidates"][0]["duty_expression"], "4%")
         self.assertEqual(report["counts"]["non_target_measure"], 1)
+        self.assertEqual(report["measure_types_observed"]["103"], 1)
+        self.assertEqual(report["measure_types_observed"]["142"], 1)
 
     def test_missing_includes_not_claimed_as_rate(self):
         result = summarize_response({"data": {"relationships": {
@@ -38,6 +40,8 @@ class XIProbeTest(unittest.TestCase):
         from datetime import date
         with self.assertRaises(ValueError):
             fetch_commodity("../x", date.today(), "a", "b")
+        with self.assertRaises(ValueError):
+            fetch_public_commodity("../x", date.today())
 
 
 if __name__ == "__main__":

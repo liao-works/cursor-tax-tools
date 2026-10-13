@@ -49,6 +49,26 @@ jobs:
               "duty": repr(rows[0].get("measure__duty_expression", ""))[:100]
           })
           PY
+      - name: Probe one XI public API sample (not a publish gate)
+        continue-on-error: true
+        run: |
+          python -m src.target_duty.xi_probe --public --code 0101210000 --output xi-candidate-report.json
+          python - <<'PY'
+          import json
+          report = json.load(open('xi-candidate-report.json'))
+          print('XI measure types:', report['measure_types_observed'])
+          print('XI geographies:', report['geographical_areas_observed'])
+          print('XI type 103 count:', len(report['candidates']))
+          print('Read-only audit:', report['status'], report['rate'])
+          PY
+      - name: Upload public XI audit when accessible
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xi-public-canary-${{ github.run_id }}
+          path: xi-candidate-report.json
+          if-no-files-found: ignore
+          retention-days: 5
       - name: Validate DBT filtered-query parameters
         run: |
           python - <<'PY'

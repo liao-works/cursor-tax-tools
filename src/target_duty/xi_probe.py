@@ -23,6 +23,23 @@ API_URL = "https://api.trade-tariff.service.gov.uk/xi/api/commodities/"
 ACCEPT = "application/vnd.hmrc.2.0+json"
 
 
+
+PUBLIC_API_URL = "https://www.trade-tariff.service.gov.uk/xi/api/commodities/"
+
+def fetch_public_commodity(code: str, as_of: date) -> dict:
+    """One-off public API audit; official managed OAuth required for production."""
+    if not re.fullmatch(r"\\d{10}", code):
+        raise ValueError("XI probe requires exactly a 10-digit commodity code")
+    url = PUBLIC_API_URL + code + "?" + urllib.parse.urlencode({"as_of": as_of.isoformat()})
+    request = urllib.request.Request(url, headers={
+        "Accept": ACCEPT, "User-Agent": "liao-target-duty-xi-audit/1.0"})
+    with urllib.request.urlopen(request, timeout=40) as response:
+        payload = json.load(response)
+    if not isinstance(payload, dict) or "data" not in payload:
+        raise ValueError("Malformed public XI response")
+    return payload
+
+
 def get_token(client_id: str, client_secret: str) -> str:
     if not client_id or not client_secret:
         raise ValueError("HMRC_CLIENT_ID and HMRC_CLIENT_SECRET are required")
@@ -85,6 +102,8 @@ def summarize_response(payload: dict, code: str) -> dict:
     candidates = []
     counts: Counter = Counter()
     relations = refs(data, "import_measures")
+    all_type_counts: Counter = Counter()
+    all_geo_counts: Counter = Counter()
     for measure_ref in relations:
         measure = included.get(("measure", str(measure_ref.get("id"))))
         if not measure:
@@ -94,6 +113,8 @@ def summarize_response(payload: dict, code: str) -> dict:
         geos = refs(measure, "geographical_area")
         measure_type = str(types[0].get("id")) if types else None
         geo = str(geos[0].get("id")) if geos else None
+        all_type_counts[str(measure_type)] += 1
+        all_geo_counts[str(geo)] += 1
         if measure_type != "103":
             counts["non_target_measure"] += 1
             continue
@@ -118,6 +139,8 @@ def summarize_response(payload: dict, code: str) -> dict:
         "rate": None,
         "import_measures_listed": len(relations),
         "counts": dict(counts),
+        "measure_types_observed": dict(all_type_counts),
+        "geographical_areas_observed": dict(all_geo_counts),
         "candidates": candidates,
         "observed_at": datetime.now(timezone.utc).isoformat(),
     }
@@ -128,10 +151,16 @@ def main():
     parser.add_argument("--code", required=True)
     parser.add_argument("--as-of", default=date.today().isoformat())
     parser.add_argument("--output", default="xi-candidate-report.json")
+    parser.add_argument("--public", action="store_true",
+                        help="One-off public API probe only; never use as production source")
     args = parser.parse_args()
-    payload = fetch_commodity(
-        args.code, date.fromisoformat(args.as_of),
-        os.getenv("HMRC_CLIENT_ID", ""), os.getenv("HMRC_CLIENT_SECRET", ""))
+    when = date.fromisoformat(args.as_of)
+    if args.public:
+        payload = fetch_public_commodity(args.code, when)
+    else:
+        payload = fetch_commodity(
+            args.code, when,
+            os.getenv("HMRC_CLIENT_ID", ""), os.getenv("HMRC_CLIENT_SECRET", ""))
     report = summarize_response(payload, args.code)
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
