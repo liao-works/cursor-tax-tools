@@ -14,7 +14,10 @@ class XIProbeTest(unittest.TestCase):
                  "relationships": {
                      "measure_type": {"data": {"id": "103", "type": "measure_type"}},
                      "geographical_area": {"data": {"id": "1011", "type": "geographical_area"}},
-                     "measure_conditions": {"data": []}}},
+                     "measure_conditions": {"data": []},
+                     "duty_expression": {"data": {"id": "duty-a", "type": "duty_expression"}}}},
+                {"id": "duty-a", "type": "duty_expression",
+                 "attributes": {"base": "4%"}},
                 {"id": "b", "type": "measure",
                  "attributes": {"resolved_duty_expression": "0%"},
                  "relationships": {
@@ -26,6 +29,7 @@ class XIProbeTest(unittest.TestCase):
         self.assertIsNone(report["rate"])
         self.assertEqual(len(report["candidates"]), 1)
         self.assertEqual(report["candidates"][0]["duty_expression"], "4%")
+        self.assertEqual(report["candidates"][0]["duty_expression_details"], [{"base": "4%"}])
         self.assertEqual(report["counts"]["non_target_measure"], 1)
         self.assertEqual(report["measure_types_observed"]["103"], 1)
         self.assertEqual(report["measure_types_observed"]["142"], 1)

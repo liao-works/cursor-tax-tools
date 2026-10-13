@@ -59,6 +59,7 @@ jobs:
           print('XI measure types:', report['measure_types_observed'])
           print('XI geographies:', report['geographical_areas_observed'])
           print('XI type 103 count:', len(report['candidates']))
+          print('XI duty internals:', report['candidates'][:1])
           print('Read-only audit:', report['status'], report['rate'])
           PY
       - name: Check two more XI reference codes without writing duty data

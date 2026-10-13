@@ -121,11 +121,21 @@ def summarize_response(payload: dict, code: str) -> dict:
         conditions = refs(measure, "measure_conditions")
         attrs = measure.get("attributes") or {}
         duty = attrs.get("resolved_duty_expression")
+        def detail(ref_name):
+            output = []
+            for reference in refs(measure, ref_name)[:15]:
+                entity = included.get((reference.get("type"), str(reference.get("id"))))
+                if entity:
+                    output.append(entity.get("attributes") or {})
+            return output
         candidates.append({
             "measure_id": str(measure.get("id")),
             "measure_type": measure_type,
             "geographical_area_id": geo,
             "duty_expression": duty,
+            "duty_expression_details": detail("duty_expression"),
+            "measure_components": detail("measure_components"),
+            "resolved_measure_components": detail("resolved_measure_components"),
             "has_conditions": bool(conditions),
             "additional_code_present": bool(refs(measure, "additional_code")),
             "effective_start_date": attrs.get("effective_start_date"),
