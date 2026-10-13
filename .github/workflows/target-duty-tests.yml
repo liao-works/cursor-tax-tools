@@ -6,6 +6,7 @@ on:
       - 'src/target_duty/**'
       - 'tests/test_target_duty.py'
       - 'tests/test_xi_probe.py'
+      - 'tests/test_target_reconcile.py'
       - '.github/workflows/target-duty-tests.yml'
 permissions:
   contents: read
@@ -22,6 +23,7 @@ jobs:
         run: |
           python -m unittest discover -s tests -p 'test_target_duty.py' -v
           python -m unittest discover -s tests -p 'test_xi_probe.py' -v
+          python -m unittest discover -s tests -p 'test_target_reconcile.py' -v
       - name: Verify official DBT *filtered* live sample
         run: |
           python - <<'PY'
@@ -66,9 +68,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Download pinned, SHA-verified legacy reference for comparison only
+        run: python -m src.target_duty.legacy --output legacy-tariffs.db
       - name: Build real GB-only filtered shadow snapshot
         run: |
-          python -m src.target_duty.build --output target-duty.db
+          python -m src.target_duty.build --legacy-db legacy-tariffs.db --output target-duty.db
+          python -m src.target_duty.reconcile --old legacy-tariffs.db --new target-duty.db --output target-duty-diff.json
           python - <<'PY'
           import json, sqlite3
           info = json.load(open("target-duty.metadata.json"))
@@ -88,4 +93,6 @@ jobs:
           path: |
             target-duty.db
             target-duty.metadata.json
+            target-duty-diff.json
+            target-duty-diff.csv
           retention-days: 7
