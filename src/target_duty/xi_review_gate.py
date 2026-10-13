@@ -8,6 +8,7 @@ remains *insufficient* to certify the web UI 'Other' meaning.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 from collections import Counter
@@ -116,8 +117,10 @@ def main():
     parser.add_argument("--min-chapters", type=int, default=12)
     parser.add_argument("--output", default="xi-review-gate.json")
     args = parser.parse_args()
-    payload = json.loads(Path(args.audit).read_text(encoding="utf-8"))
+    raw = Path(args.audit).read_bytes()
+    payload = json.loads(raw)
     result = evaluate(payload, min_chapters=args.min_chapters)
+    result["audit_sha256"] = hashlib.sha256(raw).hexdigest()
     dest = Path(args.output)
     dest.write_text(json.dumps(result, ensure_ascii=False, indent=2)+"\n", encoding="utf-8")
     dest.with_suffix(".md").write_text(render_markdown(result), encoding="utf-8")
