@@ -22,7 +22,7 @@ def open_readonly(path: str) -> sqlite3.Connection:
 
 
 def percent_value(text: str):
-    match = re.fullmatch(r"\\s*(\\d+(?:\\.\\d+)?)\\s*%\\s*", text)
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*%\s*", text)
     if not match:
         return None
     return Decimal(match.group(1))
@@ -31,8 +31,8 @@ def percent_value(text: str):
 def specific_value(text: str):
     """Conservative currency/units normalization; never collapse mixed formulas."""
     text = text.strip()
-    british = re.fullmatch(r"£\\s*(\\d[\\d,.]*)\\s*/\\s*(.+)", text)
-    iso = re.fullmatch(r"(\\d[\\d,.]*)\\s+GBP\\s*/\\s*(.+)", text)
+    british = re.fullmatch(r"£\s*(\d[\d,.]*)\s*/\s*(.+)", text)
+    iso = re.fullmatch(r"(\d[\d,.]*)\s+GBP\s*/\s*(.+)", text)
     match = british or iso
     if not match:
         return None
@@ -40,7 +40,7 @@ def specific_value(text: str):
         amount = Decimal(match.group(1).replace(",", ""))
     except InvalidOperation:
         return None
-    unit = re.sub(r"\\s+", " ", match.group(2).strip().lower())
+    unit = re.sub(r"\s+", " ", match.group(2).strip().lower())
     return amount, unit
 
 
