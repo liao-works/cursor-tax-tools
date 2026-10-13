@@ -5,10 +5,19 @@ import unittest
 from pathlib import Path
 
 from src.target_duty.legacy import validate_metadata
-from src.target_duty.reconcile import compare
+from src.target_duty.reconcile import compare, classify_rate
 
 
 class ReconcileTest(unittest.TestCase):
+    def test_rate_semantics_not_merely_strings(self):
+        self.assertEqual(classify_rate("0.00%", "0%"), "gb_format_equivalent")
+        self.assertEqual(classify_rate("1.60%", "1.6%"), "gb_format_equivalent")
+        self.assertEqual(classify_rate("£34.00 / 100 kg", "34 GBP / 100 kg"),
+                         "gb_format_equivalent")
+        self.assertEqual(classify_rate("8.00%", "14%"), "gb_percentage_changed")
+        self.assertEqual(classify_rate("10.00%", "10% + 77 GBP / 100 kg"),
+                         "gb_new_complex_duty")
+
     def test_metadata_has_to_pin_existing_version(self):
         self.assertEqual(validate_metadata({
             "version": "data-36851279616", "file_size": 500,
@@ -34,7 +43,7 @@ class ReconcileTest(unittest.TestCase):
                 ("0301110000","0%",None,"verified","pending")])
             two.commit();two.close()
             report=compare(str(old),str(new),str(output))
-            self.assertEqual(report["summary"]["gb_rate_changed"], 1)
+            self.assertEqual(report["summary"]["gb_percentage_changed"], 1)
             self.assertEqual(report["summary"]["legacy_only_code"], 1)
             self.assertEqual(report["summary"]["new_code"], 1)
             self.assertTrue(output.exists())
