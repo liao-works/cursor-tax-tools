@@ -33,6 +33,7 @@ class TargetDutyTest(unittest.TestCase):
         self.assertEqual(choose([self.row(rate="0%"), self.row(rate="6%")]), ("", "conditional"))
         self.assertEqual(choose([self.row(measure__additional_code__code="1234")]),
                          ("", "conditional"))
+        self.assertEqual(choose([self.row(measure__conditions="[]")]), ("0%", "verified"))
         self.assertEqual(choose([self.row(measure__conditions="A1")]), ("", "conditional"))
 
     def test_shadow_build_and_stale_ni(self):
@@ -55,6 +56,8 @@ class TargetDutyTest(unittest.TestCase):
                          as_of=date(2026,10,13), legacy_db=str(prior),
                          min_records=2, min_verified_ratio=0.4)
             self.assertEqual(meta["record_count"], 2)
+            self.assertEqual(len(meta["source"]["filtered_csv_sha256"]), 64)
+            self.assertTrue(meta["version"].endswith(meta["source"]["filtered_csv_sha256"][:12]))
             con = sqlite3.connect(output)
             self.assertEqual(con.execute("SELECT rate,uk_rate_status,north_ireland_rate,ni_rate_status FROM tariffs WHERE code='0101210000'").fetchone(), ("0%","verified","4%","stale"))
             self.assertEqual(con.execute("SELECT rate,uk_rate_status FROM tariffs WHERE code='0101290000'").fetchone(), ("","conditional"))

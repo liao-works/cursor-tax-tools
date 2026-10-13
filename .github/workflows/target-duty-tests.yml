@@ -41,6 +41,11 @@ jobs:
           assert all(r["measure__type__id"] == "103" for r in rows)
           assert all(r["measure__geographical_area__id"] == "1011" for r in rows)
           print(f"GB official target measures: {len(rows)} (no unfiltered download)")
+          print("Source sample fields:", {
+              "conditions": repr(rows[0].get("measure__conditions", ""))[:100],
+              "additional": repr(rows[0].get("measure__additional_code__code", ""))[:100],
+              "duty": repr(rows[0].get("measure__duty_expression", ""))[:100]
+          })
           PY
       - name: Validate DBT filtered-query parameters
         run: |
@@ -52,3 +57,35 @@ jobs:
           assert q['measure__geographical_area__id'] == ['1011']
           assert 'query-simple' in q
           PY
+
+  shadow-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build real GB-only filtered shadow snapshot
+        run: |
+          python -m src.target_duty.build --output target-duty.db
+          python - <<'PY'
+          import json, sqlite3
+          info = json.load(open("target-duty.metadata.json"))
+          print("Source: ", info["source"])
+          print("Quality: ", info["quality_metrics"])
+          db=sqlite3.connect("target-duty.db")
+          for row in db.execute("SELECT uk_rate_status,COUNT(*) FROM tariffs GROUP BY uk_rate_status"):
+              print("GB status:", row)
+          for row in db.execute("SELECT ni_rate_status,COUNT(*) FROM tariffs GROUP BY ni_rate_status"):
+              print("NI status:", row)
+          db.close()
+          PY
+      - name: Upload SHADOW ONLY, never production
+        uses: actions/upload-artifact@v4
+        with:
+          name: gb-third-country-shadow-${{ github.run_id }}
+          path: |
+            target-duty.db
+            target-duty.metadata.json
+          retention-days: 7

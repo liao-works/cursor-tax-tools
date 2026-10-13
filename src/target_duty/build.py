@@ -28,7 +28,7 @@ COLUMNS = (
     "measure__conditions", "measure__excluded_geographical_areas__ids",
     "measure__effective_start_date", "measure__effective_end_date"
 )
-NA = {"", "#NA", "N/A", "null", "None"}
+NA = {"", "#NA", "N/A", "null", "None", "[]", "{}", "NULL"}
 
 
 def build_url(version: str = "latest") -> str:
@@ -103,6 +103,13 @@ def build(csv_path: str, output: str, *, version: str, as_of: date,
     by_code: dict[str, list[dict]] = defaultdict(list)
     names: dict[str, str] = {}
     invalid_rows = 0
+    # Fingerprint the *filtered* official export. The API alias 'latest' is
+    # not an immutable source version, so incorporate actual response bytes.
+    source_hash = hashlib.sha256()
+    with open(csv_path, "rb") as source_stream:
+        while chunk := source_stream.read(1024 * 1024):
+            source_hash.update(chunk)
+    source_sha256 = source_hash.hexdigest()
     with open(csv_path, newline="", encoding="utf-8-sig") as stream:
         reader = csv.DictReader(stream)
         if not set(COLUMNS).issubset(reader.fieldnames or []):
@@ -162,11 +169,12 @@ def build(csv_path: str, output: str, *, version: str, as_of: date,
 
     digest = hashlib.sha256(output_file.read_bytes()).hexdigest()
     meta = {
-        "version": f"target-duty-{version}-{as_of.isoformat()}",
+        "version": f"target-duty-{version}-{as_of.isoformat()}-{source_sha256[:12]}",
         "timestamp": now, "last_modified": now,
         "file_hash": f"sha256:{digest}", "file_size": output_file.stat().st_size,
         "record_count": rows, "source": {"gb": "DBT", "version": version,
         "measure_type": "103", "geographical_area": "1011",
+        "filtered_csv_sha256": source_sha256,
         "effective_date": as_of.isoformat(), "ni": "legacy-unverified"},
         "quality_metrics": {"gb_verified": verified, "gb_conditional": conditional,
                             "ni_stale": ni_stale, "ignored_inactive_or_invalid": invalid_rows}
