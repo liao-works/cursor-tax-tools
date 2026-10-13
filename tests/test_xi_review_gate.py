@@ -12,7 +12,12 @@ def example(code, comparison="ni_format_equivalent"):
         "source_url": "https://www.trade-tariff.service.gov.uk/xi/commodities/" + code,
         "candidate_measures": [{
             "measure_type": "103", "geographical_area_id": "1011",
-            "duty_expression_details": [{"base": "0%"}]
+            "duty_expression_details": [{"base": "0%"}],
+            "effective_start_date": "2021-01-01T00:00:00.000Z",
+            "effective_end_date": None,
+            "has_conditions": False,
+            "additional_code_present": False,
+            "excluded_countries_present": False
         }]
     }
 
@@ -38,6 +43,16 @@ class XIReviewGateTests(unittest.TestCase):
         result = evaluate(p)
         self.assertEqual(result["manual_review_count"], 1)
         self.assertEqual(result["manual_review_items"][0]["code"], "0100000000")
+
+    def test_fabricated_candidate_or_expired_measure_fails_closed(self):
+        p = self.payload()
+        p["entries"][0]["xi_candidate"] = "9%"
+        with self.assertRaisesRegex(ValueError, "not reproduced"):
+            evaluate(p)
+        p = self.payload()
+        p["entries"][0]["candidate_measures"][0]["effective_end_date"] = "2025-01-01"
+        with self.assertRaisesRegex(ValueError, "not reproduced"):
+            evaluate(p)
 
     def test_non_original_date_or_missing_provenance_rejected(self):
         for field, value in (("effective_date_checked", "2025-01-01"),

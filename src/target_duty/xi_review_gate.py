@@ -14,6 +14,8 @@ from collections import Counter
 from datetime import date, datetime, timezone
 from pathlib import Path
 
+from .xi_probe import candidate_rate
+
 
 def evaluate(audit: dict, min_chapters: int = 12) -> dict:
     if not 1 <= min_chapters <= 96:
@@ -50,8 +52,9 @@ def evaluate(audit: dict, min_chapters: int = 12) -> dict:
             matches = [m for m in entry.get("candidate_measures", [])
                        if m.get("measure_type") == "103"
                        and m.get("geographical_area_id") == "1011"]
-            if not matches:
-                raise ValueError("XI candidate lacks supporting target measure")
+            if not matches or candidate_rate(entry["candidate_measures"],
+                                               date.fromisoformat(expected_date)) != candidate:
+                raise ValueError("XI candidate is not reproduced by the as-of measure selector")
         if verdict != "candidate_review" or comparison not in ("ni_rate_same", "ni_format_equivalent"):
             high_priority.append({
                 "code": code, "comparison": comparison, "verdict": verdict,
