@@ -66,7 +66,7 @@ jobs:
         run: |
           for CODE in 0201100000 0301110000; do
             python -m src.target_duty.xi_probe --public --code "$CODE" --output "xi-${CODE}.json"
-            python -c 'import glob,json; x=json.load(open(sorted(glob.glob("xi-*.json"))[-1])); print("XI reference:",x["commodity_code"],"types:",x["measure_types_observed"].get("103",0),"candidate:",x["candidates"])'
+            python -c 'import json,sys; x=json.load(open(sys.argv[1])); print("XI reference:",x["commodity_code"],"types:",x["measure_types_observed"].get("103",0),"candidate:",x["candidates"])' "xi-${CODE}.json"
           done
       - name: Upload public XI audit when accessible
         if: always()
