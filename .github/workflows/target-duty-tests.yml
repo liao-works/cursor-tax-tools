@@ -64,7 +64,7 @@ jobs:
       - name: Check two more XI reference codes without writing duty data
         continue-on-error: true
         run: |
-          for CODE in 0201100000 0301110000; do
+          for CODE in 0101299000 0102291010; do
             python -m src.target_duty.xi_probe --public --code "$CODE" --output "xi-${CODE}.json"
             python -c 'import json,sys; x=json.load(open(sys.argv[1])); print("XI reference:",x["commodity_code"],"types:",x["measure_types_observed"].get("103",0),"candidate:",x["candidates"])' "xi-${CODE}.json"
           done
