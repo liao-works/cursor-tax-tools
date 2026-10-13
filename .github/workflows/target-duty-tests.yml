@@ -22,6 +22,26 @@ jobs:
         run: |
           python -m unittest discover -s tests -p 'test_target_duty.py' -v
           python -m unittest discover -s tests -p 'test_xi_probe.py' -v
+      - name: Verify official DBT *filtered* live sample
+        run: |
+          python - <<'PY'
+          import csv, io, urllib.parse, urllib.request
+          from src.target_duty.build import build_url
+          url = build_url() + "&commodity__code=0101210000"
+          request = urllib.request.Request(url, headers={
+              "Accept": "text/csv", "User-Agent": "liao-tariff-shadow-smoke/1.0"})
+          with urllib.request.urlopen(request, timeout=60) as response:
+              assert response.status == 200
+              body = response.read(2_000_001)
+          assert len(body) <= 2_000_000, "Unexpectedly large filtered sample"
+          reader = csv.DictReader(io.StringIO(body.decode("utf-8-sig")))
+          rows = list(reader)
+          assert rows, "No DBT measures for known public commodity"
+          assert all(r["commodity__code"] == "0101210000" for r in rows)
+          assert all(r["measure__type__id"] == "103" for r in rows)
+          assert all(r["measure__geographical_area__id"] == "1011" for r in rows)
+          print(f"GB official target measures: {len(rows)} (no unfiltered download)")
+          PY
       - name: Validate DBT filtered-query parameters
         run: |
           python - <<'PY'
