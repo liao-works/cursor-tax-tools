@@ -28,7 +28,7 @@ PUBLIC_API_URL = "https://www.trade-tariff.service.gov.uk/xi/api/commodities/"
 
 def fetch_public_commodity(code: str, as_of: date) -> dict:
     """One-off public API audit; official managed OAuth required for production."""
-    if not re.fullmatch(r"\\d{10}", code):
+    if not re.fullmatch(r"\d{10}", code):
         raise ValueError("XI probe requires exactly a 10-digit commodity code")
     url = PUBLIC_API_URL + code + "?" + urllib.parse.urlencode({"as_of": as_of.isoformat()})
     request = urllib.request.Request(url, headers={

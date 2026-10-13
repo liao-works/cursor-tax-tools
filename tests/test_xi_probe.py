@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 from src.target_duty.xi_probe import summarize_response, fetch_commodity, fetch_public_commodity
 
 
@@ -35,6 +36,18 @@ class XIProbeTest(unittest.TestCase):
             "0101210000")
         self.assertIsNone(result["rate"])
         self.assertEqual(result["counts"]["unresolved_import_measure"], 1)
+
+    def test_public_probe_accepts_valid_code(self):
+        import json
+        from datetime import date
+        from io import BytesIO
+        with patch("urllib.request.urlopen", return_value=BytesIO(
+            json.dumps({"data": {"id": "x"}, "included": []}).encode()
+        )) as mocked:
+            response = fetch_public_commodity("0101210000", date(2026, 10, 13))
+            self.assertIn("data", response)
+            request = mocked.call_args.args[0]
+            self.assertIn("/xi/api/commodities/0101210000?", request.full_url)
 
     def test_bad_code_rejected_before_network(self):
         from datetime import date
