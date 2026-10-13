@@ -86,3 +86,20 @@ The *public* canary is only a small schema check and may be rate-limited.
 
 CI workflow `Focused third-country duty tests` creates and uploads shadow
 artifacts. It never performs a production Release publish.
+
+## V2 shadow-preview transport
+
+The CI `shadow-build` job now creates **`target-duty-preview.zip`**, nested
+inside the GitHub Actions artifact `gb-third-country-shadow-<run_id>`.
+It holds only `manifest.json` and `target-duty.db`.
+
+Manifest v2 fields include `channel=shadow-preview`,
+`production_eligible=false`, `signed=false`, SHA-256, byte size, as-of date,
+GB source fingerprint and status counts. Bundling re-reads SQLite to reject
+invalid coverage/status values, and importer verifies it again. No GitHub
+release or main-branch mutation.
+
+This manifest is a **transport integrity check, not producer authentication**.
+It is not suitable for production until a signature format/public key trust
+model is implemented separately. Manual review guide:
+`liao-tools/docs/shadow-preview-manual-test.md`.
