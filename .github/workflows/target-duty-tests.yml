@@ -61,12 +61,21 @@ jobs:
           print('XI type 103 count:', len(report['candidates']))
           print('Read-only audit:', report['status'], report['rate'])
           PY
+      - name: Check two more XI reference codes without writing duty data
+        continue-on-error: true
+        run: |
+          for CODE in 0201100000 0301110000; do
+            python -m src.target_duty.xi_probe --public --code "$CODE" --output "xi-${CODE}.json"
+            python -c 'import glob,json; x=json.load(open(sorted(glob.glob("xi-*.json"))[-1])); print("XI reference:",x["commodity_code"],"types:",x["measure_types_observed"].get("103",0),"candidate:",x["candidates"])'
+          done
       - name: Upload public XI audit when accessible
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: xi-public-canary-${{ github.run_id }}
-          path: xi-candidate-report.json
+          path: |
+            xi-candidate-report.json
+            xi-*.json
           if-no-files-found: ignore
           retention-days: 5
       - name: Validate DBT filtered-query parameters
