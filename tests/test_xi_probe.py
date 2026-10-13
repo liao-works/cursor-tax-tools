@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import patch
-from src.target_duty.xi_probe import summarize_response, fetch_commodity, fetch_public_commodity
+from src.target_duty.xi_probe import summarize_response, fetch_commodity, fetch_public_commodity, candidate_rate
 
 
 class XIProbeTest(unittest.TestCase):
@@ -33,6 +33,16 @@ class XIProbeTest(unittest.TestCase):
         self.assertEqual(report["counts"]["non_target_measure"], 1)
         self.assertEqual(report["measure_types_observed"]["103"], 1)
         self.assertEqual(report["measure_types_observed"]["142"], 1)
+
+    def test_candidate_uses_actual_duty_expression_relationship(self):
+        base = {"measure_type": "103", "geographical_area_id": "1011",
+                "has_conditions": False, "additional_code_present": False,
+                "excluded_countries_present": False,
+                "duty_expression_details": [{"base": "10.20 % + 93.10 EUR / 100 kg"}]}
+        self.assertEqual(candidate_rate([base]), "10.20 % + 93.10 EUR / 100 kg")
+        self.assertIsNone(candidate_rate([{**base, "has_conditions": True}]))
+        self.assertIsNone(candidate_rate([base, base]))
+        self.assertIsNone(candidate_rate([{**base, "geographical_area_id": "GB"}]))
 
     def test_missing_includes_not_claimed_as_rate(self):
         result = summarize_response({"data": {"relationships": {

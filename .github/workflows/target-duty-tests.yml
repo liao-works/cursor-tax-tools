@@ -59,6 +59,7 @@ jobs:
           print('XI measure types:', report['measure_types_observed'])
           print('XI geographies:', report['geographical_areas_observed'])
           print('XI type 103 count:', len(report['candidates']))
+          print('XI one-off candidate rate:', report['candidate_rate'])
           print('XI duty internals:', report['candidates'][:1])
           print('Read-only audit:', report['status'], report['rate'])
           PY
@@ -67,7 +68,7 @@ jobs:
         run: |
           for CODE in 0101299000 0102291010; do
             python -m src.target_duty.xi_probe --public --code "$CODE" --output "xi-${CODE}.json"
-            python -c 'import json,sys; x=json.load(open(sys.argv[1])); print("XI reference:",x["commodity_code"],"types:",x["measure_types_observed"].get("103",0),"candidate:",x["candidates"])' "xi-${CODE}.json"
+            python -c 'import json,sys; x=json.load(open(sys.argv[1])); print("XI reference:",x["commodity_code"],"types:",x["measure_types_observed"].get("103",0),"candidate rate:",x["candidate_rate"],"details:",x["candidates"])' "xi-${CODE}.json"
           done
       - name: Upload public XI audit when accessible
         if: always()

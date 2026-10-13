@@ -92,6 +92,25 @@ def refs(node: dict, relation: str) -> list[dict]:
     return []
 
 
+def candidate_rate(candidates: list[dict]) -> str | None:
+    """Unambiguous XI type 103 / ERGA OMNES *candidate*, not an Other ruling."""
+    matching = [c for c in candidates if c["measure_type"] == "103"
+                and c["geographical_area_id"] == "1011"]
+    if len(matching) != 1:
+        return None
+    item = matching[0]
+    if (item["has_conditions"] or item["additional_code_present"]
+            or item.get("excluded_countries_present")):
+        return None
+    expressions = item.get("duty_expression_details") or []
+    if len(expressions) != 1:
+        return None
+    base = expressions[0].get("base", "")
+    if not isinstance(base, str) or not base.strip():
+        return None
+    return base.strip()
+
+
 def summarize_response(payload: dict, code: str) -> dict:
     data = payload.get("data") or {}
     included = {
@@ -138,6 +157,7 @@ def summarize_response(payload: dict, code: str) -> dict:
             "resolved_measure_components": detail("resolved_measure_components"),
             "has_conditions": bool(conditions),
             "additional_code_present": bool(refs(measure, "additional_code")),
+            "excluded_countries_present": bool(refs(measure, "excluded_countries")),
             "effective_start_date": attrs.get("effective_start_date"),
             "effective_end_date": attrs.get("effective_end_date")
         })
@@ -147,6 +167,8 @@ def summarize_response(payload: dict, code: str) -> dict:
         "commodity_code": code, "region": "XI",
         "status": "review_required",  # NEVER 'verified' without a proven Other mapping
         "rate": None,
+        "candidate_rate": candidate_rate(candidates),
+        "candidate_rate_status": "review_only_not_verified",
         "import_measures_listed": len(relations),
         "counts": dict(counts),
         "measure_types_observed": dict(all_type_counts),
