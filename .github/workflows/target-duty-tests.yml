@@ -7,6 +7,7 @@ on:
       - 'tests/test_target_duty.py'
       - 'tests/test_xi_probe.py'
       - 'tests/test_target_reconcile.py'
+      - 'tests/test_preview_bundle.py'
       - '.github/workflows/target-duty-tests.yml'
 permissions:
   contents: read
@@ -24,6 +25,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_target_duty.py' -v
           python -m unittest discover -s tests -p 'test_xi_probe.py' -v
           python -m unittest discover -s tests -p 'test_target_reconcile.py' -v
+          python -m unittest discover -s tests -p 'test_preview_bundle.py' -v
       - name: Verify official DBT *filtered* live sample
         run: |
           python - <<'PY'
@@ -105,6 +107,7 @@ jobs:
         run: |
           python -m src.target_duty.build --legacy-db legacy-tariffs.db --output target-duty.db
           python -m src.target_duty.reconcile --old legacy-tariffs.db --new target-duty.db --output target-duty-diff.json
+          python -m src.target_duty.preview_bundle --output target-duty-preview.zip
           python - <<'PY'
           import json, sqlite3
           info = json.load(open("target-duty.metadata.json"))
@@ -126,4 +129,5 @@ jobs:
             target-duty.metadata.json
             target-duty-diff.json
             target-duty-diff.csv
+            target-duty-preview.zip
           retention-days: 7

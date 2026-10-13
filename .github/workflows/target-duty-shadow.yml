@@ -18,6 +18,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_target_duty.py' -v
       - name: Build focused GB tariff shadow (NO release publishing)
         run: python -m src.target_duty.build --output target-duty.db
+      - name: Produce isolated preview archive (not production-signed)
+        run: python -m src.target_duty.preview_bundle --output target-duty-preview.zip
       - name: Save candidates for offline reconciliation
         uses: actions/upload-artifact@v4
         with:
@@ -25,4 +27,5 @@ jobs:
           path: |
             target-duty.db
             target-duty.metadata.json
+            target-duty-preview.zip
           retention-days: 14
