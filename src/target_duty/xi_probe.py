@@ -92,10 +92,25 @@ def refs(node: dict, relation: str) -> list[dict]:
     return []
 
 
-def candidate_rate(candidates: list[dict]) -> str | None:
-    """Unambiguous XI type 103 / ERGA OMNES *candidate*, not an Other ruling."""
+def measure_active(item: dict, as_of: date) -> bool:
+    """Fail closed on missing/malformed start date or an expired/future measure."""
+    try:
+        start = item.get("effective_start_date")
+        if not isinstance(start, str) or not start:
+            return False
+        begin = date.fromisoformat(start[:10])
+        end = item.get("effective_end_date")
+        finish = date.fromisoformat(end[:10]) if isinstance(end, str) and end else None
+        return begin <= as_of and (finish is None or as_of <= finish)
+    except (ValueError, TypeError):
+        return False
+
+
+def candidate_rate(candidates: list[dict], as_of: date | None = None) -> str | None:
+    """Unambiguous, currently effective XI 103/1011 candidate; not an Other ruling."""
     matching = [c for c in candidates if c["measure_type"] == "103"
-                and c["geographical_area_id"] == "1011"]
+                and c["geographical_area_id"] == "1011"
+                and (as_of is None or measure_active(c, as_of))]
     if len(matching) != 1:
         return None
     item = matching[0]
@@ -111,7 +126,7 @@ def candidate_rate(candidates: list[dict]) -> str | None:
     return base.strip()
 
 
-def summarize_response(payload: dict, code: str) -> dict:
+def summarize_response(payload: dict, code: str, as_of: date | None = None) -> dict:
     data = payload.get("data") or {}
     included = {
         (obj.get("type"), str(obj.get("id"))): obj
@@ -167,7 +182,8 @@ def summarize_response(payload: dict, code: str) -> dict:
         "commodity_code": code, "region": "XI",
         "status": "review_required",  # NEVER 'verified' without a proven Other mapping
         "rate": None,
-        "candidate_rate": candidate_rate(candidates),
+        "candidate_rate": candidate_rate(candidates, as_of),
+        "effective_date_checked": as_of.isoformat() if as_of else None,
         "candidate_rate_status": "review_only_not_verified",
         "import_measures_listed": len(relations),
         "counts": dict(counts),
@@ -193,7 +209,7 @@ def main():
         payload = fetch_commodity(
             args.code, when,
             os.getenv("HMRC_CLIENT_ID", ""), os.getenv("HMRC_CLIENT_SECRET", ""))
-    report = summarize_response(payload, args.code)
+    report = summarize_response(payload, args.code, when)
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2)+"\n", encoding="utf-8")

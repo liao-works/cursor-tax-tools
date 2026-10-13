@@ -64,7 +64,7 @@ def audit(legacy_db: str, output: str, *, limit: int, as_of: date,
             time.sleep(delay)
         try:
             payload = fetcher(code, as_of)
-            report = summarize_response(payload, code)
+            report = summarize_response(payload, code, as_of)
             candidate = report["candidate_rate"]
             if candidate:
                 category = classify_rate(legacy, candidate)

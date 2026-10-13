@@ -1,6 +1,6 @@
 import unittest
 from unittest.mock import patch
-from src.target_duty.xi_probe import summarize_response, fetch_commodity, fetch_public_commodity, candidate_rate
+from src.target_duty.xi_probe import summarize_response, fetch_commodity, fetch_public_commodity, candidate_rate, measure_active
 
 
 class XIProbeTest(unittest.TestCase):
@@ -43,6 +43,19 @@ class XIProbeTest(unittest.TestCase):
         self.assertIsNone(candidate_rate([{**base, "has_conditions": True}]))
         self.assertIsNone(candidate_rate([base, base]))
         self.assertIsNone(candidate_rate([{**base, "geographical_area_id": "GB"}]))
+
+    def test_future_and_expired_measures_cannot_be_current_candidates(self):
+        from datetime import date
+        item = {"measure_type": "103", "geographical_area_id": "1011",
+                "has_conditions": False, "additional_code_present": False,
+                "effective_start_date": "2026-01-01T00:00:00.000Z",
+                "effective_end_date": "2026-12-31T00:00:00.000Z",
+                "duty_expression_details": [{"base": "11.50 %"}]}
+        self.assertEqual(candidate_rate([item], date(2026, 10, 13)), "11.50 %")
+        self.assertIsNone(candidate_rate([item], date(2027, 1, 1)))
+        self.assertIsNone(candidate_rate([item], date(2025, 12, 31)))
+        self.assertIsNone(candidate_rate([{**item, "effective_start_date": "bad"}], date(2026, 10, 13)))
+        self.assertFalse(measure_active({**item, "effective_start_date": None}, date(2026, 10, 13)))
 
     def test_missing_includes_not_claimed_as_rate(self):
         result = summarize_response({"data": {"relationships": {
