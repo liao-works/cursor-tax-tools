@@ -137,3 +137,34 @@ jobs:
             target-duty-diff.csv
             target-duty-preview.zip
           retention-days: 7
+
+  xi-audit-canary:
+    name: XI candidate sample (review only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Fetch authenticated-by-SHA old reference
+        run: python -m src.target_duty.legacy --output legacy-tariffs.db
+      - name: Audit 12 XI references across different HS chapters
+        continue-on-error: true
+        run: |
+          python -m src.target_duty.xi_audit --legacy-db legacy-tariffs.db --public --limit 12 --delay 1.2 --output xi-audit.json
+          python - <<'PY'
+          import json
+          result=json.load(open('xi-audit.json'))
+          print('XI audit only:',result['coverage'],'samples')
+          print('XI result breakdown:',result['stats'])
+          print('Production eligible?',result['production_eligible'])
+          PY
+      - name: Archive XI review evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xi-stratified-review-${{ github.run_id }}
+          path: xi-audit.json
+          if-no-files-found: ignore
+          retention-days: 7
