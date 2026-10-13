@@ -9,6 +9,7 @@ on:
       - 'tests/test_target_reconcile.py'
       - 'tests/test_preview_bundle.py'
       - 'tests/test_xi_audit.py'
+      - 'tests/test_xi_review_gate.py'
       - 'tests/test_signed_review.py'
       - '.github/workflows/target-duty-tests.yml'
 permissions:
@@ -29,6 +30,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_target_duty.py' -v
           python -m unittest discover -s tests -p 'test_xi_probe.py' -v
           python -m unittest discover -s tests -p 'test_xi_audit.py' -v
+          python -m unittest discover -s tests -p 'test_xi_review_gate.py' -v
           python -m unittest discover -s tests -p 'test_target_reconcile.py' -v
           python -m unittest discover -s tests -p 'test_preview_bundle.py' -v
           python -m unittest discover -s tests -p 'test_signed_review.py' -v
@@ -149,10 +151,11 @@ jobs:
           python-version: '3.11'
       - name: Fetch authenticated-by-SHA old reference
         run: python -m src.target_duty.legacy --output legacy-tariffs.db
-      - name: Audit 12 XI references across different HS chapters
+      - name: Audit 24 XI references across different HS chapters
         continue-on-error: true
         run: |
-          python -m src.target_duty.xi_audit --legacy-db legacy-tariffs.db --public --limit 12 --delay 1.2 --output xi-audit.json
+          python -m src.target_duty.xi_audit --legacy-db legacy-tariffs.db --public --limit 24 --delay 1.2 --output xi-audit.json
+          python -m src.target_duty.xi_review_gate --audit xi-audit.json --min-chapters 24 --output xi-review-gate.json
           python - <<'PY'
           import json
           result=json.load(open('xi-audit.json'))
@@ -165,6 +168,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: xi-stratified-review-${{ github.run_id }}
-          path: xi-audit.json
+          path: |
+            xi-audit.json
+            xi-review-gate.json
+            xi-review-gate.md
           if-no-files-found: ignore
           retention-days: 7

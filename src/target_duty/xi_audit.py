@@ -8,7 +8,7 @@ values are a reference only, not authoritative truth. No automatic promotion.
 from __future__ import annotations
 
 import argparse
-import csv
+import hashlib
 import json
 import sqlite3
 import time
@@ -22,9 +22,11 @@ from .xi_probe import fetch_public_commodity, fetch_commodity, summarize_respons
 from .reconcile import classify_rate
 
 
-def select_codes(legacy_db: str, limit: int) -> list[tuple[str, str]]:
+def select_codes(legacy_db: str, limit: int, offset: int = 0) -> list[tuple[str, str]]:
     if limit < 1 or limit > 100:
         raise ValueError("Audit limit must be within 1..100")
+    if offset < 0 or offset > 1000:
+        raise ValueError("Offset must be within 0..1000")
     conn = sqlite3.connect(Path(legacy_db).resolve().as_uri() + "?mode=ro", uri=True)
     try:
         rows = conn.execute(
@@ -38,6 +40,12 @@ def select_codes(legacy_db: str, limit: int) -> list[tuple[str, str]]:
     for code, rate in rows:
         if code.isdigit():
             chapters.setdefault(code[:2], []).append((code, rate))
+    # Deterministic offset lets review rounds cover additional codes within a chapter
+    # without random input or accidentally repeating the same first code forever.
+    for chapter, records in chapters.items():
+        if records:
+            shift = offset % len(records)
+            chapters[chapter] = records[shift:] + records[:shift]
     selected = []
     while len(selected) < limit and chapters:
         for chapter in list(chapters):
@@ -51,10 +59,11 @@ def select_codes(legacy_db: str, limit: int) -> list[tuple[str, str]]:
 
 
 def audit(legacy_db: str, output: str, *, limit: int, as_of: date,
-          fetcher: Callable[[str, date], dict], delay: float = 1.0) -> dict:
+          fetcher: Callable[[str, date], dict], delay: float = 1.0,
+          offset: int = 0) -> dict:
     if delay < 0 or delay > 30:
         raise ValueError("Delay must be between zero and 30 seconds")
-    codes = select_codes(legacy_db, limit)
+    codes = select_codes(legacy_db, limit, offset)
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     stats: Counter = Counter()
@@ -67,15 +76,22 @@ def audit(legacy_db: str, output: str, *, limit: int, as_of: date,
             report = summarize_response(payload, code, as_of)
             candidate = report["candidate_rate"]
             if candidate:
-                category = classify_rate(legacy, candidate)
+                category = classify_rate(legacy, candidate).replace("gb_", "ni_", 1)
                 verdict = "candidate_review"
             else:
                 category = "no_unambiguous_candidate"
                 verdict = "needs_measure_review"
+            provenance = hashlib.sha256(json.dumps(
+                payload, ensure_ascii=False, sort_keys=True,
+                separators=(",", ":")).encode("utf-8")).hexdigest()
             row = {
                 "code": code, "legacy_ni_rate": legacy,
                 "xi_candidate": candidate, "verdict": verdict,
-                "comparison": category, "candidate_measures": report["candidates"]
+                "comparison": category, "candidate_measures": report["candidates"],
+                "source": "HMRC-XI-v2", "source_url": (
+                    "https://www.trade-tariff.service.gov.uk/xi/commodities/" + code),
+                "response_sha256": provenance,
+                "effective_date_checked": as_of.isoformat()
             }
         except urllib.error.HTTPError as error:
             if error.code in (429, 503):
@@ -99,6 +115,8 @@ def audit(legacy_db: str, output: str, *, limit: int, as_of: date,
         "kind": "xi-third-country-duty-review-only",
         "as_of": as_of.isoformat(),
         "sampled_from": "legacy-ni-codes",
+        "sample_offset": offset,
+        "selection": "chapter-round-robin",
         "checked_at": datetime.now(timezone.utc).isoformat(),
         "coverage": len(codes), "stats": dict(stats), "entries": results,
         "production_eligible": False,
@@ -113,6 +131,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--legacy-db", required=True)
     parser.add_argument("--limit", type=int, default=20)
+    parser.add_argument("--offset", type=int, default=0,
+                        help="Select later codes within each chapter for additional audit rounds")
     parser.add_argument("--as-of", default=date.today().isoformat())
     parser.add_argument("--delay", type=float, default=1.5)
     parser.add_argument("--public", action="store_true",
@@ -139,7 +159,7 @@ def main():
                 return json.load(response)
 
     result = audit(args.legacy_db, args.output, limit=args.limit,
-                   as_of=when, fetcher=fetcher, delay=args.delay)
+                   as_of=when, fetcher=fetcher, delay=args.delay, offset=args.offset)
     print(json.dumps({"coverage": result["coverage"], "stats": result["stats"],
                       "path": args.output}, indent=2))
 

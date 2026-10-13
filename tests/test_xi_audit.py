@@ -45,6 +45,10 @@ class XIAuditTests(unittest.TestCase):
         self.assertEqual([code[:2] for code, _ in chosen], ["01", "02", "03"])
         with self.assertRaises(ValueError):
             select_codes(str(self.db), 101)
+        with self.assertRaises(ValueError):
+            select_codes(str(self.db), 3, offset=-1)
+        alternate = select_codes(str(self.db), 3, offset=1)
+        self.assertEqual(alternate[0][0], "0101299000")
 
     def test_report_only_and_preserve_mixed_duties(self):
         report = audit(str(self.db), str(self.dir/"audit.json"),
@@ -53,6 +57,10 @@ class XIAuditTests(unittest.TestCase):
         self.assertFalse(report["production_eligible"])
         self.assertEqual(report["coverage"], 3)
         self.assertEqual(report["stats"]["candidate_review"], 3)
+        self.assertEqual(report["entries"][0]["source"], "HMRC-XI-v2")
+        self.assertEqual(len(report["entries"][0]["response_sha256"]), 64)
+        self.assertEqual(report["entries"][0]["effective_date_checked"], "2026-10-13")
+        self.assertIn("ni_format_equivalent", report["stats"])
         feb = next(r for r in report["entries"] if r["code"].startswith("02"))
         self.assertEqual(feb["xi_candidate"], "10.20 % + 93.10 EUR / 100 kg")
         with sqlite3.connect(self.db) as db:
