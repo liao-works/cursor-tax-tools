@@ -180,7 +180,7 @@ def build(full_db: str, catalogue_db: str, output: str, *, max_mb: int=256) -> d
                         role=("gb_103_1011_candidate" if geo=="1011"
                               else "non_gb_103_1080_context")
                         db.execute(
-                            "INSERT INTO evidence VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                            "INSERT INTO evidence VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                             (code,ordinal,role,sid,kind,geo,effective,expression,
                              additional,conditions,excluded,start,end,raw_json))
                         if role=="gb_103_1011_candidate":
