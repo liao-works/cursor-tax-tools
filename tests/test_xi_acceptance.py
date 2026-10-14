@@ -84,6 +84,22 @@ class XIAcceptanceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"discrepancy"):
             evaluate(str(self.catalogue),str(self.measures),min_chapters=1)
 
+    def test_failed_source_request_cannot_hide_measure_rows(self):
+        db=sqlite3.connect(self.measures)
+        db.execute("UPDATE requests SET status='source_error',error='bad source' "
+                   "WHERE code='0101210000'")
+        db.commit();db.close()
+        with self.assertRaisesRegex(ValueError,"failed request incorrectly contains measures"):
+            evaluate(str(self.catalogue),str(self.measures),min_chapters=1)
+
+    def test_unknown_request_status_is_not_an_ordinary_retry(self):
+        db=sqlite3.connect(self.measures)
+        db.execute("UPDATE requests SET status='claimed_complete' "
+                   "WHERE code='0101210000'")
+        db.commit();db.close()
+        with self.assertRaisesRegex(ValueError,"Unsupported XI source status"):
+            evaluate(str(self.catalogue),str(self.measures),min_chapters=1)
+
     def test_catalogue_changed_or_wrong_minimum(self):
         with self.assertRaisesRegex(ValueError,"thresholds"):
             evaluate(str(self.catalogue),str(self.measures),min_chapters=0)
