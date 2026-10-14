@@ -39,11 +39,11 @@ CREATE TABLE commodities (
     parent_code TEXT,
     parent_suffix TEXT,
     active INTEGER NOT NULL CHECK(active IN (0,1)),
-    declarable INTEGER NOT NULL CHECK(declarable IN (0,1)),
+    suffix80 INTEGER NOT NULL CHECK(suffix80 IN (0,1)),
     PRIMARY KEY (sid, suffix)
 );
 CREATE INDEX idx_catalog_code ON commodities(code);
-CREATE INDEX idx_catalog_active ON commodities(active, declarable, code);
+CREATE INDEX idx_catalog_active ON commodities(active, suffix80, code);
 CREATE TABLE provenance (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
@@ -145,7 +145,7 @@ def build(csv_path: str, output: str, *, as_of: date, source_version: str,
                         raise ValueError(f"Duplicate commodity SID/suffix at row {rows}") from exc
 
             active_codes = conn.execute(
-                "SELECT COUNT(DISTINCT code) FROM commodities WHERE active=1 AND declarable=1"
+                "SELECT COUNT(DISTINCT code) FROM commodities WHERE active=1 AND suffix80=1"
             ).fetchone()[0]
             if active_codes < min_active:
                 raise ValueError(f"Coverage gate: {active_codes} active declarable codes < {min_active}")
@@ -153,9 +153,9 @@ def build(csv_path: str, output: str, *, as_of: date, source_version: str,
                 "all_catalogue_rows": rows,
                 "all_distinct_codes": conn.execute(
                     "SELECT COUNT(DISTINCT code) FROM commodities").fetchone()[0],
-                "active_declarable_codes": active_codes,
-                "historical_or_non_declarable_rows": conn.execute(
-                    "SELECT COUNT(*) FROM commodities WHERE active=0 OR declarable=0"
+                "active_suffix80_candidates": active_codes,
+                "inactive_or_non_suffix80_rows": conn.execute(
+                    "SELECT COUNT(*) FROM commodities WHERE active=0 OR suffix80=0"
                 ).fetchone()[0],
             }
             generated = datetime.now(timezone.utc).isoformat()
@@ -169,7 +169,7 @@ def build(csv_path: str, output: str, *, as_of: date, source_version: str,
                 "as_of": as_of.isoformat(),
                 "generated_at": generated,
                 "counts": counts,
-                "notes": "Suffix 80 and active dates define current declarable GB codes; all source rows retained.",
+                "notes": "Suffix 80 is necessary but NOT sufficient for declarability; all source rows retained, further validation required.",
             }
             for key, value in (
                 ("as_of", manifest["as_of"]), ("source_csv_sha256", sha.hexdigest()),
@@ -201,9 +201,9 @@ def compare(catalog_db: str, legacy_db: str, focused_db: str, output: str) -> di
     conn = sqlite3.connect(Path(catalog_db).resolve().as_uri() + "?mode=ro", uri=True)
     try:
         catalog = {code for (code,) in conn.execute(
-            "SELECT DISTINCT code FROM commodities WHERE active=1 AND declarable=1")}
+            "SELECT DISTINCT code FROM commodities WHERE active=1 AND suffix80=1")}
         historical = {code for (code,) in conn.execute(
-            "SELECT DISTINCT code FROM commodities WHERE active=0 OR declarable=0")}
+            "SELECT DISTINCT code FROM commodities WHERE active=0 OR suffix80=0")}
         as_of = conn.execute(
             "SELECT value FROM provenance WHERE key='as_of'").fetchone()[0]
     finally:
@@ -218,13 +218,13 @@ def compare(catalog_db: str, legacy_db: str, focused_db: str, output: str) -> di
     import csv as csv_module
     with out.with_suffix(".csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv_module.writer(stream)
-        writer.writerow(["code", "current_gb_declarable", "historical_or_non_declarable",
+        writer.writerow(["code", "active_suffix80_candidate", "historical_or_non_declarable",
                          "legacy_present", "focused_gb_present", "audit_status"])
         for code in sorted(union):
             current, old_present, focused_present = code in catalog, code in old, code in focused
-            status = ("catalogue_active_not_in_focused" if current and not focused_present
-                      else "focused_not_in_active_catalogue" if focused_present and not current
-                      else "legacy_only_not_active" if old_present and not current and not focused_present
+            status = ("catalogue_suffix80_not_in_focused" if current and not focused_present
+                      else "focused_not_in_active_suffix80" if focused_present and not current
+                      else "legacy_only_not_active_suffix80" if old_present and not current and not focused_present
                       else "present")
             if status != "present":
                 writer.writerow([code, int(current), int(code in historical),
@@ -233,17 +233,17 @@ def compare(catalog_db: str, legacy_db: str, focused_db: str, output: str) -> di
         "kind": "gb-catalogue-scope-reconciliation",
         "production_eligible": False,
         "as_of": as_of,
-        "active_declarable_catalogue": len(catalog),
+        "active_suffix80_catalogue": len(catalog),
         "legacy_codes": len(old),
         "focused_gb_codes": len(focused),
-        "active_catalogue_missing_focused": len(catalog - focused),
-        "focused_not_active_catalogue": len(focused - catalog),
-        "legacy_not_active_catalogue": len(old - catalog),
+        "active_suffix80_missing_focused": len(catalog - focused),
+        "focused_not_active_suffix80": len(focused - catalog),
+        "legacy_not_active_suffix80": len(old - catalog),
         "legacy_not_focused": len(old - focused),
         "csv": out.with_suffix(".csv").name,
-        "note": ("The GB catalogue, historical legacy and GB 103/1011 measures "
+        "note": ("The GB suffix-80 candidate catalogue, historical legacy and GB 103/1011 measures "
                  "have different scopes. Mismatches are review evidence, not deletions. "
-                 "No NI accuracy or production eligibility is implied."),
+                 "Suffix 80 is NOT proof of declaration eligibility. No NI accuracy or production eligibility is implied."),
     }
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return result
