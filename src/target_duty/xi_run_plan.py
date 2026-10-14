@@ -119,8 +119,11 @@ def build_plan(catalogue: str, *, manifest: str | None = None,
         "all_managed_source_responses_verified": full,
         "previous_checkpoint_replayed": bool(replay),
         "next_shard": next_shard,
-        "next_step": "source_collection_complete_but_business_unverified" if full
-                     else "collect_remaining_or_retry_failed",
+        "next_step": (
+            "source_collection_complete_but_business_unverified" if full
+            else "partial_canary_finished_not_full_ni" if not pending
+            else "collect_remaining_or_retry_failed"
+        ),
         "warning": "Source coverage is not a verified NI Other or payable duty rate.",
     }
 
