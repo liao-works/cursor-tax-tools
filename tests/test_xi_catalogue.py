@@ -102,6 +102,20 @@ class XICatalogueTest(unittest.TestCase):
                     records("01",{"data":[record]},TODAY)
         self.assertFalse(self.output.exists())
 
+    def test_official_chapter_pagination_never_silently_truncated(self):
+        all_chapters=listing()
+        all_chapters["links"]={"next":"https://example.invalid/page/2"}
+        with self.assertRaisesRegex(ValueError,"pagination next link"):
+            chapters(all_chapters)
+        part=payloads()["01"]
+        part["meta"]={"pagination":{"next":2}}
+        with self.assertRaisesRegex(ValueError,"more pages"):
+            records("01",part,TODAY)
+        with self.assertRaisesRegex(ValueError,"more pages"):
+            build(listing(),{"01":part,"02":payloads()["02"]},
+                  str(self.output),as_of=TODAY)
+        self.assertFalse(self.output.exists())
+
     def test_reject_missing_chapter_list(self):
         with self.assertRaisesRegex(ValueError,"missing or empty"):
             chapters({"data":[]})
