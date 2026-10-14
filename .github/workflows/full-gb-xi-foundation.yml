@@ -15,6 +15,8 @@ on:
       - 'tests/test_xi_catalogue.py'
       - 'src/target_duty/xi_measure_crawl.py'
       - 'tests/test_xi_measure_crawl.py'
+      - 'src/target_duty/xi_drift_guard.py'
+      - 'tests/test_xi_drift_guard.py'
       - 'src/target_duty/xi_acceptance.py'
       - 'tests/test_xi_acceptance.py'
       - 'src/target_duty/xi_run_plan.py'
@@ -67,5 +69,7 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_xi_run_plan.py' -v
       - name: Complete managed XI 97-chapter source coverage receipt safety tests
         run: python -m unittest discover -s tests -p 'test_xi_coverage_receipt.py' -v
+      - name: Replay verified XI cross-run source drift guard contract
+        run: python -m unittest discover -s tests -p 'test_xi_drift_guard.py' -v
       - name: Existing region evidence contract regression
         run: python -m unittest discover -s tests -p 'test_region_measures.py' -v
