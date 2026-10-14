@@ -184,11 +184,17 @@ def build(csv_path: str, output: str, *, as_of: date, source_version: str,
                 ).fetchone()[0],
             }
             generated = datetime.now(timezone.utc).isoformat()
+            version_match = re.search(
+                r"/versions/(v[0-9]+(?:\.[0-9]+)*)/", resolved_url or "")
+            resolved_version = (
+                version_match.group(1) if version_match else
+                source_version if re.fullmatch(r"v[0-9]+(?:\.[0-9]+)*", source_version) else None)
             manifest = {
                 "kind": "gb-official-commodity-catalogue-shadow",
                 "production_eligible": False,
-                "source": "DBT commodities table",
+                "source": "DBT commodities-report",
                 "requested_version": source_version,
+                "resolved_version": resolved_version,
                 "resolved_url": resolved_url,
                 "source_csv_sha256": sha.hexdigest(),
                 "as_of": as_of.isoformat(),
@@ -230,8 +236,9 @@ def compare(catalog_db: str, legacy_db: str, focused_db: str, output: str) -> di
                WHERE c.active=1 AND c.suffix80=1
                AND NOT EXISTS (SELECT 1 FROM commodities child
                  WHERE child.parent_sid=c.sid AND child.active=1)""")}
-        non_leaf_or_historical = {code for (code,) in conn.execute(
-            "SELECT DISTINCT code FROM commodities")} - catalog
+        all_catalog_codes = {code for (code,) in conn.execute(
+            "SELECT DISTINCT code FROM commodities")}
+        non_leaf_or_historical = all_catalog_codes - catalog
         as_of = conn.execute(
             "SELECT value FROM provenance WHERE key='as_of'").fetchone()[0]
     finally:
@@ -246,8 +253,9 @@ def compare(catalog_db: str, legacy_db: str, focused_db: str, output: str) -> di
     import csv as csv_module
     with out.with_suffix(".csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv_module.writer(stream)
-        writer.writerow(["code", "active_leaf_declarable", "structural_or_historical",
-                         "legacy_present", "focused_gb_present", "audit_status"])
+        writer.writerow(["code", "active_leaf_declarable", "in_official_catalogue",
+                         "structural_or_historical", "legacy_present",
+                         "focused_gb_present", "audit_status"])
         for code in sorted(union):
             current, old_present, focused_present = code in catalog, code in old, code in focused
             status = ("catalogue_leaf_not_in_focused" if current and not focused_present
@@ -255,7 +263,8 @@ def compare(catalog_db: str, legacy_db: str, focused_db: str, output: str) -> di
                       else "legacy_only_not_active_leaf" if old_present and not current and not focused_present
                       else "present")
             if status != "present":
-                writer.writerow([code, int(current), int(code in non_leaf_or_historical),
+                writer.writerow([code, int(current), int(code in all_catalog_codes),
+                                 int(code in non_leaf_or_historical),
                                  int(old_present), int(focused_present), status])
     result = {
         "kind": "gb-catalogue-scope-reconciliation",
@@ -267,6 +276,10 @@ def compare(catalog_db: str, legacy_db: str, focused_db: str, output: str) -> di
         "active_leaf_missing_focused": len(catalog - focused),
         "focused_not_active_leaf": len(focused - catalog),
         "legacy_not_active_leaf": len(old - catalog),
+        "legacy_active_leaf_missing_focused": len((old & catalog) - focused),
+        "active_leaf_missing_both_dbs": len(catalog - (old | focused)),
+        "legacy_absent_from_official_catalogue": len(old - all_catalog_codes),
+        "legacy_official_but_not_current_leaf": len((old & all_catalog_codes) - catalog),
         "legacy_not_focused": len(old - focused),
         "csv": out.with_suffix(".csv").name,
         "note": ("Official active suffix-80 leaf catalogue, legacy history and GB "
