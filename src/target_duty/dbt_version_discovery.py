@@ -151,7 +151,13 @@ def discover(*, previous_pin: str | None = None,
     except (ValueError,urllib.error.HTTPError,urllib.error.URLError,TimeoutError,OSError) as err:
         result["error"]=f"{type(err).__name__}: {str(err)[:400]}"
         if result["version_discovered"]:
-            result["state"]="table_inventory_unavailable"
+            diagnostic=result.get("table_inventory_diagnostic") or {}
+            result["newest_version_no_tables"]=diagnostic.get("tables_length")==0
+            result["state"]=(
+                "newest_version_registered_without_tables"
+                if result["newest_version_no_tables"]
+                else "table_inventory_unavailable"
+            )
             if previous_pin and previous_pin!=result.get("newest_official_version"):
                 # Diagnose whether only the new release is incomplete, without
                 # substituting an older version for the newest one.
