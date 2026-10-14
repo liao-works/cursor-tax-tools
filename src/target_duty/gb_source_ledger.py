@@ -27,22 +27,29 @@ FIELDS=[
 ]
 
 
-def _has_qualifier(value: str | None) -> bool:
-    """Structured empty official JSON arrays are not qualifying conditions."""
+def _has_qualifier(value: object) -> bool:
+    """Interpret official nested #NA sentinels, not JSON-array nonemptiness.
+
+    DBT serializes absent conditions/extra codes as "#NA"; the ledger
+    contains that value inside a one-element JSON list (e.g. '["#NA"]').
+    Strings containing unknown qualifiers remain conservative/blocked.
+    """
     if value is None:
         return False
+    if isinstance(value,(list,tuple)):
+        return any(_has_qualifier(item) for item in value)
+    if isinstance(value,dict):
+        return any(_has_qualifier(item) for item in value.values())
     if not isinstance(value,str):
-        raise ValueError("Official GB qualifier must be text")
+        return True
     item=value.strip()
     if item in ("","[]","{}","#NA","N/A","NULL","null","None"):
         return False
     if item[0] in "[{":
         try:
-            decoded=json.loads(item)
+            return _has_qualifier(json.loads(item))
         except json.JSONDecodeError:
-            # Unknown/malformed conditions must NOT be treated as none.
             return True
-        return bool(decoded) if isinstance(decoded,(list,dict)) else True
     return True
 
 
@@ -63,6 +70,7 @@ def build(database: str, output_csv: str, output_report: str) -> dict:
     out.parent.mkdir(parents=True,exist_ok=True)
     report_file.parent.mkdir(parents=True,exist_ok=True)
     status_counts=Counter()
+    reason_counts=Counter()
     ambiguous=0
     with sqlite3.connect(src.as_uri()+"?mode=ro",uri=True) as db:
         db.row_factory=sqlite3.Row
@@ -129,10 +137,14 @@ def build(database: str, output_csv: str, output_report: str) -> dict:
                     })
                     rows+=1
                     status_counts[status]+=1
+                    reason_counts[reason]+=1
             if rows!=len(snapshot["codes"]) or sum(status_counts.values())!=rows:
                 raise ValueError("GB ledger fails full active-leaf row parity")
             if status_counts.get("candidate_present_requires_applicability_review",0)!=snapshot["target_codes"]:
                 raise ValueError("GB ledger active-target count differs from source evidence")
+            if (reason_counts.get("candidate_not_certified_for_payable_rate",0)
+                + ambiguous != snapshot["target_codes"]):
+                raise ValueError("GB candidate type classification does not cover every candidate")
             os.replace(tmp,out)
     result={
         "kind":"gb-all-active-leaf-third-country-review-ledger-v1",
@@ -143,6 +155,9 @@ def build(database: str, output_csv: str, output_report: str) -> dict:
         "candidate_codes":snapshot["target_codes"],
         "unresolved_codes":len(snapshot["codes"])-snapshot["target_codes"],
         "complex_or_ambiguous_candidate_codes":ambiguous,
+        "simple_percentage_source_candidate_codes":reason_counts.get(
+            "candidate_not_certified_for_payable_rate",0),
+        "candidate_reason_counts":dict(reason_counts),
         "status_counts":dict(status_counts),
         "exactly_one_row_per_active_leaf":True,
         "source_coverage_verified":True,
