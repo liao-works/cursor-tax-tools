@@ -15,6 +15,9 @@ on:
       - 'tests/test_xi_origin_compare.py'
       - 'src/target_duty/xi_merge.py'
       - 'tests/test_xi_merge.py'
+      - 'src/target_duty/xi_frozen_catalogue.py'
+      - 'tests/test_xi_frozen_catalogue.py'
+      - '.github/workflows/xi-managed-coverage.yml'
       - '.github/workflows/full-gb-xi-foundation.yml'
   workflow_dispatch:
 
@@ -42,5 +45,7 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_xi_origin_compare.py' -v
       - name: XI cross-batch replay and conflict safe merge tests
         run: python -m unittest discover -s tests -p 'test_xi_merge.py' -v
+      - name: Frozen full XI source catalogue and indexed shard plan
+        run: python -m unittest discover -s tests -p 'test_xi_frozen_catalogue.py' -v
       - name: Existing region evidence contract regression
         run: python -m unittest discover -s tests -p 'test_region_measures.py' -v
