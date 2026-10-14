@@ -7,6 +7,8 @@ on:
       - 'tests/test_gb_full_measures.py'
       - 'src/target_duty/xi_catalogue.py'
       - 'tests/test_xi_catalogue.py'
+      - 'src/target_duty/xi_measure_crawl.py'
+      - 'tests/test_xi_measure_crawl.py'
       - '.github/workflows/full-gb-xi-foundation.yml'
   workflow_dispatch:
 
@@ -26,5 +28,7 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_gb_full_measures.py' -v
       - name: Independent XI chapter inventory contract regression
         run: python -m unittest discover -s tests -p 'test_xi_catalogue.py' -v
+      - name: XI bounded raw measure collection regression
+        run: python -m unittest discover -s tests -p 'test_xi_measure_crawl.py' -v
       - name: Existing region evidence contract regression
         run: python -m unittest discover -s tests -p 'test_region_measures.py' -v
