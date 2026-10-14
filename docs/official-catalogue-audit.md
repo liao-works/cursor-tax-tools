@@ -11,22 +11,24 @@ no active matching measure disappear, even if they remain in the official
 nomenclature, and NI / anti-dumping / countervailing fields are not populated
 by that focused importer.
 
-This stage instead fetches the **independent DBT commodities table** for
+This stage instead fetches the **independent DBT commodities-report view** for
 the entire source version, without a measure-type or geographical filter.
 It preserves every source row in SQLite, including historical dates, all
 suffixes, original commodity SID, hierarchy and descriptions.
 
-## Critical: suffix 80 is NOT sufficient proof of declarability
+## Declarability from the published hierarchy
 
-DBT documents that codes whose suffix is not 80 cannot be used for
-declarations. It does NOT follow that every suffix-80 node is actually a
-declarable leaf. This proof of concept calls active suffix-80 nodes
-**candidates**, not verified declarable codes. Phase 2 must validate
-against official measures-on-declarable-commodities, hierarchy and
-HMRC API; then record proven declaration status separately.
+The UK Government API catalogue says that codes with descendants are
+classification nodes, while codes without child commodities are
+declarable. The implementation requires (a) an effective commodity date,
+(b) suffix 80, and (c) zero *currently effective* direct children.
+It preserves the entire hierarchy and historical nodes for audit.
+A separate official cross-source check is still necessary before
+treating these as production-verified tariffs.
 
-Neither the active suffix-80 candidate count nor total catalogue rows
-is a production coverage guarantee.
+The DBT raw v4 commodities table contains internal model columns
+(e.g. item_id). The commodities-report projection is the correct public
+view containing code, description and parent relationships.
 
 ## Reproducible local commands
 
@@ -55,9 +57,9 @@ is installed. No write permission or production mutation.
 
 - legacy_not_focused is the previously observed missing-old-codes population,
   NOT proof that a code is currently valid.
-- active_suffix80_missing_focused indicates possible GB measure gaps OR
-  a hierarchy/non-declarable candidate. It is NOT a new tariff rate.
-- focused_not_active_suffix80 may be source version, as-of or parsing drift.
+- active_leaf_missing_focused indicates leaf commodities that have no
+  focused 103/1011 measure; not a deletion or proof of a zero duty.
+- focused_not_active_leaf may be source version, as-of or parsing drift.
 - A legacy-only code is retained as evidence, not revived as current.
 - Missing 103 never implies 0% or deletion.
 - Each report has production_eligible=false.
@@ -78,7 +80,7 @@ is installed. No write permission or production mutation.
 ## Sources
 
 - DBT Data API: https://data.api.trade.gov.uk/
-- DBT commodity table: /v1/datasets/uk-tariff-2021-01-01/versions/{version}/tables/commodities/data
+- DBT commodity report: /v1/datasets/uk-tariff-2021-01-01/versions/{version}/tables/commodities-report/data
 - HMRC Trade Tariff API V2: https://api.trade-tariff.service.gov.uk/uk/api
 
 Offline fixtures alone do not prove the live official API is available;
