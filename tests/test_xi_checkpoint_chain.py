@@ -144,6 +144,25 @@ class ContinuityTests(unittest.TestCase):
                  output=str(self.chain1),public_canary=True,
                  previous_db=str(self.parent))
 
+    def test_original_continuity_receipt_is_append_only(self):
+        proof=self._seal_first()
+        self.assertEqual(self._seal_first(),proof)
+        original=self.chain0.read_bytes()
+        forged=json.loads(original)
+        forged["successful_codes"]=99
+        self.chain0.write_text(json.dumps(forged))
+        with self.assertRaisesRegex(ValueError,"cannot be overwritten"):
+            self._seal_first()
+        self.assertEqual(json.loads(self.chain0.read_text())["successful_codes"],99)
+
+    def test_forged_genesis_lineage_cannot_seed_next_checkpoint(self):
+        self._seal_first()
+        fake=json.loads(self.chain0.read_text())
+        fake["continuity"]["old_requests_retained"]=999
+        self.chain0.write_text(json.dumps(fake))
+        with self.assertRaisesRegex(ValueError,"genesis"):
+            self._continue()
+
     def test_changed_merged_report_byte_fingerprint_rejected(self):
         self._seal_first()
         report=self.current.with_suffix(".json")
