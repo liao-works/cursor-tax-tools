@@ -122,6 +122,22 @@ def evaluate(catalogue_db: str, measure_db: str, *, min_chapters: int = 90,
                     third_types[str(source["measure_type"])] += 1
             measure_count += len(original)
         missing = sorted(expected-requested)
+        chapter_coverage = []
+        for chapter in sorted({code[:2] for code in expected}):
+            scoped = {code for code in expected if code.startswith(chapter)}
+            chapter_missing = sorted(scoped - requested)
+            chapter_failures = sorted(item["code"] for item in source_failures
+                                      if item["code"].startswith(chapter))
+            chapter_coverage.append({
+                "chapter": chapter,
+                "expected": len(scoped),
+                "verified_responses": len(scoped) - len(chapter_missing) - len(chapter_failures),
+                "missing": len(chapter_missing),
+                "source_errors": len(chapter_failures),
+                "complete": not chapter_missing and not chapter_failures,
+                "missing_samples": chapter_missing[:10],
+                "failure_samples": chapter_failures[:10],
+            })
         complete = not missing and not source_failures and len(requested)==len(expected)
         # A full pass of ALL XI chapter records is not equivalent to a proven
         # atomic official snapshot or a verified country-specific tax rate.
@@ -146,6 +162,8 @@ def evaluate(catalogue_db: str, measure_db: str, *, min_chapters: int = 90,
             "requests_recorded": len(requested),
             "missing_codes": len(missing),
             "missing_samples": missing[:25],
+            "chapter_coverage": chapter_coverage,
+            "chapters_incomplete": sum(not row["complete"] for row in chapter_coverage),
             "request_failures": len(source_failures),
             "failure_samples": source_failures[:25],
             "replayed_source_measures": measure_count,
