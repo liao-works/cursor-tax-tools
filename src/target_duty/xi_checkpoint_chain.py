@@ -134,10 +134,27 @@ def _parent(catalogue: str, source: dict, *,
     for key,value in {
         "kind":KIND,"production_eligible":False,
         "ni_other_verified":False,"atomic_official_snapshot_verified":False,
+        "chain_authenticated_or_signed":False,
         **_identity(prior)
     }.items():
         if chain.get(key)!=value:
             raise ValueError("XI parent continuity receipt/source provenance mismatch: "+key)
+    # A prior receipt without its own ancestor remains a locally
+    # verifiable genesis; later links are only hash-linked, not signed.
+    preceding=chain.get("parent_chain_sha256")
+    preceding_db=chain.get("parent_checkpoint_sha256")
+    if preceding is None:
+        if (preceding_db is not None
+                or chain.get("parent_successful_codes") is not None
+                or chain.get("continuity")!={
+                    "old_requests_retained":0,
+                    "old_successes_immutable":0,
+                    "old_failures_recovered":0,
+                    "new_requests":len(prior["rows"])}):
+            raise ValueError("XI original genesis checkpoint continuity metadata invalid")
+    elif (not isinstance(preceding,str) or not HASH.fullmatch(preceding)
+          or not isinstance(preceding_db,str) or not HASH.fullmatch(preceding_db)):
+        raise ValueError("XI previous checkpoint lineage SHA-256 malformed")
     prior_hash=digest_file(previous_chain)
     old=prior["rows"]
     latest=source["rows"]
@@ -200,6 +217,10 @@ def seal(catalogue: str, checkpoint: str, merged_report: str, *,
         "chain_authenticated_or_signed":False,
         "warning":"Hash-linked operational review, NOT signed/authenticated HMRC evidence or NI Other duty.",
     }
+    if dest.exists():
+        if _document(str(dest))!=proof:
+            raise ValueError("XI immutable checkpoint continuity receipt cannot be overwritten")
+        return proof
     dest.parent.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(dir=dest.parent) as folder:
         stage=Path(folder)/"xi-continuity.json"
