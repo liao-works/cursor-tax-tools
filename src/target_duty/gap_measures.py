@@ -230,7 +230,7 @@ def audit(catalog_db: str, focused_db: str, output: str, *,
                             active_rows += state == "active"
                             types.add(row["measure__type__id"])
                             db.execute(
-                                "INSERT INTO measures VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                                "INSERT INTO measures VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                                 (code, index, row["measure__sid"], row["measure__type__id"],
                                  row["measure__geographical_area__id"],
                                  row["measure__duty_expression"],
