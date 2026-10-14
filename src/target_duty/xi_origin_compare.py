@@ -139,7 +139,7 @@ def build(code: str, when: date, origins: list[str], output: str, *,
         raise ValueError("Expected exactly ten-digit commodity code")
     if not origins or len(origins)>3 or len(set(origins))!=len(origins):
         raise ValueError("Select 1-3 distinct actual country codes")
-    if any(not COUNTRY.fullmatch(s) or s == "GB" and False for s in origins):
+    if any(not COUNTRY.fullmatch(s) for s in origins):
         raise ValueError("Origins must be ISO two-letter country codes")
     if not 1 <= max_bytes <= 8_000_000:
         raise ValueError("Invalid source response bound")
