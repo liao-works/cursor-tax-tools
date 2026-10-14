@@ -37,7 +37,7 @@ def gaps(catalogue: str, manifest: str, shards: list[str], *,
             {target_json, target_csv} & (original_paths | set(shard_paths))):
         raise ValueError("Public gap audit output aliases source evidence")
     valid_codes = set(codes)
-    seen: dict[str, tuple[str, str | None, str]] = {}
+    seen: dict[str, tuple[str, str | None, str, int, int]] = {}
     stored_shards = []
     for file in shard_paths:
         if not file.is_file():
@@ -50,6 +50,13 @@ def gaps(catalogue: str, manifest: str, shards: list[str], *,
             raise ValueError("Public XI shard scope/date mismatch")
         rows = 0
         with sqlite3.connect(file.as_uri() + "?mode=ro", uri=True) as db:
+            per_code_measures = {
+                code: (total, targets)
+                for code, total, targets in db.execute(
+                    """SELECT code, COUNT(*),
+                        SUM(CASE WHEN measure_type IN ('103','105') THEN 1 ELSE 0 END)
+                       FROM measures GROUP BY code""")
+            }
             for code, status, body_hash, error in db.execute(
                     "SELECT code,status,response_sha256,error FROM requests ORDER BY code"):
                 if code not in valid_codes:
@@ -58,7 +65,8 @@ def gaps(catalogue: str, manifest: str, shards: list[str], *,
                     raise ValueError("Same code occurs in multiple public shards: " + code)
                 if status not in ("ok", "source_error"):
                     raise ValueError("Unexpected public raw-source status: " + str(status))
-                seen[code] = (status, body_hash, error or "")
+                total, targets = per_code_measures.get(code, (0, 0))
+                seen[code] = (status, body_hash, error or "", total, targets)
                 rows += 1
         stored_shards.append({
             "filename":file.name,
@@ -76,14 +84,30 @@ def gaps(catalogue: str, manifest: str, shards: list[str], *,
     with csv_target.open("w", newline="", encoding="utf-8") as stream:
         writer = csv.writer(stream)
         writer.writerow(["commodity_code", "chapter", "source_response_status",
-                         "source_response_sha256", "source_error"])
+                         "source_response_sha256", "source_error",
+                         "raw_import_measure_count", "third_country_103_105_candidates",
+                         "review_state"])
         for code in codes:
-            status, digest, error = seen.get(code, ("missing", None, ""))
+            status, digest, error, total, targets = seen.get(
+                code, ("missing", None, "", 0, 0))
+            if status == "ok":
+                if total == 0:
+                    summary["raw_response_with_zero_import_measures"] += 1
+                if targets == 0:
+                    summary["raw_response_without_103_105_candidates"] += 1
+                else:
+                    summary["raw_response_with_103_105_candidates"] += 1
+            review_state = (
+                "source_not_collected" if status == "missing"
+                else "source_fetch_or_parse_error" if status == "source_error"
+                else "candidate_requires_origin_and_conditions_review" if targets
+                else "no_third_country_candidate_needs_source_review")
             summary[status] += 1
             chapters[code[:2]][status] += 1
             if status in samples and len(samples[status]) < sample_limit:
                 samples[status].append(code)
-            writer.writerow([code,code[:2],status,digest or "",error])
+            writer.writerow([code,code[:2],status,digest or "",error,
+                             total,targets,review_state])
     total=len(codes)
     success=summary["ok"]
     missing=summary["missing"]
@@ -107,6 +131,9 @@ def gaps(catalogue: str, manifest: str, shards: list[str], *,
         "replayed_successful_responses":success,
         "missing_responses":missing,
         "source_errors":errors,
+        "raw_response_with_zero_import_measures":summary["raw_response_with_zero_import_measures"],
+        "raw_response_without_103_105_candidates":summary["raw_response_without_103_105_candidates"],
+        "raw_response_with_103_105_candidates":summary["raw_response_with_103_105_candidates"],
         "public_source_complete":complete,
         "incomplete_chapters":sum(not row["complete"] for row in chapter_rows),
         "chapter_coverage":chapter_rows,
