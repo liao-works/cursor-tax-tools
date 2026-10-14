@@ -2,9 +2,13 @@ name: Official GB commodity catalogue audit (shadow only)
 
 on:
   workflow_dispatch:
-  schedule:
-    # Daily evidence-only audit; official change/NI APIs are NOT promoted here.
-    - cron: '25 8 * * *'
+  pull_request:
+    paths:
+      - 'src/target_duty/catalog.py'
+      - 'tests/test_catalog.py'
+      - '.github/workflows/gb-catalogue-audit.yml'
+  # Schedules only execute from the repository default branch; no production
+  # branch or release is modified by this workflow.
 
 permissions:
   contents: read
