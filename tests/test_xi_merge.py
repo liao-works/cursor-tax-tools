@@ -85,6 +85,29 @@ class MergeTests(unittest.TestCase):
                     str(self.out),as_of=DAY)
         self.assertEqual(self.out.read_bytes(),good)
 
+    def test_duplicate_shard_measure_tampering_cannot_bypass_replay(self):
+        copy=self.root/"tampered-duplicate.db"
+        import shutil
+        shutil.copyfile(self.shard1,copy)
+        db=sqlite3.connect(copy)
+        db.execute("UPDATE measures SET measure_type='999'")
+        db.commit();db.close()
+        with self.assertRaisesRegex(ValueError,"measure rows differ"):
+            combine(str(self.cat),[str(self.shard1),str(self.shard2),
+                                   str(copy)],str(self.out),as_of=DAY)
+        self.assertFalse(self.out.exists())
+
+    def test_failed_then_successful_overlap_needs_explicit_reconciliation(self):
+        failed=self.root/"failed.db"
+        def reject(c,d):
+            raise RuntimeError("429")
+        collect(str(self.cat),str(failed),as_of=DAY,limit=1,start_index=0,
+                fetcher=reject)
+        with self.assertRaisesRegex(ValueError,"Conflicting"):
+            combine(str(self.cat),[str(failed),str(self.shard1)],
+                    str(self.out),as_of=DAY)
+        self.assertFalse(self.out.exists())
+
     def test_source_tampering_rejected(self):
         db=sqlite3.connect(self.shard1)
         db.execute("UPDATE requests SET response_sha256=?",
