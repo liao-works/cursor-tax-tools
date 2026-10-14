@@ -187,10 +187,17 @@ def fetch(path: str, token: str | None, *, public: bool = False,
 def build(chapter_list: dict, chapter_payloads: dict[str, dict], output: str,
           *, as_of: date, public: bool = False,
           full_managed_listing: bool = False,
-          official_listed_total: int | None = None) -> dict:
+          official_listed_total: int | None = None,
+          public_full_audit: bool = False) -> dict:
     expected = chapters(chapter_list)
-    if full_managed_listing and (public or official_listed_total != len(expected)):
+    if full_managed_listing and (public or public_full_audit
+                                 or official_listed_total != len(expected)):
         raise ValueError("Full managed XI inventory must match original official chapter list")
+    if public_full_audit and (
+            not public or len(expected)<90 or official_listed_total!=len(expected)):
+        raise ValueError("Full public XI catalogue audit requires every officially listed chapter")
+    if public_full_audit and full_managed_listing:
+        raise ValueError("XI public catalogue cannot be marked managed")
     if set(chapter_payloads) != set(expected):
         missing = sorted(set(expected)-set(chapter_payloads))
         extra = sorted(set(chapter_payloads)-set(expected))
@@ -223,7 +230,9 @@ def build(chapter_list: dict, chapter_payloads: dict[str, dict], output: str,
             db.execute("INSERT INTO metadata VALUES ('as_of',?)",
                        (as_of.isoformat(),))
             db.execute("INSERT INTO metadata VALUES ('listing_scope',?)",
-                       ("managed_full" if full_managed_listing else "partial_or_fixture",))
+                       ("managed_full" if full_managed_listing else
+                             "public_full_untrusted" if public_full_audit
+                             else "partial_or_fixture",))
             db.execute("INSERT INTO metadata VALUES ('listed_chapters',?)",
                        (str(official_listed_total or len(expected)),))
             db.execute("INSERT INTO metadata VALUES ('production_eligible','false')")
@@ -241,7 +250,9 @@ def build(chapter_list: dict, chapter_payloads: dict[str, dict], output: str,
         "unknown_declarability_entries": unknown,
         "other_semantics_verified": False, "measures_imported": 0,
         "atomic_version_proven": False,
-        "listing_scope": "managed_full" if full_managed_listing else "partial_or_fixture",
+        "listing_scope": ("managed_full" if full_managed_listing else
+                          "public_full_untrusted" if public_full_audit
+                          else "partial_or_fixture"),
         "official_listed_chapters": official_listed_total,
         "sqlite_sha256": hashlib.sha256(destination.read_bytes()).hexdigest(),
         "warning": "Independent XI code coverage is not XI Other rates; verify UKIMS/origin conditions.",
@@ -257,6 +268,8 @@ def main():
     parser.add_argument("--output", default="xi-catalogue-shadow.db")
     parser.add_argument("--fixtures", help="JSON with chapters and chapter_payloads (offline replay)")
     parser.add_argument("--public-canary", action="store_true")
+    parser.add_argument("--public-full-audit", action="store_true",
+                        help="Read-only enumeration of ALL public XI chapters; NEVER managed/production")
     parser.add_argument("--max-chapters", type=int, default=0,
                         help="Canary cap; 0 means all officially enumerated chapters")
     parser.add_argument("--min-chapter-interval", type=float, default=1.0,
@@ -266,16 +279,21 @@ def main():
         raise ValueError("Invalid canary cap")
     if args.min_chapter_interval < 0.5 or args.min_chapter_interval > 60:
         raise ValueError("XI chapter API interval must be 0.5-60 seconds")
+    if args.public_canary and args.public_full_audit:
+        raise ValueError("Choose partial public canary OR untrusted full public audit")
     if args.public_canary and not 1 <= args.max_chapters <= 5:
         raise ValueError("Public XI API limited to at most five canary chapters")
+    if args.public_full_audit and args.max_chapters:
+        raise ValueError("Full public XI audit cannot limit chapters")
     if args.fixtures:
         raw = json.loads(Path(args.fixtures).read_text(encoding="utf-8"))
         listing, payloads = raw["chapters"], raw["chapter_payloads"]
         official_total = None
     else:
-        token = None if args.public_canary else get_token(
+        token = None if (args.public_canary or args.public_full_audit) else get_token(
             os.getenv("HMRC_CLIENT_ID",""), os.getenv("HMRC_CLIENT_SECRET",""))
-        listing = json.loads(fetch("/chapters", token, public=args.public_canary))
+        listing = json.loads(fetch("/chapters", token,
+                                   public=(args.public_canary or args.public_full_audit)))
         all_chapters = chapters(listing)
         official_total = len(all_chapters)
         if args.max_chapters:
@@ -288,9 +306,12 @@ def main():
             if index:
                 time.sleep(args.min_chapter_interval)
             payloads[chapter] = json.loads(fetch(
-                f"/goods_nomenclatures/chapter/{chapter}",token,public=args.public_canary))
+                f"/goods_nomenclatures/chapter/{chapter}",token,
+                public=(args.public_canary or args.public_full_audit)))
     result = build(listing,payloads,args.output,
-                   as_of=date.fromisoformat(args.as_of),public=args.public_canary,
+                   as_of=date.fromisoformat(args.as_of),
+                   public=(args.public_canary or args.public_full_audit),
+                   public_full_audit=args.public_full_audit,
                    full_managed_listing=(not args.fixtures and not args.public_canary
                                          and args.max_chapters == 0),
                    official_listed_total=official_total)
