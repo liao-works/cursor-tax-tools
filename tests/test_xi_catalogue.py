@@ -89,7 +89,7 @@ class XICatalogueTest(unittest.TestCase):
     def test_reject_missing_chapter_list(self):
         with self.assertRaisesRegex(ValueError,"missing or empty"):
             chapters({"data":[]})
-        with self.assertRaisesRegex(ValueError,"Duplicate"):
+        with self.assertRaisesRegex(ValueError,"duplicate"):
             chapters({"data":[{"id":"1"},{"id":"01"}]})
         with self.assertRaisesRegex(ValueError,"Unsupported"):
             fetch("/commodities/0101210000",token="anything")
