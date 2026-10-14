@@ -22,6 +22,8 @@ on:
       - 'src/target_duty/xi_run_plan.py'
       - 'src/target_duty/xi_full_capture.py'
       - 'tests/test_xi_full_capture.py'
+      - 'src/target_duty/gb_xi_coverage_matrix.py'
+      - 'tests/test_gb_xi_coverage_matrix.py'
       - 'tests/test_xi_run_plan.py'
       - 'tests/test_xi_source_first_workflow.py'
       - 'src/target_duty/xi_source_lookup.py'
@@ -85,6 +87,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_xi_run_plan.py' -v
       - name: Durable full managed XI source capture and recovery tests
         run: python -m unittest discover -s tests -p 'test_xi_full_capture.py' -v
+      - name: GB and XI independently replayed source-to-desktop coverage matrix
+        run: python -m unittest discover -s tests -p 'test_gb_xi_coverage_matrix.py' -v
       - name: Complete managed XI 97-chapter source coverage receipt safety tests
         run: python -m unittest discover -s tests -p 'test_xi_coverage_receipt.py' -v
       - name: Replay verified XI cross-run source drift guard contract
