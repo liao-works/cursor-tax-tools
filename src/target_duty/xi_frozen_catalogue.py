@@ -65,7 +65,7 @@ def inspect(catalogue: str, *, min_chapters: int = 90, required_day: str | None 
             raise ValueError("Active XI commodity declarability unknown")
         malformed = db.execute("""
           SELECT COUNT(*) FROM nomenclature
-          WHERE length(code)!=10 OR code NOT GLOB '[0-9]*'
+          WHERE length(code)!=10 OR code GLOB '*[^0-9]*'
             OR substr(code,1,2) != chapter
         """).fetchone()[0]
         if malformed:
