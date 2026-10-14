@@ -60,7 +60,8 @@ class XIAcceptanceTests(unittest.TestCase):
         collect(str(self.catalogue),str(self.measures),as_of=DAY,limit=2,
                 fetcher=lambda code,day:source_body(code,use="105"))
         x=evaluate(str(self.catalogue),str(self.measures),min_chapters=1)
-        self.assertEqual(x["readiness"],"further_business_validation_required")
+        self.assertEqual(x["readiness"],"source_coverage_incomplete")
+        self.assertEqual(x["listing_scope"],"partial_or_fixture")
         self.assertTrue(x["all_collected_measure_responses_verified"])
         self.assertEqual(x["third_country_measure_types"],{"103":1,"105":1})
         self.assertFalse(x["atomic_official_snapshot_verified"])
