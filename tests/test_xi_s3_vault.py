@@ -129,6 +129,26 @@ class SourceS3VaultTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"Precondition Failed"):
             store(str(self.fixture.archive),**self.kw)
 
+    def test_wrong_operator_key_rejected_before_any_immutable_s3_call(self):
+        with self.assertRaisesRegex(ValueError,"signature operation failed"):
+            store(str(self.fixture.archive),
+                  **{**self.kw,"public_key":str(self.fixture.wrong_pub)})
+        self.assertEqual(self.cloud.calls,[])
+        self.assertFalse(self.cloud.writes)
+
+    def test_modified_signed_archive_cannot_create_locked_undeletable_object(self):
+        import zipfile
+        edited=self.fixture.root/"forged-source.zip"
+        with zipfile.ZipFile(self.fixture.archive) as old,zipfile.ZipFile(edited,"w") as out:
+            for name in old.namelist():
+                payload=old.read(name)
+                if name=="checkpoint.db":
+                    payload+=b"F"
+                out.writestr(name,payload)
+        with self.assertRaises(ValueError):
+            store(str(edited),**self.kw)
+        self.assertEqual(self.cloud.calls,[])
+
     def test_bucket_versioning_or_object_lock_disabled_prevents_any_put(self):
         self.cloud.versioning="Suspended"
         with self.assertRaisesRegex(ValueError,"versioning"):
