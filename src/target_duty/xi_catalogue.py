@@ -313,6 +313,7 @@ def main():
                    public=(args.public_canary or args.public_full_audit),
                    public_full_audit=args.public_full_audit,
                    full_managed_listing=(not args.fixtures and not args.public_canary
+                                         and not args.public_full_audit
                                          and args.max_chapters == 0),
                    official_listed_total=official_total)
     result["partial_canary"] = bool(args.max_chapters)
