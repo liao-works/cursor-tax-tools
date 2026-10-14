@@ -44,6 +44,39 @@ class XIProbeTest(unittest.TestCase):
         self.assertIsNone(candidate_rate([base, base]))
         self.assertIsNone(candidate_rate([{**base, "geographical_area_id": "GB"}]))
 
+    def test_105_is_preserved_and_blocks_ambiguous_103_same_geography(self):
+        from datetime import date
+        base = {"measure_type": "103", "geographical_area_id": "1011",
+                "has_conditions": False, "additional_code_present": False,
+                "excluded_countries_present": False,
+                "effective_start_date": "2026-01-01",
+                "effective_end_date": None,
+                "duty_expression_details": [{"base": "4%"}]}
+        overlapping = {**base, "measure_type": "105",
+                       "duty_expression_details": [{"base": "6%"}]}
+        self.assertIsNone(candidate_rate([base, overlapping], date(2026, 10, 14)))
+        self.assertEqual(candidate_rate([base, {**overlapping,
+            "effective_end_date": "2026-09-30"}], date(2026, 10, 14)), "4%")
+        payload = {"data": {"relationships": {"import_measures": {"data": [
+            {"id": "a", "type": "measure"}, {"id": "b", "type": "measure"}]}}},
+            "included": [
+                {"id": "a", "type": "measure",
+                 "attributes": {"effective_start_date": "2026-01-01"},
+                 "relationships": {
+                    "measure_type": {"data": {"id": "103", "type": "measure_type"}},
+                    "geographical_area": {"data": {"id": "1011", "type": "geographical_area"}}}},
+                {"id": "b", "type": "measure",
+                 "attributes": {"effective_start_date": "2026-01-01"},
+                 "relationships": {
+                    "measure_type": {"data": {"id": "105", "type": "measure_type"}},
+                    "geographical_area": {"data": {"id": "1011", "type": "geographical_area"}}}}
+            ]}
+        report = summarize_response(payload, "0101210000", date(2026, 10, 14))
+        self.assertEqual({item["measure_type"] for item in report["candidates"]}, {"103", "105"})
+        self.assertIsNone(report["candidate_rate"])
+        self.assertEqual(report["counts"]["third_country_type_105"], 1)
+        self.assertIsNone(report["rate"])
+
     def test_future_and_expired_measures_cannot_be_current_candidates(self):
         from datetime import date
         item = {"measure_type": "103", "geographical_area_id": "1011",
