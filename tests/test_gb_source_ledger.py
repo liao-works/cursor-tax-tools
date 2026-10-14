@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.target_duty.gb_source_ledger import build
+from src.target_duty.gb_source_ledger import build,lookup
 from test_gb_review_diff import make_snapshot,row,ACTIVE,MISSING,CONTEXT
 
 
@@ -51,6 +51,27 @@ class GBSourceLedgerTests(unittest.TestCase):
         self.assertEqual(rows["9930270000"]["non_gb_1080_context_count"],"1")
         self.assertIn("not_gb",rows["9930270000"]["missing_or_review_reason"])
         self.assertIn("not_zero_rate",rows["9930240000"]["missing_or_review_reason"])
+
+    def test_exact_code_lookup_retains_complex_raw_evidence_and_unavailable(self):
+        r=lookup(str(self.src),"0101210000")
+        self.assertEqual(r["commodity_code"],"0101210000")
+        self.assertEqual(r["version"],"v4.0.1627")
+        self.assertEqual(r["active_103_1011_count"],1)
+        self.assertEqual(r["official_candidate_evidence"][0]["expression"],
+                         "8% + 5 GBP / 100 kg")
+        self.assertEqual(r["official_candidate_evidence"][0]["conditions"],"certificate")
+        self.assertIsNone(r["payable_rate"])
+        self.assertFalse(r["production_eligible"])
+        missing=lookup(str(self.src),"9930270000")
+        self.assertEqual(missing["non_gb_1080_context_rows"],1)
+        self.assertEqual(missing["active_103_1011_count"],0)
+        self.assertIsNone(missing["payable_rate"])
+        not_leaf=lookup(str(self.src),"0101210001")
+        self.assertEqual(not_leaf["status"],
+                         "not_in_current_official_active_leaf_catalogue")
+        self.assertIsNone(not_leaf["payable_rate"])
+        with self.assertRaisesRegex(ValueError,"exactly ten digits"):
+            lookup(str(self.src),"0101")
 
     def test_corrupted_manifest_rejected_without_outputs(self):
         manifest=self.src.with_suffix(".json")
