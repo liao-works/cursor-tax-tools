@@ -1,0 +1,233 @@
+"""Resumable, bounded XI HMRC raw import-measure audit.
+
+Input MUST be a separately enumerated XI nomenclature SQLite, not GB codes.
+Store every import measure and original JSON:API response with exact SHA-256.
+Never produce a NI Other tariff rate, even when type 103/1011 exists.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+import sqlite3
+import time
+import zlib
+from datetime import date, datetime, timezone
+from pathlib import Path
+from typing import Callable
+
+from .xi_catalogue import fetch as fetch_endpoint
+from .xi_probe import get_token, refs
+
+CODE = re.compile(r"\d{10}\Z")
+SCHEMA = """
+PRAGMA foreign_keys=ON;
+CREATE TABLE config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE requests (
+ code TEXT PRIMARY KEY, status TEXT NOT NULL, response_sha256 TEXT,
+ bytes INTEGER, checked_at TEXT NOT NULL, error TEXT, compressed_body BLOB
+);
+CREATE TABLE measures (
+ code TEXT NOT NULL REFERENCES requests(code),
+ ordinal INTEGER NOT NULL,
+ measure_id TEXT NOT NULL, measure_type TEXT,
+ geography_id TEXT, duty_expression TEXT,
+ effective_start TEXT, effective_end TEXT,
+ raw_json TEXT NOT NULL,
+ PRIMARY KEY(code,ordinal)
+);
+CREATE INDEX idx_xi_import_type ON measures(code,measure_type,geography_id);
+"""
+
+
+def candidates(xi_catalogue: str) -> list[str]:
+    db=sqlite3.connect(Path(xi_catalogue).resolve().as_uri()+"?mode=ro",uri=True)
+    try:
+        cols={r[1] for r in db.execute("PRAGMA table_info(nomenclature)")}
+        if not {"code","declarable","active"}.issubset(cols):
+            raise ValueError("Expected independent official XI catalogue schema")
+        result=sorted({code for (code,) in db.execute(
+            "SELECT code FROM nomenclature WHERE active=1 AND declarable=1")})
+        if not result:
+            raise ValueError("No XI official declarable commodities in catalogue")
+        return result
+    finally:
+        db.close()
+
+
+def parse(payload: bytes, code: str) -> list[dict]:
+    if not CODE.fullmatch(code):
+        raise ValueError("Invalid XI commodity code")
+    try:
+        doc=json.loads(payload)
+    except (ValueError,UnicodeError) as err:
+        raise ValueError("HMRC XI response is not valid JSON") from err
+    data=doc.get("data")
+    if not isinstance(data,dict):
+        raise ValueError("XI commodity response lacks data object")
+    attr=data.get("attributes") or {}
+    returned=attr.get("goods_nomenclature_item_id")
+    if returned is not None and returned != code:
+        raise ValueError("XI commodity response returned another code")
+    included={(node.get("type"),str(node.get("id"))):node
+              for node in doc.get("included",[]) if isinstance(node,dict)}
+    relations=refs(data,"import_measures")
+    extracted=[]
+    seen=set()
+    for ref in relations:
+        key=("measure",str(ref.get("id")))
+        measure=included.get(key)
+        if measure is None:
+            raise ValueError(f"Unresolved XI import measure relationship: {key[1]}")
+        if key in seen:
+            raise ValueError(f"Duplicate XI measure link: {key[1]}")
+        seen.add(key)
+        mt=refs(measure,"measure_type")
+        geo=refs(measure,"geographical_area")
+        attrs=measure.get("attributes") or {}
+        extracted.append({
+            "measure_id":key[1],
+            "measure_type":str(mt[0].get("id")) if mt else None,
+            "geography_id":str(geo[0].get("id")) if geo else None,
+            "duty_expression":attrs.get("resolved_duty_expression"),
+            "effective_start":attrs.get("effective_start_date"),
+            "effective_end":attrs.get("effective_end_date"),
+            "raw_json":json.dumps(measure,ensure_ascii=False,sort_keys=True),
+        })
+    # A usable response with no import measures is valid *evidence of zero
+    # returned rows*, NEVER evidence of 0% duty.
+    return extracted
+
+
+def initialize(db: sqlite3.Connection, as_of: date, catalogue_sha: str):
+    db.executescript(SCHEMA)
+    properties={"region":"XI","as_of":as_of.isoformat(),
+                "catalogue_sha256":catalogue_sha,
+                "production_eligible":"false",
+                "other_semantics_verified":"false"}
+    for k,v in properties.items():
+        existing=db.execute("SELECT value FROM config WHERE key=?", (k,)).fetchone()
+        if existing and existing[0]!=v:
+            raise ValueError("XI checkpoint incompatible with region/date/catalogue")
+        db.execute("INSERT OR IGNORE INTO config VALUES (?,?)", (k,v))
+    db.commit()
+
+
+def collect(catalogue: str, output: str, *, as_of: date, limit: int=20,
+            fetcher: Callable[[str,date],bytes], max_bytes: int=8_000_000,
+            sleep_seconds: float=0.0) -> dict:
+    """Bounded incremental collection; checkpoint every code, safe re-runs.
+
+    Errors are checkpointed but retried on the next run. A changed catalogue
+    invalidates the checkpoint to prevent falsely claiming full coverage.
+    """
+    if not 1 <= limit <= 1000 or not 0 <= sleep_seconds <= 120:
+        raise ValueError("Invalid XI batch bounds")
+    codes=candidates(catalogue)
+    catalogue_sha=hashlib.sha256(Path(catalogue).read_bytes()).hexdigest()
+    target=Path(output)
+    target.parent.mkdir(parents=True,exist_ok=True)
+    db=sqlite3.connect(target)
+    try:
+        initialize(db,as_of,catalogue_sha)
+        completed={code for (code,) in db.execute(
+            "SELECT code FROM requests WHERE status='ok'")}
+        selected=[code for code in codes if code not in completed][:limit]
+        for index, code in enumerate(selected):
+            now=datetime.now(timezone.utc).isoformat()
+            body=None
+            rows=[]
+            try:
+                body=fetcher(code,as_of)
+                if not isinstance(body,bytes) or not body or len(body)>max_bytes:
+                    raise ValueError("XI response is empty, oversized or not bytes")
+                rows=parse(body,code)
+                status,error="ok",None
+            except Exception as ex:
+                status,error="source_error",f"{type(ex).__name__}: {str(ex)[:250]}"
+            db.execute("DELETE FROM measures WHERE code=?", (code,))
+            db.execute("""INSERT OR REPLACE INTO requests
+                VALUES (?,?,?,?,?,?,?)""",
+                (code,status,hashlib.sha256(body).hexdigest() if body else None,
+                 len(body) if body else None,now,error,zlib.compress(body) if body else None))
+            if status=="ok":
+                for ordinal,m in enumerate(rows):
+                    db.execute("INSERT INTO measures VALUES (?,?,?,?,?,?,?,?)",
+                               (code,ordinal,m["measure_id"],m["measure_type"],
+                                m["geography_id"],m["duty_expression"],
+                                m["effective_start"],m["effective_end"],m["raw_json"]))
+            db.commit()
+            if index+1 < len(selected) and sleep_seconds:
+                time.sleep(sleep_seconds)
+        ok=db.execute("SELECT COUNT(*) FROM requests WHERE status='ok'").fetchone()[0]
+        errors=db.execute(
+            "SELECT COUNT(*) FROM requests WHERE status='source_error'").fetchone()[0]
+        measure_rows=db.execute("SELECT COUNT(*) FROM measures").fetchone()[0]
+        if db.execute("PRAGMA integrity_check").fetchone()[0]!="ok":
+            raise ValueError("XI measure audit integrity failure")
+    finally:
+        db.close()
+    summary={
+        "kind":"xi-resumable-raw-import-measures-v1",
+        "production_eligible":False,
+        "other_semantics_verified":False,
+        "source_region":"XI",
+        "as_of":as_of.isoformat(),
+        "independent_xi_catalogue_codes":len(codes),
+        "attempted_this_run":len(selected),
+        "successful_codes":ok, "failed_codes":errors,
+        "remaining_codes":len(codes)-ok,
+        "measure_rows":measure_rows,
+        "all_codes_fetched":ok==len(codes) and errors==0,
+        "warning":"Response evidence is not a confirmed NI Other rate or complete NI duty calculation.",
+    }
+    Path(str(target)+".metadata.json").write_text(
+        json.dumps(summary,indent=2,ensure_ascii=False)+"\n",encoding="utf-8")
+    return summary
+
+
+def managed_fetcher(client_id: str, secret: str, *, public: bool=False):
+    token=None if public else get_token(client_id,secret)
+    def fetch_one(code: str, as_of: date) -> bytes:
+        import urllib.parse
+        import urllib.request
+        if not CODE.fullmatch(code):
+            raise ValueError("Invalid XI code")
+        url=("https://www.trade-tariff.service.gov.uk/xi/api/commodities/" if public
+             else "https://api.trade-tariff.service.gov.uk/xi/api/commodities/")
+        query=urllib.parse.urlencode({"as_of":as_of.isoformat()})
+        headers={"Accept":"application/vnd.hmrc.2.0+json",
+                 "User-Agent":"liao-xi-measure-evidence-shadow/1.0"}
+        if not public:
+            headers["Authorization"]="Bearer "+token
+        with urllib.request.urlopen(urllib.request.Request(url+code+"?"+query,
+                                                             headers=headers),
+                                    timeout=50) as response:
+            return response.read(8_000_001)
+    return fetch_one
+
+
+def main():
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--catalogue",required=True)
+    p.add_argument("--as-of",required=True)
+    p.add_argument("--output",default="xi-raw-measures-shadow.db")
+    p.add_argument("--limit",type=int,default=20)
+    p.add_argument("--min-interval",type=float,default=2.0)
+    p.add_argument("--public-canary",action="store_true")
+    a=p.parse_args()
+    report=collect(
+        a.catalogue,a.output,as_of=date.fromisoformat(a.as_of),limit=a.limit,
+        fetcher=managed_fetcher(os.getenv("HMRC_CLIENT_ID",""),
+                                os.getenv("HMRC_CLIENT_SECRET",""),
+                                public=a.public_canary),
+        sleep_seconds=a.min_interval)
+    print(json.dumps(report,indent=2,ensure_ascii=False))
+    if report["failed_codes"]:
+        raise SystemExit("XI source errors present; no production eligibility")
+
+
+if __name__=="__main__":
+    main()
