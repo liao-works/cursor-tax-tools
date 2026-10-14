@@ -19,6 +19,8 @@ on:
       - 'tests/test_xi_acceptance.py'
       - 'src/target_duty/xi_run_plan.py'
       - 'tests/test_xi_run_plan.py'
+      - 'src/target_duty/xi_coverage_receipt.py'
+      - 'tests/test_xi_coverage_receipt.py'
       - 'src/target_duty/xi_origin_compare.py'
       - 'tests/test_xi_origin_compare.py'
       - 'src/target_duty/xi_merge.py'
@@ -63,5 +65,7 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_xi_frozen_catalogue.py' -v
       - name: Frozen XI full-source completion, retries, tamper and next-shard tests
         run: python -m unittest discover -s tests -p 'test_xi_run_plan.py' -v
+      - name: Complete managed XI 97-chapter source coverage receipt safety tests
+        run: python -m unittest discover -s tests -p 'test_xi_coverage_receipt.py' -v
       - name: Existing region evidence contract regression
         run: python -m unittest discover -s tests -p 'test_region_measures.py' -v
