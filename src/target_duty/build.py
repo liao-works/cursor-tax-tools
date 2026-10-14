@@ -47,11 +47,16 @@ def present(value: str | None) -> bool:
 
 def active(row: dict, day: date) -> bool:
     start, end = row.get("measure__effective_start_date", ""), row.get("measure__effective_end_date", "")
+    if not present(start):
+        raise ValueError("GB official target measure missing effective_start_date")
     try:
-        return (not present(start) or date.fromisoformat(start) <= day) and (
-            not present(end) or date.fromisoformat(end) >= day)
-    except ValueError:
-        return False  # Malformed effective dates must never be silently accepted.
+        start_day = date.fromisoformat(start)
+        end_day = date.fromisoformat(end) if present(end) else None
+    except ValueError as exc:
+        raise ValueError("Malformed GB official measure effective date") from exc
+    if end_day is not None and end_day < start_day:
+        raise ValueError("GB official measure has reversed effective dates")
+    return start_day <= day and (end_day is None or day <= end_day)
 
 
 def choose(rows: list[dict]) -> tuple[str, str]:
@@ -117,8 +122,7 @@ def build(csv_path: str, output: str, *, version: str, as_of: date,
         for row in reader:
             code = (row.get("commodity__code") or "").strip()
             if not re.fullmatch(r"\d{10}", code):
-                invalid_rows += 1
-                continue
+                raise ValueError("GB official source has invalid commodity code")
             if row.get("measure__type__id") != "103" or row.get("measure__geographical_area__id") != "1011":
                 raise ValueError("Non Third-country/ERGA-OMNES data in source")
             if active(row, as_of):
