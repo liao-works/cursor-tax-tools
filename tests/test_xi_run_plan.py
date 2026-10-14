@@ -95,6 +95,24 @@ class FullManagedXIPlanTests(unittest.TestCase):
         self.assertEqual(next_step["verified_successful_codes"],4)
         self.assertEqual(next_step["next_shard"]["start_index"],4)
 
+    def test_retry_failed_first_can_jump_past_earlier_missing_codes(self):
+        collect(str(self.catalogue),str(self.first),as_of=DAY,
+                start_index=4,limit=1,
+                fetcher=lambda c,d: (_ for _ in ()).throw(RuntimeError("HTTP 503")))
+        ordinary=build_plan(str(self.catalogue),manifest=str(self.manifest),
+                            checkpoint=str(self.first),batch_size=2)
+        retry=build_plan(str(self.catalogue),manifest=str(self.manifest),
+                         checkpoint=str(self.first),batch_size=2,
+                         retry_failed_first=True)
+        self.assertEqual(ordinary["next_shard"]["start_index"],0)
+        self.assertEqual(retry["next_shard"]["start_index"],4)
+        self.assertEqual(retry["next_shard"]["failed_codes_in_window"],1)
+        self.assertEqual(retry["failed_requests"],1)
+        self.assertEqual(retry["missing_requests"],96)
+        self.assertEqual(retry["incomplete_chapters"],97)
+        self.assertEqual(retry["chapter_gaps"][4]["failed_samples"],["0501000000"])
+        self.assertFalse(retry["production_eligible"])
+
     def test_corrupted_prior_success_never_marked_complete(self):
         collect(str(self.catalogue),str(self.first),as_of=DAY,
                 start_index=0,limit=2,fetcher=lambda c,d:measures(c))
