@@ -123,6 +123,7 @@ def initialize(db: sqlite3.Connection, as_of: date, catalogue_sha: str):
 
 def collect(catalogue: str, output: str, *, as_of: date, limit: int=20,
             fetcher: Callable[[str,date],bytes], start_index: int | None = None,
+            skip_successes_from: str | None = None,
             max_bytes: int=8_000_000,
             sleep_seconds: float=0.0) -> dict:
     """Bounded incremental collection; checkpoint every code, safe re-runs.
@@ -136,6 +137,33 @@ def collect(catalogue: str, output: str, *, as_of: date, limit: int=20,
     if start_index is not None and not 0 <= start_index < len(codes):
         raise ValueError("XI explicit shard start index outside official catalogue")
     catalogue_sha=hashlib.sha256(Path(catalogue).read_bytes()).hexdigest()
+    prior_ok: set[str] = set()
+    if skip_successes_from:
+        prior_path=Path(skip_successes_from).resolve()
+        if not prior_path.is_file():
+            raise ValueError("Previous XI checkpoint missing")
+        if prior_path==Path(output).resolve():
+            raise ValueError("Previous XI checkpoint cannot be overwritten")
+        prior=sqlite3.connect(prior_path.as_uri()+"?mode=ro",uri=True)
+        try:
+            if prior.execute("PRAGMA integrity_check").fetchone()[0]!="ok":
+                raise ValueError("Previous XI checkpoint integrity failure")
+            config=dict(prior.execute("SELECT key,value FROM config"))
+            for key,value in (
+                ("region","XI"),
+                ("catalogue_sha256",catalogue_sha),
+                ("as_of",as_of.isoformat()),
+                ("production_eligible","false"),
+                ("other_semantics_verified","false")
+            ):
+                if config.get(key)!=value:
+                    raise ValueError("Previous XI checkpoint provenance mismatch: "+key)
+            prior_ok={code for (code,) in prior.execute(
+                "SELECT code FROM requests WHERE status='ok'")}
+            if not prior_ok.issubset(set(codes)):
+                raise ValueError("Previous XI checkpoint contains unlisted commodity codes")
+        finally:
+            prior.close()
     target=Path(output)
     target.parent.mkdir(parents=True,exist_ok=True)
     db=sqlite3.connect(target)
@@ -143,6 +171,7 @@ def collect(catalogue: str, output: str, *, as_of: date, limit: int=20,
         initialize(db,as_of,catalogue_sha)
         completed={code for (code,) in db.execute(
             "SELECT code FROM requests WHERE status='ok'")}
+        completed.update(prior_ok)
         if start_index is None:
             selected=[code for code in codes if code not in completed][:limit]
         else:
@@ -191,6 +220,7 @@ def collect(catalogue: str, output: str, *, as_of: date, limit: int=20,
         "independent_xi_catalogue_codes":len(codes),
         "attempted_this_run":len(selected),
         "explicit_start_index":start_index,
+        "previous_checkpoint_successes_skipped":len(prior_ok),
         "successful_codes":ok, "failed_codes":errors,
         "remaining_codes":len(codes)-ok,
         "measure_rows":measure_rows,
@@ -258,12 +288,14 @@ def main():
     p.add_argument("--limit",type=int,default=20)
     p.add_argument("--start-index",type=int,default=None,
                    help="Optional index for independent, explicitly bounded shard")
+    p.add_argument("--skip-successes-from",help="Prior same-catalogue XI checkpoint; skip successful codes without re-fetching")
     p.add_argument("--min-interval",type=float,default=2.0)
     p.add_argument("--public-canary",action="store_true")
     a=p.parse_args()
     report=collect(
         a.catalogue,a.output,as_of=date.fromisoformat(a.as_of),limit=a.limit,
         start_index=a.start_index,
+        skip_successes_from=a.skip_successes_from,
         fetcher=managed_fetcher(os.getenv("HMRC_CLIENT_ID",""),
                                 os.getenv("HMRC_CLIENT_SECRET",""),
                                 public=a.public_canary),
