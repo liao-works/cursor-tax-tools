@@ -105,7 +105,8 @@ class XICrossBatchDriftTests(unittest.TestCase):
                 "FROM anchors ORDER BY code").fetchall()
             self.assertEqual(len(rows),2)
             self.assertEqual(zlib.decompress(rows[0][2]),body(CODES[0]))
-            self.assertEqual(zlib.decompress(rows[1][2]),
+            self.assertEqual(zlib.decompress(rows[1][2]),body(CODES[2]))
+            self.assertEqual(zlib.decompress(rows[1][3]),
                              body(CODES[2],rate="12% + 10 EUR / 100 kg"))
             self.assertEqual(rows[1][1],"source_drift_detected")
         with self.assertRaisesRegex(ValueError,"must not overwrite"):
