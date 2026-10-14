@@ -107,11 +107,14 @@ def measure_active(item: dict, as_of: date) -> bool:
 
 
 def candidate_rate(candidates: list[dict], as_of: date | None = None) -> str | None:
-    """Unambiguous, currently effective XI 103/1011 candidate; not an Other ruling."""
+    """Unambiguous XI 103/1011 candidate; active 105/1011 also blocks selection."""
     matching = [c for c in candidates if c["measure_type"] == "103"
                 and c["geographical_area_id"] == "1011"
                 and (as_of is None or measure_active(c, as_of))]
-    if len(matching) != 1:
+    competing = [c for c in candidates if c.get("measure_type") == "105"
+                 and c.get("geographical_area_id") == "1011"
+                 and (as_of is None or measure_active(c, as_of))]
+    if len(matching) != 1 or competing:
         return None
     item = matching[0]
     if (item["has_conditions"] or item["additional_code_present"]
@@ -149,7 +152,7 @@ def summarize_response(payload: dict, code: str, as_of: date | None = None) -> d
         geo = str(geos[0].get("id")) if geos else None
         all_type_counts[str(measure_type)] += 1
         all_geo_counts[str(geo)] += 1
-        if measure_type != "103":
+        if measure_type not in ("103", "105"):
             counts["non_target_measure"] += 1
             continue
         conditions = refs(measure, "measure_conditions")
@@ -177,6 +180,7 @@ def summarize_response(payload: dict, code: str, as_of: date | None = None) -> d
             "effective_end_date": attrs.get("effective_end_date")
         })
         counts["third_country_candidate"] += 1
+        counts[f"third_country_type_{measure_type}"] += 1
 
     return {
         "commodity_code": code, "region": "XI",
