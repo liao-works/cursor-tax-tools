@@ -203,7 +203,10 @@ def collect(catalogue: str, output: str, *, as_of: date, limit: int=20,
             db.commit()
             if index+1 < len(selected) and sleep_seconds:
                 time.sleep(sleep_seconds)
-        ok=db.execute("SELECT COUNT(*) FROM requests WHERE status='ok'").fetchone()[0]
+        current_success_codes={r[0] for r in db.execute(
+            "SELECT code FROM requests WHERE status='ok'")}
+        ok=len(current_success_codes)
+        cumulative_known_successes=len(prior_ok | current_success_codes)
         errors=db.execute(
             "SELECT COUNT(*) FROM requests WHERE status='source_error'").fetchone()[0]
         measure_rows=db.execute("SELECT COUNT(*) FROM measures").fetchone()[0]
@@ -220,9 +223,10 @@ def collect(catalogue: str, output: str, *, as_of: date, limit: int=20,
         "independent_xi_catalogue_codes":len(codes),
         "attempted_this_run":len(selected),
         "explicit_start_index":start_index,
-        "previous_checkpoint_successes_skipped":len(prior_ok),
+        "previous_checkpoint_successes_available":len(prior_ok),
         "successful_codes":ok, "failed_codes":errors,
-        "remaining_codes":len(codes)-ok,
+        "cumulative_known_successes":cumulative_known_successes,
+        "remaining_codes":len(codes)-cumulative_known_successes,
         "measure_rows":measure_rows,
         "all_codes_fetched":ok==len(codes) and errors==0,
         "warning":"Response evidence is not a confirmed NI Other rate or complete NI duty calculation.",
