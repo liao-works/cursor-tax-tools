@@ -2,9 +2,15 @@ name: Newest DBT GB replay candidate (manual, NEVER publish)
 
 on:
   workflow_dispatch:
+    inputs:
+      baseline_run_id:
+        description: 'Previously verified pinned-GB source-proof Actions run ID'
+        type: string
+        required: true
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: dbt-newest-shadow-replay
@@ -19,6 +25,29 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Verify baseline run ID before reading same-repository artifacts
+        shell: bash
+        env:
+          BASELINE_RUN: ${{ inputs.baseline_run_id }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$BASELINE_RUN" =~ ^[0-9]{1,16}$ ]]; then
+            echo "::error::A previously verified pinned GB Actions run ID is required"
+            exit 1
+          fi
+      - name: Independently test GB evidence version comparison and tamper detection
+        run: python -m unittest discover -s tests -p 'test_gb_review_diff.py' -v
+      - name: Retrieve prior pinned GB compact audit for cross-version comparison
+        uses: actions/download-artifact@v4
+        with:
+          name: gb-full-source-proof-${{ inputs.baseline_run_id }}
+          run-id: ${{ inputs.baseline_run_id }}
+          github-token: ${{ github.token }}
+          path: baseline/
+      - name: Require unmodified previous pinned GB compact manifest
+        run: |
+          test -f baseline/gb-compact-103-review.db
+          test -f baseline/gb-compact-103-review.json
       - name: Require newest OFFICIAL version, all required tables and CSVW columns
         shell: bash
         run: |
@@ -111,6 +140,15 @@ jobs:
               raise SystemExit("Review-only source output cannot authorize production")
           print("Newest GB evidence replayed without version drift; release NOT authorized.")
           PY
+      - name: Compare new GB third-country candidates with trusted prior compact evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.gb_review_diff \
+            --before baseline/gb-compact-103-review.db \
+            --after gb-newest-compact-review.db \
+            --output gb-newest-versus-baseline.json \
+            --fail-on-high-risk
       - name: Archive full and compact source evidence proofs (review only)
         if: always()
         uses: actions/upload-artifact@v4
@@ -126,5 +164,6 @@ jobs:
             gb-newest-full-shadow.json
             gb-newest-compact-review.json
             gb-newest-compact-review.db
+            gb-newest-versus-baseline.json
           if-no-files-found: warn
           retention-days: 14
