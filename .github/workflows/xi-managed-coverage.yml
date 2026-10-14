@@ -139,7 +139,13 @@ jobs:
           plan=json.loads(Path("xi-shard-plan.json").read_text())
           segment=plan["next_shard"]
           if segment is None:
-              raise SystemExit("All XI source codes captured; nothing to fetch. Run independent final acceptance.")
+              if (not plan["all_managed_source_responses_verified"]
+                      or not os.environ.get("PRIOR_CHECKPOINT_RUN_ID")):
+                  raise SystemExit("XI empty plan without verified managed checkpoint")
+              with Path(os.environ["GITHUB_ENV"]).open("a") as env:
+                  env.write("SOURCE_COLLECTION_COMPLETE=true\n")
+              print("All XI raw responses replayed and verified: final audit only")
+              raise SystemExit(0)
           if not 1<=segment["pending_codes_in_window"]<=segment["limit"]:
               raise SystemExit("Planned XI batch contains no work")
           with Path(os.environ["GITHUB_ENV"]).open("a") as env:
@@ -151,6 +157,7 @@ jobs:
                 "next absolute start:",segment["start_index"])
           PY
       - name: Download fixed bounded XI shard with managed OAuth (source errors recorded)
+        if: env.SOURCE_COLLECTION_COMPLETE != 'true'
         id: crawl
         continue-on-error: true
         shell: bash
@@ -173,7 +180,12 @@ jobs:
         run: |
           set -euo pipefail
           DAY="$(python -c 'import json;print(json.load(open("xi-frozen-manifest.json"))["as_of"])')"
-          if [[ -n "$PRIOR_CHECKPOINT_RUN_ID" ]]; then
+          if [[ "${SOURCE_COLLECTION_COMPLETE:-}" == "true" ]]; then
+            test -f previous/xi-merged-shadow.db
+            test -f previous/xi-merged-shadow.json
+            cp previous/xi-merged-shadow.db xi-merged-shadow.db
+            cp previous/xi-merged-shadow.json xi-merged-shadow.json
+          elif [[ -n "$PRIOR_CHECKPOINT_RUN_ID" ]]; then
             test -f previous/xi-merged-shadow.db
             python -m src.target_duty.xi_merge \
               --catalogue xi-full-catalogue-shadow.db \
@@ -192,9 +204,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          STRICT_ARGS=()
+          if [[ "${SOURCE_COLLECTION_COMPLETE:-}" == "true" ]]; then
+            STRICT_ARGS=(--strict)
+          fi
           python -m src.target_duty.xi_acceptance \
             --catalogue xi-full-catalogue-shadow.db \
             --measures xi-merged-shadow.db \
+            "${STRICT_ARGS[@]}" \
             --output xi-managed-coverage-gate.json
       - name: Reconcile every XI chapter and publish source-only coverage receipt
         shell: bash
@@ -248,7 +265,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${{ steps.crawl.outcome }}" != "success" ]]; then
+          if [[ "${{ steps.crawl.outcome }}" != "success" &&
+                "${SOURCE_COLLECTION_COMPLETE:-}" != "true" ]]; then
             echo "::error::XI source failures; audit artifact retained for repair"
             exit 1
           fi
