@@ -7,6 +7,8 @@ on:
       - 'tests/test_gb_full_measures.py'
       - 'src/target_duty/gb_compact_review.py'
       - 'tests/test_gb_compact_review.py'
+      - 'src/target_duty/gb_review_diff.py'
+      - 'tests/test_gb_review_diff.py'
       - 'src/target_duty/dbt_source_health.py'
       - 'tests/test_dbt_source_health.py'
       - '.github/workflows/full-gb-official-validation.yml'
@@ -33,6 +35,8 @@ jobs:
       # independent freshness flow, not silently substitute old snapshots.
       - name: Offline official latest-alias freshness and 404 fail-closed tests
         run: python -m unittest discover -s tests -p 'test_dbt_source_health.py' -v
+      - name: Offline full GB-to-GB source version diff safety tests
+        run: python -m unittest discover -s tests -p 'test_gb_review_diff.py' -v
       - name: Download independently pinned official catalogue v4.0.1626
         run: |
           set -euo pipefail
@@ -103,6 +107,12 @@ jobs:
               assert db.execute("SELECT COUNT(*) FROM evidence WHERE role='non_gb_103_1080_context' AND geography!='1080'").fetchone()[0]==0
           print("GB official source parity, compact evidence and scope verified")
           PY
+      - name: Replay-verify compact historical DB against itself (NO VERSION ACCEPTANCE)
+        run: |
+          python -m src.target_duty.gb_review_diff \
+            --before gb-compact-103-review.db \
+            --after gb-compact-103-review.db \
+            --self-check --output gb-compact-self-check.json
       - name: Independently probe latest alias health without replacing pinned source
         shell: bash
         run: |
@@ -123,6 +133,7 @@ jobs:
             gb-full-sample.json
             gb-compact-103-review.json
             gb-compact-103-review.db
+            gb-compact-self-check.json
             dbt-latest-alias-health.json
           if-no-files-found: warn
           retention-days: 14
