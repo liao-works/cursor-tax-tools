@@ -96,6 +96,14 @@ class CrossDatabaseMatrixTest(unittest.TestCase):
         # Partial fixture catalogue can never pass managed full completeness.
         self.assertFalse(report["both_regional_sources_complete"])
 
+    def test_mismatched_region_effective_dates_block_joint_source_completion(self):
+        self.fixture["as_of"] = "2026-10-13"
+        report = self.analyze()
+        self.assertFalse(report["as_of_dates_equal"])
+        self.assertFalse(report["both_regional_sources_complete"])
+        self.assertEqual(report["as_of_gb"], "2026-10-13")
+        self.assertEqual(report["as_of_xi"], "2026-10-14")
+
     def test_sources_and_outputs_cannot_alias(self):
         with patch("src.target_duty.gb_xi_coverage_matrix.gb_snapshot",
                    return_value=self.fixture):
