@@ -21,6 +21,8 @@ on:
       - 'tests/test_xi_acceptance.py'
       - 'src/target_duty/xi_run_plan.py'
       - 'tests/test_xi_run_plan.py'
+      - 'tests/test_xi_source_first_workflow.py'
+      - '.github/workflows/xi-public-five-chapter-probe.yml'
       - 'src/target_duty/xi_coverage_receipt.py'
       - 'tests/test_xi_coverage_receipt.py'
       - 'src/target_duty/xi_checkpoint_chain.py'
@@ -65,6 +67,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_xi_measure_crawl.py' -v
       - name: XI source replay and Other semantics acceptance tests
         run: python -m unittest discover -s tests -p 'test_xi_acceptance.py' -v
+      - name: Managed XI source-first workflow safety contract
+        run: python -m unittest discover -s tests -p 'test_xi_source_first_workflow.py' -v
       - name: XI country-of-origin official filter comparison safety tests
         run: python -m unittest discover -s tests -p 'test_xi_origin_compare.py' -v
       - name: XI cross-batch replay and conflict safe merge tests
