@@ -85,6 +85,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_xi_run_plan.py' -v
           python -m unittest discover -s tests -p 'test_xi_drift_guard.py' -v
           python -m unittest discover -s tests -p 'test_xi_coverage_receipt.py' -v
+          python -m unittest discover -s tests -p 'test_xi_checkpoint_chain.py' -v
       - name: Retrieve original frozen managed XI catalogue from an earlier run
         if: ${{ inputs.catalogue_run_id != '' }}
         uses: actions/download-artifact@v4
@@ -250,6 +251,35 @@ jobs:
                 "chapters:",r["complete_chapters"],"/",r["chapters_collected"],
                 "pending codes:",r["missing_responses"]+r["failed_responses"])
           PY
+      - name: Seal immutable previous-to-current XI source checkpoint continuity
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARGS=(--catalogue xi-full-catalogue-shadow.db
+                --manifest xi-frozen-manifest.json
+                --checkpoint xi-merged-shadow.db
+                --merge-report xi-merged-shadow.json
+                --output xi-checkpoint-chain.json)
+          if [[ -n "$PRIOR_CHECKPOINT_RUN_ID" ]]; then
+            test -f previous/xi-merged-shadow.db
+            test -f previous/xi-merged-shadow.json
+            test -f previous/xi-checkpoint-chain.json
+            ARGS+=(--previous-checkpoint previous/xi-merged-shadow.db
+                   --previous-report previous/xi-merged-shadow.json
+                   --previous-chain previous/xi-checkpoint-chain.json)
+          fi
+          python -m src.target_duty.xi_checkpoint_chain seal "${ARGS[@]}"
+          python -m src.target_duty.xi_checkpoint_chain verify "${ARGS[@]}"
+          python - <<'PY'
+          import json
+          p=json.load(open("xi-checkpoint-chain.json"))
+          assert p["production_eligible"] is False
+          assert p["ni_other_verified"] is False
+          assert p["chain_authenticated_or_signed"] is False
+          print("Source checkpoint continuity:",p["successful_codes"],
+                "/",p["total_official_codes"],
+                "parent SHA:",p["parent_chain_sha256"])
+          PY
       - name: Archive immutable original catalogue for future runs (max 30-day Actions retention)
         if: always()
         uses: actions/upload-artifact@v4
@@ -274,6 +304,7 @@ jobs:
             xi-chapter-coverage-receipt.json
             xi-source-drift-review.json
             xi-source-drift-raw-evidence.db
+            xi-checkpoint-chain.json
             xi-merged-shadow.db
             xi-merged-shadow.json
           if-no-files-found: warn
