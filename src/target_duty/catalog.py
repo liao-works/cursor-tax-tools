@@ -79,6 +79,11 @@ def effective(start: date, end: date | None, as_of: date) -> bool:
 
 
 def download_catalog(version: str, destination: Path, *, max_bytes: int = 80_000_000) -> str:
+    if version=="latest":
+        # Some legacy CI jobs call the downloader directly instead of main().
+        # Enforce the identical official newest-version readiness gate here.
+        from .dbt_version_discovery import resolve_requested_version
+        version=resolve_requested_version(version)
     req = urllib.request.Request(source_url(version), headers={
         "Accept": "text/csv", "User-Agent": "liao-target-duty-catalog-shadow/1.0"})
     for attempt in range(3):
