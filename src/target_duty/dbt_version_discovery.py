@@ -115,12 +115,25 @@ def inspect_csvw(payload: dict) -> dict:
         if not isinstance(t,dict):
             raise ValueError("Malformed DBT CSVW table record")
         tid=t.get("id")
+        if tid is None:
+            # Real DBT CSVW metadata uses a relative data URL, not an id:
+            # tables/commodities-report/data?format=csv&download
+            # The ODS companion and 'reports/' entries MUST be ignored.
+            item_url=t.get("url")
+            if not isinstance(item_url,str):
+                raise ValueError("DBT CSVW metadata lacks both table id and URL")
+            parsed=urllib.parse.urlsplit(item_url)
+            match=re.fullmatch(r"tables/([a-z0-9-]+)/data",parsed.path)
+            formats=urllib.parse.parse_qs(parsed.query).get("format",[])
+            if not match or formats!=["csv"]:
+                continue
+            tid=match.group(1)
         schema=t.get("tableSchema") or {}
         cols=schema.get("columns")
         if not isinstance(tid,str) or not isinstance(cols,list):
             raise ValueError("DBT CSVW table schema lacks table or columns")
         if tid in inventory:
-            raise ValueError("Repeated DBT CSVW table id")
+            raise ValueError("Repeated DBT CSVW CSV table id")
         names=[]
         for obj in cols:
             if not isinstance(obj,dict) or not isinstance(obj.get("name"),str):
