@@ -8,6 +8,7 @@ from pathlib import Path
 
 from src.target_duty.xi_catalogue import build as build_catalogue
 from src.target_duty.xi_measure_crawl import collect
+from src.target_duty.xi_frozen_catalogue import freeze
 from src.target_duty.xi_drift_guard import audit,semantic_fingerprint
 
 DAY=date(2026,10,14)
@@ -127,6 +128,28 @@ class XICrossBatchDriftTests(unittest.TestCase):
             audit(str(self.catalog),str(self.previous),as_of=DAY,
                   public_canary=True,count=4,
                   fetcher=lambda code,day:body(code))
+
+    def test_managed_97_chapter_manifest_allows_only_source_stability_not_atomic_cert(self):
+        root=self.catalog.parent
+        cat=root/"managed-full.db"
+        manifest=root/"managed-manifest.json"
+        checkpoint=root/"managed-measures.db"
+        listing={"data":[{"id":str(x)} for x in range(1,98)]}
+        chapters={f"{x:02d}":{"data":[node(f"{x:02d}01000000",x)]}
+                  for x in range(1,98)}
+        build_catalogue(listing,chapters,str(cat),as_of=DAY,
+                        full_managed_listing=True,official_listed_total=97)
+        freeze(str(cat),str(manifest))
+        collect(str(cat),str(checkpoint),as_of=DAY,limit=1,
+                fetcher=lambda code,day:body(code))
+        report=audit(str(cat),str(checkpoint),as_of=DAY,manifest=str(manifest),
+                     count=2,fetcher=lambda code,day:body(code))
+        self.assertEqual(report["source_scope"],"managed_full")
+        self.assertEqual(report["previous_successful_codes"],1)
+        self.assertEqual(report["anchor_count"],1)
+        self.assertTrue(report["resume_source_stability_gate_pass"])
+        self.assertFalse(report["atomic_official_snapshot_verified"])
+        self.assertFalse(report["ni_other_verified"])
 
     def test_wrong_date_rejects_even_for_public_canary(self):
         with self.assertRaisesRegex(ValueError,"source as_of differs"):
