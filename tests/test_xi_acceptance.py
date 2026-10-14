@@ -100,8 +100,9 @@ class XIAcceptanceTests(unittest.TestCase):
         self.assertEqual(valid["status"],"origin_specific_official_filter_required")
         self.assertFalse(valid["production_eligible"])
         self.assertEqual(interpret_other_origin("CN")["origin"],"CN")
-        with self.assertRaises(ValueError):
-            interpret_other_origin("OTHER",selected_country="UNCONFIRMED")
+        self.assertEqual(
+            interpret_other_origin("OTHER",selected_country="UNCONFIRMED")["status"],
+            "origin_required")
         with self.assertRaises(ValueError):
             interpret_other_origin("1080")
 
