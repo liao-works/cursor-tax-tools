@@ -125,8 +125,11 @@ def build(csv_path: str, output: str, *, as_of: date, source_version: str,
             rows = 0
             with csv_file.open(newline="", encoding="utf-8-sig") as stream:
                 reader = csv.DictReader(stream)
-                if not set(FIELDS).issubset(reader.fieldnames or []):
-                    raise ValueError("Official commodity CSV is missing required columns")
+                missing = sorted(set(FIELDS) - set(reader.fieldnames or []))
+                if missing:
+                    raise ValueError(
+                        f"Official commodity CSV is missing required columns: {missing}; "
+                        f"available: {reader.fieldnames}")
                 for row in reader:
                     rows += 1
                     sid = optional(row["commodity__sid"])
