@@ -10,6 +10,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import sqlite3
 import tempfile
 from collections import Counter
@@ -24,6 +25,31 @@ FIELDS=[
     "conditions_json","excluded_areas_json","effective_periods_json",
     "applicability_verified","payable_rate","missing_or_review_reason",
 ]
+
+
+def _has_qualifier(value: str | None) -> bool:
+    """Structured empty official JSON arrays are not qualifying conditions."""
+    if value is None:
+        return False
+    if not isinstance(value,str):
+        raise ValueError("Official GB qualifier must be text")
+    item=value.strip()
+    if item in ("","[]","{}","#NA","N/A","NULL","null","None"):
+        return False
+    if item[0] in "[{":
+        try:
+            decoded=json.loads(item)
+        except json.JSONDecodeError:
+            # Unknown/malformed conditions must NOT be treated as none.
+            return True
+        return bool(decoded) if isinstance(decoded,(list,dict)) else True
+    return True
+
+
+def _simple_percentage(expression: str | None) -> bool:
+    return isinstance(expression,str) and bool(
+        re.fullmatch(r"\d+(?:\.\d+)?\s*%",expression.strip())
+    )
 
 
 def build(database: str, output_csv: str, output_report: str) -> dict:
@@ -67,12 +93,15 @@ def build(database: str, output_csv: str, output_report: str) -> dict:
                         if len(measures)!=1:
                             reason="multiple_active_candidates_require_business_rules"
                             ambiguous+=1
-                        elif (measures[0]["conditions"] or measures[0]["additional_code"]
-                              or measures[0]["excluded_areas"]):
+                        elif any(_has_qualifier(measures[0][key]) for key in
+                                 ("conditions","additional_code","excluded_areas")):
                             reason="conditional_or_additional_code_requires_business_rules"
                             ambiguous+=1
                         elif not measures[0]["expression"]:
                             reason="candidate_expression_missing"
+                            ambiguous+=1
+                        elif not _simple_percentage(measures[0]["expression"]):
+                            reason="compound_or_specific_expression_requires_calculation"
                             ambiguous+=1
                     elif status=="non_gb_1080_only_or_other_measures_unresolved":
                         reason="no_active_gb_103_1011_non_gb_1080_is_not_gb"
