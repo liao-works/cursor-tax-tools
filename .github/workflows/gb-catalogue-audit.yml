@@ -6,6 +6,8 @@ on:
     paths:
       - 'src/target_duty/catalog.py'
       - 'tests/test_catalog.py'
+      - 'src/target_duty/gap_measures.py'
+      - 'tests/test_gap_measures.py'
       - '.github/workflows/gb-catalogue-audit.yml'
   # Schedules only execute from the repository default branch; no production
   # branch or release is modified by this workflow.
@@ -16,7 +18,7 @@ permissions:
 jobs:
   catalogue-and-coverage:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,6 +26,8 @@ jobs:
           python-version: '3.11'
       - name: Offline catalogue regression tests
         run: python -m unittest discover -s tests -p 'test_catalog.py' -v
+      - name: Offline all-measure source regression tests
+        run: python -m unittest discover -s tests -p 'test_gap_measures.py' -v
       - name: Download and stage FULL official DBT commodity catalogue
         shell: bash
         run: |
@@ -57,7 +61,19 @@ jobs:
             --legacy legacy-tariffs.db \
             --focused focused-gb.db \
             --output gb-catalogue-coverage.json
+      - name: Audit ALL active leaf gaps against unfiltered official measures
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(python -c 'import json; print(json.load(open("gb-commodity-catalogue.metadata.json"))["resolved_version"] or "")')"
+          python -m src.target_duty.gap_measures \
+            --catalogue gb-commodity-catalogue.db \
+            --focused focused-gb.db \
+            --version "$VERSION" \
+            --as-of "$(python -c 'import json; print(json.load(open("gb-commodity-catalogue.metadata.json"))["as_of"])')" \
+            --workers 3 --limit 1000 --output gb-gap-measures.json
       - name: Preserve source and review evidence (NOT a production release)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gb-official-catalogue-audit-${{ github.run_id }}
@@ -67,4 +83,7 @@ jobs:
             gb-commodity-catalogue.metadata.json
             gb-catalogue-coverage.json
             gb-catalogue-coverage.csv
+            gb-gap-measures.json
+            gb-gap-measures.db
+            gb-gap-measures.csv
           retention-days: 14
