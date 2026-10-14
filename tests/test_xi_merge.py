@@ -108,6 +108,31 @@ class MergeTests(unittest.TestCase):
                     str(self.out),as_of=DAY)
         self.assertFalse(self.out.exists())
 
+    def test_explicit_later_verified_retry_heals_only_failed_request(self):
+        import time
+        failed=self.root/"earlier-error.db"
+        recovered=self.root/"later-ok.db"
+        collect(str(self.cat),str(failed),as_of=DAY,limit=1,start_index=0,
+                fetcher=lambda c,d: (_ for _ in ()).throw(RuntimeError("429")))
+        time.sleep(0.01)
+        collect(str(self.cat),str(recovered),as_of=DAY,limit=1,start_index=0,
+                fetcher=lambda c,d:payload(c))
+        with self.assertRaisesRegex(ValueError,"Conflicting"):
+            combine(str(self.cat),[str(failed),str(recovered)],
+                    str(self.out),as_of=DAY)
+        result=combine(str(self.cat),[str(failed),str(recovered)],
+                       str(self.out),as_of=DAY,resolve_failures=True)
+        self.assertEqual(result["resolved_source_failures"],1)
+        self.assertEqual(result["failed_codes"],0)
+        self.assertEqual(result["successful_codes"],1)
+        self.assertEqual(result["remaining_codes"],2)
+        self.assertFalse(result["source_complete"])
+        db=sqlite3.connect(self.out)
+        try:
+            self.assertEqual(db.execute("SELECT status FROM requests").fetchone()[0],"ok")
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM measures").fetchone()[0],1)
+        finally:db.close()
+
     def test_source_tampering_rejected(self):
         db=sqlite3.connect(self.shard1)
         db.execute("UPDATE requests SET response_sha256=?",
