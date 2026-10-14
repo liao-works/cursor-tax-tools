@@ -1,10 +1,23 @@
-name: Authenticated XI full catalogue and bounded measures (manual SHADOW)
+name: Managed XI snapshot & resumable shard audit (manual SHADOW)
 
 on:
   workflow_dispatch:
     inputs:
+      catalogue_run_id:
+        description: 'Original trusted catalogue artifact run ID (empty = create fresh catalogue)'
+        required: false
+        type: string
+      prior_checkpoint_run_id:
+        description: 'Optional previous merged-checkpoint run ID, using SAME frozen catalogue'
+        required: false
+        type: string
+      start_index:
+        description: 'Fixed sorted XI catalogue start index (0-based)'
+        required: true
+        default: '0'
+        type: string
       sample_limit:
-        description: 'Maximum XI code API calls per run (NO production)'
+        description: 'Maximum managed XI commodity requests in this shard'
         required: true
         default: '40'
         type: choice
@@ -12,33 +25,73 @@ on:
 
 permissions:
   contents: read
+  actions: read
+
+concurrency:
+  group: xi-managed-shadow-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   managed-xi-collector:
     runs-on: ubuntu-latest
-    timeout-minutes: 105
+    timeout-minutes: 110
     env:
       HMRC_CLIENT_ID: ${{ secrets.HMRC_CLIENT_ID }}
       HMRC_CLIENT_SECRET: ${{ secrets.HMRC_CLIENT_SECRET }}
+      START_INDEX: ${{ inputs.start_index }}
+      SHARD_LIMIT: ${{ inputs.sample_limit }}
+      CATALOGUE_RUN_ID: ${{ inputs.catalogue_run_id }}
+      PRIOR_CHECKPOINT_RUN_ID: ${{ inputs.prior_checkpoint_run_id }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Require managed Trade Tariff credentials (no public bulk workaround)
+      - name: Validate parameters and require managed credentials
         shell: bash
         run: |
           set -euo pipefail
           if [[ -z "$HMRC_CLIENT_ID" || -z "$HMRC_CLIENT_SECRET" ]]; then
-            echo "::error::Managed HMRC_CLIENT_ID / HMRC_CLIENT_SECRET secrets are required"
+            echo "::error::Managed HMRC_CLIENT_ID and HMRC_CLIENT_SECRET required"
             exit 1
           fi
-      - name: Test XI official schema / resume / evidence gates
+          if [[ ! "$START_INDEX" =~ ^[0-9]{1,8}$ ]]; then
+            echo "::error::start_index must be a nonnegative integer"
+            exit 1
+          fi
+          if [[ -n "$CATALOGUE_RUN_ID" && ! "$CATALOGUE_RUN_ID" =~ ^[0-9]{1,16}$ ]]; then
+            echo "::error::invalid original catalogue run ID"
+            exit 1
+          fi
+          if [[ -n "$PRIOR_CHECKPOINT_RUN_ID" && ! "$PRIOR_CHECKPOINT_RUN_ID" =~ ^[0-9]{1,16}$ ]]; then
+            echo "::error::invalid previous checkpoint run ID"
+            exit 1
+          fi
+          if [[ -z "$CATALOGUE_RUN_ID" && "$START_INDEX" != '0' ]]; then
+            echo "::error::nonzero start requires a reused frozen catalogue"
+            exit 1
+          fi
+          if [[ -z "$CATALOGUE_RUN_ID" && -n "$PRIOR_CHECKPOINT_RUN_ID" ]]; then
+            echo "::error::resuming a checkpoint requires the original frozen catalogue"
+            exit 1
+          fi
+      - name: Offline source, merge and freeze contract tests
+        shell: bash
         run: |
-          python -m unittest discover -s tests -p 'test_xi_catalogue.py' -v
-          python -m unittest discover -s tests -p 'test_xi_measure_crawl.py' -v
+          set -euo pipefail
+          python -m unittest discover -s tests -p 'test_xi_frozen_catalogue.py' -v
+          python -m unittest discover -s tests -p 'test_xi_merge.py' -v
           python -m unittest discover -s tests -p 'test_xi_acceptance.py' -v
-      - name: Enumerate ALL independently official XI declarable commodities
+      - name: Retrieve original frozen managed XI catalogue from an earlier run
+        if: ${{ inputs.catalogue_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: xi-managed-catalogue-${{ inputs.catalogue_run_id }}
+          run-id: ${{ inputs.catalogue_run_id }}
+          github-token: ${{ github.token }}
+          path: .
+      - name: Enumerate all official managed XI chapters (initial run only)
+        if: ${{ inputs.catalogue_run_id == '' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -46,34 +99,112 @@ jobs:
             --as-of "$(date -u +%F)" \
             --min-chapter-interval 1.2 \
             --output xi-full-catalogue-shadow.db
-      - name: Collect a BOUNDED sample of XI import measures from managed HMRC
+          python -m src.target_duty.xi_frozen_catalogue freeze \
+            --catalogue xi-full-catalogue-shadow.db \
+            --manifest xi-frozen-manifest.json
+      - name: Verify exact source snapshot and produce immutable index plan
         shell: bash
         run: |
           set -euo pipefail
-          python -m src.target_duty.xi_measure_crawl \
+          python -m src.target_duty.xi_frozen_catalogue verify \
             --catalogue xi-full-catalogue-shadow.db \
-            --as-of "$(python -c 'import json; print(json.load(open("xi-full-catalogue-shadow.json"))["as_of"])')" \
-            --limit "${{ inputs.sample_limit }}" \
-            --min-interval 2.0 \
-            --output xi-managed-measures-shadow.db
-      - name: Replay and assess official XI raw-response evidence (NOT NI Other)
+            --manifest xi-frozen-manifest.json
+          python -m src.target_duty.xi_frozen_catalogue plan \
+            --catalogue xi-full-catalogue-shadow.db \
+            --manifest xi-frozen-manifest.json \
+            --start-index "$START_INDEX" --limit "$SHARD_LIMIT" \
+            --output xi-shard-plan.json
+      - name: Retrieve earlier fully replay-verified XI checkpoint (optional)
+        if: ${{ inputs.prior_checkpoint_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: xi-managed-checkpoint-${{ inputs.prior_checkpoint_run_id }}
+          run-id: ${{ inputs.prior_checkpoint_run_id }}
+          github-token: ${{ github.token }}
+          path: previous/
+      - name: Download fixed bounded XI shard with managed OAuth (source errors recorded)
+        id: crawl
+        continue-on-error: true
         shell: bash
         run: |
+          set -euo pipefail
+          DAY="$(python -c 'import json;print(json.load(open("xi-frozen-manifest.json"))["as_of"])')"
+          python -m src.target_duty.xi_measure_crawl \
+            --catalogue xi-full-catalogue-shadow.db \
+            --as-of "$DAY" \
+            --start-index "$START_INDEX" --limit "$SHARD_LIMIT" \
+            --min-interval 2.0 \
+            --output xi-current-shard.db
+      - name: Merge and replay verify original + current checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          DAY="$(python -c 'import json;print(json.load(open("xi-frozen-manifest.json"))["as_of"])')"
+          if [[ -n "$PRIOR_CHECKPOINT_RUN_ID" ]]; then
+            test -f previous/xi-merged-shadow.db
+            python -m src.target_duty.xi_merge \
+              --catalogue xi-full-catalogue-shadow.db \
+              --as-of "$DAY" \
+              --shards previous/xi-merged-shadow.db xi-current-shard.db \
+              --resolve-failures \
+              --output xi-merged-shadow.db
+          else
+            python -m src.target_duty.xi_merge \
+              --catalogue xi-full-catalogue-shadow.db \
+              --as-of "$DAY" \
+              --shards xi-current-shard.db \
+              --output xi-merged-shadow.db
+          fi
+      - name: Verify merged raw source scope (never certify NI Other)
+        shell: bash
+        run: |
+          set -euo pipefail
           python -m src.target_duty.xi_acceptance \
             --catalogue xi-full-catalogue-shadow.db \
-            --measures xi-managed-measures-shadow.db \
-            --min-chapters 90 \
+            --measures xi-merged-shadow.db \
             --output xi-managed-coverage-gate.json
-      - name: Archive read-only XI raw evidence (7-day retention)
-        uses: actions/upload-artifact@v4
+      - name: Archive immutable original catalogue for future runs (max 30-day Actions retention)
         if: always()
+        uses: actions/upload-artifact@v4
         with:
-          name: xi-managed-shadow-evidence-${{ github.run_id }}
+          name: xi-managed-catalogue-${{ github.run_id }}
           path: |
             xi-full-catalogue-shadow.db
             xi-full-catalogue-shadow.json
-            xi-managed-measures-shadow.db
-            xi-managed-measures-shadow.db.metadata.json
+            xi-frozen-manifest.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Archive read-only merged XI checkpoint and audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xi-managed-checkpoint-${{ github.run_id }}
+          path: |
+            xi-current-shard.db
+            xi-current-shard.db.metadata.json
+            xi-shard-plan.json
+            xi-merged-shadow.db
+            xi-merged-shadow.json
             xi-managed-coverage-gate.json
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 30
+      - name: Report incomplete or failed source after retaining the evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.crawl.outcome }}" != "success" ]]; then
+            echo "::error::XI source failures; audit artifact retained for repair"
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path("xi-merged-shadow.json").read_text())
+          print("Checkpoint: successful",report["successful_codes"],
+                "remaining",report["remaining_codes"],
+                "source errors",report["failed_codes"])
+          if report["failed_codes"]:
+              raise SystemExit("Source errors still present in merged XI checkpoint")
+          if report["production_eligible"] or report["other_semantics_verified"]:
+              raise SystemExit("Illegal production-eligible XI evidence")
+          PY
