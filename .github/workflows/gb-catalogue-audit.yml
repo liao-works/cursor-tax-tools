@@ -8,6 +8,10 @@ on:
       - 'tests/test_catalog.py'
       - 'src/target_duty/gap_measures.py'
       - 'tests/test_gap_measures.py'
+      - 'src/target_duty/region_measures.py'
+      - 'tests/test_region_measures.py'
+      - 'src/target_duty/hmrc_bulk_feasibility.py'
+      - 'tests/test_hmrc_bulk_feasibility.py'
       - '.github/workflows/gb-catalogue-audit.yml'
   # Schedules only execute from the repository default branch; no production
   # branch or release is modified by this workflow.
@@ -28,6 +32,10 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_catalog.py' -v
       - name: Offline all-measure source regression tests
         run: python -m unittest discover -s tests -p 'test_gap_measures.py' -v
+      - name: Offline region-separated canonical measures regression tests
+        run: python -m unittest discover -s tests -p 'test_region_measures.py' -v
+      - name: Offline HMRC Bulk continuity and integrity contract tests
+        run: python -m unittest discover -s tests -p 'test_hmrc_bulk_feasibility.py' -v
       - name: Download and stage FULL official DBT commodity catalogue
         shell: bash
         run: |
@@ -72,6 +80,16 @@ jobs:
             --version "$VERSION" \
             --as-of "$(python -c 'import json; print(json.load(open("gb-commodity-catalogue.metadata.json"))["as_of"])')" \
             --workers 3 --limit 1000 --output gb-gap-measures.json
+      - name: Build read-only canonical GB measure evidence from gap audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.region_measures build \
+            --gb gb-gap-measures.db \
+            --output region-measures-shadow.db
+          python -m src.target_duty.region_measures query \
+            --database region-measures-shadow.db --region GB \
+            --code 9930240000 > region-measures-sample.json
       - name: Preserve source and review evidence (NOT a production release)
         if: always()
         uses: actions/upload-artifact@v4
@@ -86,4 +104,7 @@ jobs:
             gb-gap-measures.json
             gb-gap-measures.db
             gb-gap-measures.csv
+            region-measures-shadow.db
+            region-measures-shadow.json
+            region-measures-sample.json
           retention-days: 14
