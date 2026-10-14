@@ -126,13 +126,15 @@ class CatalogTest(unittest.TestCase):
         self.assertEqual(report["legacy_not_active_suffix80"], 2)
         self.assertEqual(report["legacy_not_focused"], 1)
         self.assertFalse(report["production_eligible"])
-        self.assertEqual(len(list(csv.DictReader(path.with_suffix(".csv").open()))), 3)
+        with path.with_suffix(".csv").open(newline="", encoding="utf-8") as stream:
+            self.assertEqual(len(list(csv.DictReader(stream))), 3)
 
     def test_url_is_unfiltered_and_restricts_version(self):
         url = source_url("latest")
         self.assertIn("/tables/commodities/data", url)
         self.assertNotIn("measure__type__id", url)
-        self.assertIn("commodity__suffix", url)
+        self.assertTrue(url.endswith("?format=csv"))
+        self.assertNotIn("query-simple", url)
         with self.assertRaises(ValueError):
             source_url("../../unsafe")
 
