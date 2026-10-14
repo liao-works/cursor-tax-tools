@@ -62,16 +62,16 @@ class CatalogTest(unittest.TestCase):
             item("0207412010", "80", sid="4", start="2026-10-14"),
         ], min_active=2)
         self.assertEqual(report["counts"]["all_catalogue_rows"], 4)
-        self.assertEqual(report["counts"]["active_declarable_codes"], 2)
-        self.assertEqual(report["counts"]["historical_or_non_declarable_rows"], 2)
+        self.assertEqual(report["counts"]["active_suffix80_candidates"], 2)
+        self.assertEqual(report["counts"]["inactive_or_non_suffix80_rows"], 2)
         self.assertFalse(report["production_eligible"])
         conn = sqlite3.connect(self.db)
         try:
             self.assertEqual(conn.execute(
-                "SELECT active,declarable FROM commodities WHERE sid='1'"
+                "SELECT active,suffix80 FROM commodities WHERE sid='1'"
             ).fetchone(), (1, 0))
             self.assertEqual(conn.execute(
-                "SELECT active,declarable FROM commodities WHERE sid='3'"
+                "SELECT active,suffix80 FROM commodities WHERE sid='3'"
             ).fetchone(), (0, 1))
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM commodities").fetchone()[0], 4)
         finally:
@@ -120,10 +120,10 @@ class CatalogTest(unittest.TestCase):
         tariff_db(focused, ["0101210000", "0301110000"])
         path = self.directory / "coverage.json"
         report = compare(str(self.db), str(old), str(focused), str(path))
-        self.assertEqual(report["active_declarable_catalogue"], 2)
-        self.assertEqual(report["active_catalogue_missing_focused"], 1)
-        self.assertEqual(report["focused_not_active_catalogue"], 1)
-        self.assertEqual(report["legacy_not_active_catalogue"], 2)
+        self.assertEqual(report["active_suffix80_catalogue"], 2)
+        self.assertEqual(report["active_suffix80_missing_focused"], 1)
+        self.assertEqual(report["focused_not_active_suffix80"], 1)
+        self.assertEqual(report["legacy_not_active_suffix80"], 2)
         self.assertEqual(report["legacy_not_focused"], 1)
         self.assertFalse(report["production_eligible"])
         self.assertEqual(len(list(csv.DictReader(path.with_suffix(".csv").open()))), 3)
