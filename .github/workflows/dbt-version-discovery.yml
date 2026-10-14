@@ -1,0 +1,65 @@
+name: DBT latest version discovery and schema preflight (no release)
+
+on:
+  pull_request:
+    paths:
+      - 'src/target_duty/dbt_version_discovery.py'
+      - 'tests/test_dbt_version_discovery.py'
+      - '.github/workflows/dbt-version-discovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  version-inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Unit-test official semver and fail-closed newest-version discovery
+        run: python -m unittest discover -s tests -p 'test_dbt_version_discovery.py' -v
+      - name: Query official DBT versions and newest version table inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.dbt_version_discovery \
+            --previous-pin v4.0.1626 \
+            --output dbt-version-discovery.json
+          python - <<'PY'
+          import json
+          d=json.load(open("dbt-version-discovery.json"))
+          print("OFFICIAL DBT DISCOVERY state:",d["state"])
+          print("Newest version:",d["newest_official_version"])
+          print("Newest tables:",d["newest_version_tables"])
+          print("Missing current importer table IDs:",d.get("missing_required_tables"))
+          print("Previous verified pin:",d["replayed_previous_version"])
+          print("Full newest version replay verified:",d["full_data_replayed_for_newest"])
+          print("Release allowed:",d["publish_eligible"])
+          PY
+      - name: Archive official version inventory health report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dbt-version-preflight-${{ github.run_id }}
+          path: dbt-version-discovery.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Explicit official metadata / schema acceptance gate (fail closed)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d=json.loads(Path("dbt-version-discovery.json").read_text())
+          if d["state"]!="schema_preflight_required":
+              raise SystemExit(
+                  "Official newest tariff metadata/tables not compatible; "
+                  "current data promotion is BLOCKED (see artifact)"
+              )
+          print("Metadata table inventory OK; full source column/data replay "
+                "required before freshness or production certification.")
+          PY
