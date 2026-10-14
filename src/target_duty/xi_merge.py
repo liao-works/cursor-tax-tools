@@ -19,6 +19,7 @@ from pathlib import Path
 
 from .xi_measure_crawl import SCHEMA, candidates, initialize, parse
 from .xi_acceptance import decompress_checked
+from .xi_frozen_catalogue import digest_file
 
 
 def _readonly(path: str) -> sqlite3.Connection:
@@ -38,7 +39,7 @@ def combine(catalogue: str, sources: list[str], output: str, *,
     if out in paths or out==Path(catalogue).resolve():
         raise ValueError("XI merge output cannot overwrite inputs or catalogue")
     expected=set(candidates(catalogue))
-    cat_hash=hashlib.sha256(Path(catalogue).read_bytes()).hexdigest()
+    cat_hash=digest_file(catalogue)
     out.parent.mkdir(parents=True,exist_ok=True)
     accepted={}
     counts={"success":0,"source_error":0,"duplicates_identical":0,
@@ -146,7 +147,7 @@ def combine(catalogue: str, sources: list[str], output: str, *,
         "as_of":as_of.isoformat(),
         "catalogue_sha256":cat_hash,
         "source_shards":[{"filename":p.name,
-                          "sha256":hashlib.sha256(p.read_bytes()).hexdigest()}
+                          "sha256":digest_file(str(p))}
                          for p in paths],
         "catalogue_candidate_codes":len(expected),
         "merged_requests":len(accepted),
@@ -157,7 +158,7 @@ def combine(catalogue: str, sources: list[str], output: str, *,
         "remaining_codes":len(expected)-counts["success"],
         "source_complete":counts["success"]==len(expected)
                           and counts["source_error"]==0,
-        "sqlite_sha256":hashlib.sha256(out.read_bytes()).hexdigest(),
+        "sqlite_sha256":digest_file(str(out)),
         "warning":"Merged data are unofficially assembled XI source evidence, NOT NI Other duty.",
     }
     out.with_suffix(".json").write_text(
