@@ -24,12 +24,12 @@ from .xi_probe import get_token, refs
 CODE = re.compile(r"\d{10}\Z")
 SCHEMA = """
 PRAGMA foreign_keys=ON;
-CREATE TABLE config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-CREATE TABLE requests (
+CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS requests (
  code TEXT PRIMARY KEY, status TEXT NOT NULL, response_sha256 TEXT,
  bytes INTEGER, checked_at TEXT NOT NULL, error TEXT, compressed_body BLOB
 );
-CREATE TABLE measures (
+CREATE TABLE IF NOT EXISTS measures (
  code TEXT NOT NULL REFERENCES requests(code),
  ordinal INTEGER NOT NULL,
  measure_id TEXT NOT NULL, measure_type TEXT,
@@ -38,7 +38,7 @@ CREATE TABLE measures (
  raw_json TEXT NOT NULL,
  PRIMARY KEY(code,ordinal)
 );
-CREATE INDEX idx_xi_import_type ON measures(code,measure_type,geography_id);
+CREATE INDEX IF NOT EXISTS idx_xi_import_type ON measures(code,measure_type,geography_id);
 """
 
 
@@ -154,7 +154,7 @@ def collect(catalogue: str, output: str, *, as_of: date, limit: int=20,
                  len(body) if body else None,now,error,zlib.compress(body) if body else None))
             if status=="ok":
                 for ordinal,m in enumerate(rows):
-                    db.execute("INSERT INTO measures VALUES (?,?,?,?,?,?,?,?)",
+                    db.execute("INSERT INTO measures VALUES (?,?,?,?,?,?,?,?,?)",
                                (code,ordinal,m["measure_id"],m["measure_type"],
                                 m["geography_id"],m["duty_expression"],
                                 m["effective_start"],m["effective_end"],m["raw_json"]))
