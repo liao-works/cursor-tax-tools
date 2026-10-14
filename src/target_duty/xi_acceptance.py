@@ -173,11 +173,22 @@ def main():
     p.add_argument("--strict",action="store_true")
     p.add_argument("--output",default="xi-coverage-audit.json")
     args=p.parse_args()
+    # Write the source gap evidence BEFORE failing a strict operational gate.
+    # Calling evaluate(strict=True) directly raises before the receipt can
+    # be archived by the CI workflow, hiding the missing-code explanation.
     report=evaluate(args.catalogue,args.measures,min_chapters=args.min_chapters,
-                    strict=args.strict)
-    Path(args.output).write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n",
-                                 encoding="utf-8")
+                    strict=False)
+    dest=Path(args.output)
+    dest.parent.mkdir(parents=True,exist_ok=True)
+    dest.write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n",
+                    encoding="utf-8")
     print(json.dumps(report,ensure_ascii=False,indent=2))
+    if args.strict and not (
+            report["all_collected_measure_responses_verified"]
+            and report["independent_catalogue_scope_ok"]
+            and report["missing_codes"]==0
+            and report["request_failures"]==0):
+        raise SystemExit("XI evidence does not meet strict audit coverage; report retained")
 
 
 if __name__=="__main__":
