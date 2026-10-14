@@ -91,6 +91,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_xi_acceptance.py' -v
           python -m unittest discover -s tests -p 'test_xi_run_plan.py' -v
           python -m unittest discover -s tests -p 'test_xi_full_capture.py' -v
+          python -m unittest discover -s tests -p 'test_gb_xi_coverage_matrix.py' -v
           python -m unittest discover -s tests -p 'test_xi_drift_guard.py' -v
           python -m unittest discover -s tests -p 'test_xi_coverage_receipt.py' -v
           python -m unittest discover -s tests -p 'test_xi_checkpoint_chain.py' -v
