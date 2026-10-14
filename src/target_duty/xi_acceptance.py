@@ -91,6 +91,12 @@ def evaluate(catalogue_db: str, measure_db: str, *, min_chapters: int = 90,
                 raise ValueError(f"XI request outside independent official catalogue: {code}")
             requested.add(code)
             if status != "ok":
+                if status != "source_error":
+                    raise ValueError(f"Unsupported XI source status: {code}/{status}")
+                if measures.execute(
+                    "SELECT 1 FROM measures WHERE code=? LIMIT 1",(code,)
+                ).fetchone():
+                    raise ValueError(f"XI failed request incorrectly contains measures: {code}")
                 source_failures.append({"code":code,"error":(err or "unspecified")[:250]})
                 continue
             raw = decompress_checked(compressed)
