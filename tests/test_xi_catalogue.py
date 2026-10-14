@@ -116,6 +116,43 @@ class XICatalogueTest(unittest.TestCase):
                   str(self.output),as_of=TODAY)
         self.assertFalse(self.output.exists())
 
+    def test_full_public_catalogue_is_explicitly_untrusted_not_managed(self):
+        from src.target_duty.xi_frozen_catalogue import inspect
+        full={"data":[{"id":str(n)} for n in range(1,98)]}
+        all_chapters={f"{n:02d}":{"data":[
+            item(f"{n:02d}",f"{n:02d}01000000",str(n))]
+        } for n in range(1,98)}
+        result=build(full,all_chapters,str(self.output),as_of=TODAY,
+                     public=True,public_full_audit=True,official_listed_total=97)
+        self.assertEqual(result["chapters_complete"],97)
+        self.assertEqual(result["active_declarable_entries"],97)
+        self.assertEqual(result["listing_scope"],"public_full_untrusted")
+        self.assertFalse(result["production_eligible"])
+        self.assertFalse(result["other_semantics_verified"])
+        with self.assertRaisesRegex(ValueError,"not a managed full"):
+            inspect(str(self.output),min_chapters=90)
+        with sqlite3.connect(self.output) as db:
+            self.assertEqual(dict(db.execute(
+                "SELECT key,value FROM metadata"))["listing_scope"],
+                "public_full_untrusted")
+
+    def test_public_audit_cannot_fake_managed_or_skip_chapters(self):
+        full={"data":[{"id":str(n)} for n in range(1,98)]}
+        all_chapters={f"{n:02d}":{"data":[
+            item(f"{n:02d}",f"{n:02d}01000000",str(n))]
+        } for n in range(1,98)}
+        with self.assertRaisesRegex(ValueError,"every officially listed"):
+            build(listing(),payloads(),str(self.output),as_of=TODAY,
+                  public=True,public_full_audit=True,official_listed_total=97)
+        with self.assertRaisesRegex(ValueError,"every officially listed"):
+            build(full,all_chapters,str(self.output),as_of=TODAY,
+                  public=False,public_full_audit=True,official_listed_total=97)
+        with self.assertRaisesRegex(ValueError,"Full managed XI inventory"):
+            build(full,all_chapters,str(self.output),as_of=TODAY,
+                  public=True,public_full_audit=True,
+                  full_managed_listing=True,official_listed_total=97)
+        self.assertFalse(self.output.exists())
+
     def test_reject_missing_chapter_list(self):
         with self.assertRaisesRegex(ValueError,"missing or empty"):
             chapters({"data":[]})
