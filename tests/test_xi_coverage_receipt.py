@@ -88,6 +88,45 @@ class XICoverageReceiptTests(unittest.TestCase):
         self.assertEqual(ch["04"]["missing_samples"],["0401000000"])
         self.assertEqual(ch["01"]["replayed_successes"],1)
 
+    def test_strict_cli_fails_partial_but_saves_explainable_chapter_report(self):
+        import subprocess
+        import sys
+        collect(str(self.catalogue),str(self.checkpoint),as_of=DAY,
+                limit=3,fetcher=lambda code,day:payload(code))
+        out=self.catalogue.parent/"incomplete-report.json"
+        cmd=[sys.executable,"-m","src.target_duty.xi_coverage_receipt",
+             "--catalogue",str(self.catalogue),
+             "--manifest",str(self.manifest),
+             "--checkpoint",str(self.checkpoint),
+             "--output",str(out),"--strict"]
+        result=subprocess.run(cmd,capture_output=True,text=True,timeout=30)
+        self.assertNotEqual(result.returncode,0)
+        self.assertIn("full official source coverage gate",result.stderr)
+        self.assertTrue(out.is_file())
+        audit=json.loads(out.read_text())
+        self.assertEqual(audit["missing_responses"],94)
+        self.assertEqual(audit["complete_chapters"],3)
+        self.assertFalse(audit["managed_full_source_coverage_pass"])
+
+    def test_strict_cli_accepts_all_raw_responses_without_ni_rate_certification(self):
+        import subprocess
+        import sys
+        collect(str(self.catalogue),str(self.checkpoint),as_of=DAY,
+                limit=97,fetcher=lambda code,day:payload(code))
+        out=self.catalogue.parent/"completed-report.json"
+        result=subprocess.run(
+            [sys.executable,"-m","src.target_duty.xi_coverage_receipt",
+             "--catalogue",str(self.catalogue),
+             "--manifest",str(self.manifest),
+             "--checkpoint",str(self.checkpoint),
+             "--output",str(out),"--strict"],
+            capture_output=True,text=True,timeout=30)
+        self.assertEqual(result.returncode,0,result.stderr)
+        audit=json.loads(out.read_text())
+        self.assertTrue(audit["managed_full_source_coverage_pass"])
+        self.assertFalse(audit["ni_other_verified"])
+        self.assertFalse(audit["production_eligible"])
+
     def test_corrupted_persisted_response_blocks_receipt(self):
         collect(str(self.catalogue),str(self.checkpoint),as_of=DAY,
                 limit=1,fetcher=lambda code,day:payload(code))
