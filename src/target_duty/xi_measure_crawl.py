@@ -195,25 +195,53 @@ def collect(catalogue: str, output: str, *, as_of: date, limit: int=20,
 
 
 def managed_fetcher(client_id: str, secret: str, *, public: bool=False):
+    """Rate-limited call adapter; refresh expired managed token, retry 429/5xx.
+
+    The outer collect() owns the per-code checkpoint. HTTP errors MUST NOT
+    be converted into an empty import measure list.
+    """
     token=None if public else get_token(client_id,secret)
+    token_refreshed=False
+
     def fetch_one(code: str, as_of: date) -> bytes:
+        import urllib.error
         import urllib.parse
         import urllib.request
+        nonlocal token, token_refreshed
         if not CODE.fullmatch(code):
             raise ValueError("Invalid XI code")
-        url=("https://www.trade-tariff.service.gov.uk/xi/api/commodities/" if public
-             else "https://api.trade-tariff.service.gov.uk/xi/api/commodities/")
-        query=urllib.parse.urlencode({"as_of":as_of.isoformat()})
-        headers={"Accept":"application/vnd.hmrc.2.0+json",
-                 "User-Agent":"liao-xi-measure-evidence-shadow/1.0"}
-        if not public:
-            headers["Authorization"]="Bearer "+token
-        with urllib.request.urlopen(urllib.request.Request(url+code+"?"+query,
-                                                             headers=headers),
-                                    timeout=50) as response:
-            return response.read(8_000_001)
+        endpoint=("https://www.trade-tariff.service.gov.uk/xi/api/commodities/" if public
+                  else "https://api.trade-tariff.service.gov.uk/xi/api/commodities/")
+        url=endpoint+code+"?"+urllib.parse.urlencode({"as_of":as_of.isoformat()})
+        for attempt in range(5):
+            headers={"Accept":"application/vnd.hmrc.2.0+json",
+                     "User-Agent":"liao-xi-measure-evidence-shadow/1.0"}
+            if not public:
+                headers["Authorization"]="Bearer "+token
+            try:
+                with urllib.request.urlopen(
+                    urllib.request.Request(url,headers=headers),timeout=50
+                ) as response:
+                    if response.status!=200:
+                        raise RuntimeError(f"Unexpected HMRC XI status: {response.status}")
+                    return response.read(8_000_001)
+            except urllib.error.HTTPError as exc:
+                status=exc.code
+                if status==401 and not public and not token_refreshed:
+                    token=get_token(client_id,secret)
+                    token_refreshed=True
+                    continue
+                if status not in (429,500,502,503,504) or attempt==4:
+                    raise RuntimeError(f"HMRC XI HTTP {status}") from None
+                retry_after=exc.headers.get("Retry-After","") if exc.headers else ""
+                delay=min(60.0,max(1.0,float(retry_after))) if retry_after.isdecimal() else min(30.0,2.0**attempt)
+                time.sleep(delay)
+            except urllib.error.URLError:
+                if attempt==4:
+                    raise RuntimeError("HMRC XI network unavailable after retries") from None
+                time.sleep(min(30.0,2.0**attempt))
+        raise RuntimeError("Unreachable XI managed request retry state")
     return fetch_one
-
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
