@@ -14,7 +14,7 @@ import hashlib
 import json
 import sqlite3
 import tempfile
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from .xi_measure_crawl import SCHEMA, candidates, initialize, parse
@@ -28,7 +28,7 @@ def _readonly(path: str) -> sqlite3.Connection:
 
 
 def combine(catalogue: str, sources: list[str], output: str, *,
-            as_of: date) -> dict:
+            as_of: date, resolve_failures: bool = False) -> dict:
     if not 1 <= len(sources) <= 100:
         raise ValueError("Merge requires between 1 and 100 explicit XI shards")
     paths=[Path(s).resolve() for s in sources]
@@ -41,7 +41,8 @@ def combine(catalogue: str, sources: list[str], output: str, *,
     cat_hash=hashlib.sha256(Path(catalogue).read_bytes()).hexdigest()
     out.parent.mkdir(parents=True,exist_ok=True)
     accepted={}
-    counts={"success":0,"source_error":0,"duplicates_identical":0}
+    counts={"success":0,"source_error":0,"duplicates_identical":0,
+            "resolved_failures":0}
     with tempfile.TemporaryDirectory(dir=out.parent) as folder:
         stage=Path(folder)/"xi-combined.db"
         db=sqlite3.connect(stage)
@@ -95,11 +96,33 @@ def combine(catalogue: str, sources: list[str], output: str, *,
                         signature=(status,digest,size,error,
                                    hashlib.sha256(body).hexdigest() if body else None)
                         if code in accepted:
-                            if signature!=accepted[code]:
-                                raise ValueError(f"Conflicting XI shard responses: {code}")
-                            counts["duplicates_identical"]+=1
-                            continue
-                        accepted[code]=signature
+                            prior, checked_before = accepted[code]
+                            if signature==prior:
+                                counts["duplicates_identical"]+=1
+                                continue
+                            if (resolve_failures and prior[0]=="source_error"
+                                    and status=="ok"):
+                                old_time=datetime.fromisoformat(checked_before)
+                                new_time=datetime.fromisoformat(checked)
+                                if (old_time.tzinfo is None or new_time.tzinfo is None
+                                        or new_time<=old_time):
+                                    raise ValueError(
+                                        f"XI repaired response must be later than failed checkpoint: {code}")
+                                # Explicitly replace a *failed* request with a fully
+                                # replay-verified successful request. A successful
+                                # response is never overwritten by changed evidence.
+                                db.execute("DELETE FROM requests WHERE code=?", (code,))
+                                db.execute("INSERT INTO requests VALUES (?,?,?,?,?,?,?)",row)
+                                db.executemany(
+                                    "INSERT INTO measures VALUES (?,?,?,?,?,?,?,?,?)",
+                                    [(code,*m) for m in rows])
+                                accepted[code]=(signature,checked)
+                                counts["source_error"]-=1
+                                counts["success"]+=1
+                                counts["resolved_failures"]+=1
+                                continue
+                            raise ValueError(f"Conflicting XI shard responses: {code}")
+                        accepted[code]=(signature,checked)
                         counts["success" if status=="ok" else "source_error"]+=1
                         db.execute("INSERT INTO requests VALUES (?,?,?,?,?,?,?)",row)
                         db.executemany("INSERT INTO measures VALUES (?,?,?,?,?,?,?,?,?)",
@@ -130,6 +153,7 @@ def combine(catalogue: str, sources: list[str], output: str, *,
         "successful_codes":counts["success"],
         "failed_codes":counts["source_error"],
         "duplicate_identical_codes":counts["duplicates_identical"],
+        "resolved_source_failures":counts["resolved_failures"],
         "remaining_codes":len(expected)-counts["success"],
         "source_complete":counts["success"]==len(expected)
                           and counts["source_error"]==0,
@@ -147,9 +171,12 @@ def main():
     p.add_argument("--shards",nargs="+",required=True)
     p.add_argument("--as-of",required=True)
     p.add_argument("--output",default="xi-merged-shadow.db")
+    p.add_argument("--resolve-failures",action="store_true",
+                   help="Explicitly accept later verified OK responses replacing failed requests")
     args=p.parse_args()
     result=combine(args.catalogue,args.shards,args.output,
-                   as_of=date.fromisoformat(args.as_of))
+                   as_of=date.fromisoformat(args.as_of),
+                   resolve_failures=args.resolve_failures)
     print(json.dumps(result,ensure_ascii=False,indent=2))
 
 
