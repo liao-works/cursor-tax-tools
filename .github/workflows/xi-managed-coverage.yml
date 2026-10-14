@@ -12,9 +12,9 @@ on:
         required: false
         type: string
       start_index:
-        description: 'Fixed sorted XI catalogue start index (0-based)'
+        description: 'auto (first gap/failure), or explicit zero-based XI catalogue start index'
         required: true
-        default: '0'
+        default: 'auto'
         type: string
       sample_limit:
         description: 'Maximum managed XI commodity requests in this shard'
@@ -55,8 +55,8 @@ jobs:
             echo "::error::Managed HMRC_CLIENT_ID and HMRC_CLIENT_SECRET required"
             exit 1
           fi
-          if [[ ! "$START_INDEX" =~ ^[0-9]{1,8}$ ]]; then
-            echo "::error::start_index must be a nonnegative integer"
+          if [[ "$START_INDEX" != "auto" && ! "$START_INDEX" =~ ^[0-9]{1,8}$ ]]; then
+            echo "::error::start_index must be auto or a nonnegative integer"
             exit 1
           fi
           if [[ -n "$CATALOGUE_RUN_ID" && ! "$CATALOGUE_RUN_ID" =~ ^[0-9]{1,16}$ ]]; then
@@ -67,7 +67,7 @@ jobs:
             echo "::error::invalid previous checkpoint run ID"
             exit 1
           fi
-          if [[ -z "$CATALOGUE_RUN_ID" && "$START_INDEX" != '0' ]]; then
+          if [[ -z "$CATALOGUE_RUN_ID" && "$START_INDEX" != 'auto' && "$START_INDEX" != '0' ]]; then
             echo "::error::nonzero start requires a reused frozen catalogue"
             exit 1
           fi
@@ -82,6 +82,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_xi_frozen_catalogue.py' -v
           python -m unittest discover -s tests -p 'test_xi_merge.py' -v
           python -m unittest discover -s tests -p 'test_xi_acceptance.py' -v
+          python -m unittest discover -s tests -p 'test_xi_run_plan.py' -v
       - name: Retrieve original frozen managed XI catalogue from an earlier run
         if: ${{ inputs.catalogue_run_id != '' }}
         uses: actions/download-artifact@v4
@@ -102,18 +103,13 @@ jobs:
           python -m src.target_duty.xi_frozen_catalogue freeze \
             --catalogue xi-full-catalogue-shadow.db \
             --manifest xi-frozen-manifest.json
-      - name: Verify exact source snapshot and produce immutable index plan
+      - name: Verify exact frozen source catalogue snapshot
         shell: bash
         run: |
           set -euo pipefail
           python -m src.target_duty.xi_frozen_catalogue verify \
             --catalogue xi-full-catalogue-shadow.db \
             --manifest xi-frozen-manifest.json
-          python -m src.target_duty.xi_frozen_catalogue plan \
-            --catalogue xi-full-catalogue-shadow.db \
-            --manifest xi-frozen-manifest.json \
-            --start-index "$START_INDEX" --limit "$SHARD_LIMIT" \
-            --output xi-shard-plan.json
       - name: Retrieve earlier fully replay-verified XI checkpoint (optional)
         if: ${{ inputs.prior_checkpoint_run_id != '' }}
         uses: actions/download-artifact@v4
@@ -122,6 +118,37 @@ jobs:
           run-id: ${{ inputs.prior_checkpoint_run_id }}
           github-token: ${{ github.token }}
           path: previous/
+      - name: Plan next bounded XI shard from replay-verified missing or failed source responses
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARGS=(--catalogue xi-full-catalogue-shadow.db
+                --manifest xi-frozen-manifest.json
+                --batch-size "$SHARD_LIMIT" --output xi-shard-plan.json)
+          if [[ -n "$PRIOR_CHECKPOINT_RUN_ID" ]]; then
+            ARGS+=(--checkpoint previous/xi-merged-shadow.db)
+          fi
+          if [[ "$START_INDEX" != "auto" ]]; then
+            ARGS+=(--start-index "$START_INDEX")
+          fi
+          python -m src.target_duty.xi_run_plan "${ARGS[@]}"
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          plan=json.loads(Path("xi-shard-plan.json").read_text())
+          segment=plan["next_shard"]
+          if segment is None:
+              raise SystemExit("All XI source codes captured; nothing to fetch. Run independent final acceptance.")
+          if not 1<=segment["pending_codes_in_window"]<=segment["limit"]:
+              raise SystemExit("Planned XI batch contains no work")
+          with Path(os.environ["GITHUB_ENV"]).open("a") as env:
+              env.write(f'ACTUAL_START_INDEX={segment["start_index"]}\n')
+              env.write(f'ACTUAL_SHARD_LIMIT={segment["limit"]}\n')
+          print("Verified XI checkpoint:",plan["verified_successful_codes"],
+                "failures:",plan["failed_requests"],
+                "missing:",plan["missing_requests"],
+                "next absolute start:",segment["start_index"])
+          PY
       - name: Download fixed bounded XI shard with managed OAuth (source errors recorded)
         id: crawl
         continue-on-error: true
@@ -136,7 +163,7 @@ jobs:
           python -m src.target_duty.xi_measure_crawl \
             --catalogue xi-full-catalogue-shadow.db \
             --as-of "$DAY" \
-            --start-index "$START_INDEX" --limit "$SHARD_LIMIT" \
+            --start-index "$ACTUAL_START_INDEX" --limit "$ACTUAL_SHARD_LIMIT" \
             "${RESUME_ARGS[@]}" \
             --min-interval 2.0 \
             --output xi-current-shard.db
@@ -188,6 +215,7 @@ jobs:
             xi-current-shard.db
             xi-current-shard.db.metadata.json
             xi-shard-plan.json
+            xi-managed-coverage-gate.json
             xi-merged-shadow.db
             xi-merged-shadow.json
             xi-managed-coverage-gate.json
