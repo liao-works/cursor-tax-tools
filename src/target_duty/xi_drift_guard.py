@@ -103,6 +103,9 @@ def audit(catalogue: str, checkpoint: str, *,
         raise ValueError("XI anchor limits out of bounds")
     if not 1 <= max_bytes <= 8_000_000:
         raise ValueError("Invalid XI source response bound")
+    if (evidence_output and manifest and
+            Path(evidence_output).resolve()==Path(manifest).resolve()):
+        raise ValueError("XI anchor evidence must not overwrite frozen source manifest")
     if public_canary:
         if manifest:
             raise ValueError("Public XI canary cannot use managed manifest")
