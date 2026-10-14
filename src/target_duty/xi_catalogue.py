@@ -64,7 +64,7 @@ def chapters(payload: dict) -> list[str]:
     for node in collection:
         key = str(node.get("id") or "")
         if not re.fullmatch(r"\d{1,2}", key):
-            raise ValueError("Unexpected XI chapter id")
+            raise ValueError(f"Unexpected XI chapter id: {key!r}, node keys={list(node)}")
         key = key.zfill(2)
         if key == "00" or key in values:
             raise ValueError("Invalid or duplicate XI chapter")
