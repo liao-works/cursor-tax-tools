@@ -129,14 +129,60 @@ def build(database: str, output_csv: str, output_report: str) -> dict:
     return result
 
 
+def lookup(database: str, code: str) -> dict:
+    """Get a strictly read-only, source-verified commodity review record."""
+    if not isinstance(code,str) or len(code)!=10 or not code.isascii() or not code.isdigit():
+        raise ValueError("GB commodity lookup requires exactly ten digits")
+    snapshot=_snapshot(database)  # entire immutable source/manifest checked
+    with sqlite3.connect(Path(database).resolve().as_uri()+"?mode=ro",uri=True) as db:
+        db.row_factory=sqlite3.Row
+        row=db.execute(
+            """SELECT code,status,source_measure_rows,
+                      active_target_candidates,other_area_context_rows
+               FROM commodities WHERE code=?""",(code,)).fetchone()
+        if row is None:
+            return {
+                "region":"GB","commodity_code":code,
+                "status":"not_in_current_official_active_leaf_catalogue",
+                "version":snapshot["version"],"as_of":snapshot["as_of"],
+                "source_coverage_verified":True,"payable_rate":None,
+                "production_eligible":False,
+            }
+        evidence=[dict(r) for r in db.execute(
+            """SELECT sid,measure_type,geography,expression,additional_code,
+                      conditions,excluded_areas,effective_start,effective_end
+               FROM evidence WHERE code=? AND role='gb_103_1011_candidate'
+                         AND geography='1011' AND effective_status='active'
+               ORDER BY source_ordinal""",(code,))]
+    if len(evidence)!=row["active_target_candidates"]:
+        raise ValueError("GB lookup evidence parity differs from source")
+    return {
+        "region":"GB","commodity_code":code,
+        "status":row["status"],
+        "version":snapshot["version"],"as_of":snapshot["as_of"],
+        "source_coverage_verified":True,
+        "raw_source_measure_rows":row["source_measure_rows"],
+        "active_103_1011_count":len(evidence),
+        "non_gb_1080_context_rows":row["other_area_context_rows"],
+        "official_candidate_evidence":evidence,
+        "payable_rate":None,
+        "rate_applicability_verified":False,
+        "ni_other_verified":False,
+        "production_eligible":False,
+        "warning":"Source candidates are not payable duty; missing evidence never means 0%.",
+    }
+
+
 def main() -> None:
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--database",required=True)
+    p.add_argument("--code",help="Lookup exact 10-digit commodity, no output files")
     p.add_argument("--output-csv",default="gb-complete-source-review.csv")
     p.add_argument("--output-report",default="gb-complete-source-review.json")
     args=p.parse_args()
-    print(json.dumps(build(args.database,args.output_csv,args.output_report),
-                     ensure_ascii=False,indent=2))
+    report=(lookup(args.database,args.code) if args.code is not None
+            else build(args.database,args.output_csv,args.output_report))
+    print(json.dumps(report,ensure_ascii=False,indent=2))
 
 
 if __name__=="__main__":
