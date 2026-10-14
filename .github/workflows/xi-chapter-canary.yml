@@ -11,6 +11,8 @@ on:
       - 'tests/test_xi_acceptance.py'
       - 'src/target_duty/xi_run_plan.py'
       - 'tests/test_xi_run_plan.py'
+      - 'src/target_duty/xi_coverage_receipt.py'
+      - 'tests/test_xi_coverage_receipt.py'
       - 'src/target_duty/xi_origin_compare.py'
       - 'tests/test_xi_origin_compare.py'
       - '.github/workflows/xi-chapter-canary.yml'
@@ -72,6 +74,25 @@ jobs:
           assert a["ni_other_verified"] is False
           print("XI limited canary next shard and missing codes verified")
           PY
+      - name: Generate per-chapter XI source coverage receipt (partial canary only)
+        run: |
+          python -m src.target_duty.xi_coverage_receipt \
+            --catalogue xi-catalogue-canary.db \
+            --checkpoint xi-measures-canary.db \
+            --public-canary \
+            --output xi-chapter-receipt-canary.json
+          python - <<'PY'
+          import json
+          r=json.load(open("xi-chapter-receipt-canary.json"))
+          assert r["chapters_collected"]==2
+          assert r["active_declarable_codes"]==516
+          assert r["successful_responses"]==5
+          assert r["missing_responses"]==511
+          assert r["failed_responses"]==0
+          assert r["managed_full_source_coverage_pass"] is False
+          assert r["ni_other_verified"] is False
+          print("Verified two-chapter partial source receipt; NOT NI full source or duty.")
+          PY
       - name: Preserve only limited XI public probe evidence
         uses: actions/upload-artifact@v4
         if: always()
@@ -84,6 +105,7 @@ jobs:
             xi-measures-canary.db.metadata.json
             xi-acceptance-canary.json
             xi-next-shard-canary.json
+            xi-chapter-receipt-canary.json
             xi-origin-comparison-canary.json
             xi-origin-comparison-canary.db
           if-no-files-found: warn
