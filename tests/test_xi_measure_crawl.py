@@ -139,6 +139,18 @@ class XICollectorTests(unittest.TestCase):
             collect(str(self.cat),str(prior),as_of=DAY,limit=1,
                     skip_successes_from=str(prior),fetcher=next_source)
 
+    def test_incomplete_official_measures_pagination_is_rejected(self):
+        raw=json.loads(measure_payload("0101210000"))
+        raw["links"]={"next":"https://example.invalid/commodity?page=2"}
+        with self.assertRaisesRegex(ValueError,"paginated"):
+            parse(json.dumps(raw).encode(),"0101210000")
+        del raw["links"]
+        raw["data"]["relationships"]["import_measures"]["meta"]={"total_count":2}
+        with self.assertRaisesRegex(ValueError,"advertised count"):
+            parse(json.dumps(raw).encode(),"0101210000")
+        raw["data"]["relationships"]["import_measures"]["meta"]={"total_count":1}
+        self.assertEqual(len(parse(json.dumps(raw).encode(),"0101210000")),1)
+
     def test_bounded_batch_and_independent_catalogue(self):
         self.assertEqual(len(candidates(str(self.cat))),2)
         with self.assertRaisesRegex(ValueError,"bounds"):
