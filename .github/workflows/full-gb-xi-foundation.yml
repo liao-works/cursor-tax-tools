@@ -1,0 +1,30 @@
+name: Full GB and independent XI foundation tests (shadow)
+
+on:
+  pull_request:
+    paths:
+      - 'src/target_duty/gb_full_measures.py'
+      - 'tests/test_gb_full_measures.py'
+      - 'src/target_duty/xi_catalogue.py'
+      - 'tests/test_xi_catalogue.py'
+      - '.github/workflows/full-gb-xi-foundation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evidence-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Full DBT expanded measures contract regression
+        run: python -m unittest discover -s tests -p 'test_gb_full_measures.py' -v
+      - name: Independent XI chapter inventory contract regression
+        run: python -m unittest discover -s tests -p 'test_xi_catalogue.py' -v
+      - name: Existing region evidence contract regression
+        run: python -m unittest discover -s tests -p 'test_region_measures.py' -v
