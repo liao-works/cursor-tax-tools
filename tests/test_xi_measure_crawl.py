@@ -139,6 +139,21 @@ class XICollectorTests(unittest.TestCase):
             collect(str(self.cat),str(prior),as_of=DAY,limit=1,
                     skip_successes_from=str(prior),fetcher=next_source)
 
+    def test_independent_collector_rejects_tampered_prior_ok_without_fetching(self):
+        prior=self.base/"tampered-prior.db"
+        collect(str(self.cat),str(prior),as_of=DAY,limit=1,start_index=0,
+                fetcher=lambda c,d:measure_payload(c))
+        with sqlite3.connect(prior) as db:
+            db.execute("UPDATE requests SET response_sha256=? WHERE status='ok'",
+                       ("0"*64,))
+        calls=[]
+        with self.assertRaisesRegex(ValueError,"hash mismatch"):
+            collect(str(self.cat),str(self.out),as_of=DAY,
+                    start_index=0,limit=2,skip_successes_from=str(prior),
+                    fetcher=lambda c,d:calls.append(c))
+        self.assertEqual(calls,[])
+        self.assertFalse(self.out.exists())
+
     def test_incomplete_official_measures_pagination_is_rejected(self):
         raw=json.loads(measure_payload("0101210000"))
         raw["links"]={"next":"https://example.invalid/commodity?page=2"}
