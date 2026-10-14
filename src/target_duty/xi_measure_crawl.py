@@ -71,6 +71,12 @@ def parse(payload: bytes, code: str) -> list[dict]:
     returned=attr.get("goods_nomenclature_item_id")
     if returned is not None and returned != code:
         raise ValueError("XI commodity response returned another code")
+    relationships=data.get("relationships")
+    if not isinstance(relationships,dict) or "import_measures" not in relationships:
+        raise ValueError("XI response lacks explicit import_measures relationship")
+    import_measures=relationships["import_measures"]
+    if not isinstance(import_measures,dict) or not isinstance(import_measures.get("data"),list):
+        raise ValueError("XI import_measures relationship must be a complete list")
     included={(node.get("type"),str(node.get("id"))):node
               for node in doc.get("included",[]) if isinstance(node,dict)}
     relations=refs(data,"import_measures")
