@@ -162,7 +162,7 @@ def build(chapter_list: dict, chapter_payloads: dict[str, dict], output: str,
                             len(data),datetime.now(timezone.utc).isoformat()))
                 for row in data:
                     db.execute("""INSERT INTO nomenclature
-                      VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                      VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                       tuple(row[key] for key in
                          ("chapter","source_id","code","suffix","sid","description",
                           "declarable","valid_from","valid_to","active","raw_json")))
@@ -185,6 +185,7 @@ def build(chapter_list: dict, chapter_payloads: dict[str, dict], output: str,
         "nomenclature_rows": total, "active_declarable_entries": active_decl,
         "unknown_declarability_entries": unknown,
         "other_semantics_verified": False, "measures_imported": 0,
+        "atomic_version_proven": False,
         "sqlite_sha256": hashlib.sha256(destination.read_bytes()).hexdigest(),
         "warning": "Independent XI code coverage is not XI Other rates; verify UKIMS/origin conditions.",
     }
