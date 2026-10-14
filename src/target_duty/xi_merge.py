@@ -67,19 +67,13 @@ def combine(catalogue: str, sources: list[str], output: str, *,
                         if code not in expected:
                             raise ValueError(f"Unexpected XI code outside official catalogue: {code}")
                         row=(code,status,digest,size,checked,error,body)
-                        if code in accepted:
-                            previous=accepted[code]
-                            # Identical source bytes and status allow deduplication
-                            # even when checked_at timestamps differ.
-                            if (status,digest,size,error,body)!=(previous[1],previous[2],
-                                   previous[3],previous[5],previous[6]):
-                                raise ValueError(f"Conflicting XI shard responses: {code}")
-                            counts["duplicates_identical"]+=1
-                            continue
                         rows=list(src.execute(
                             """SELECT ordinal,measure_id,measure_type,geography_id,
                                       duty_expression,effective_start,effective_end,raw_json
                                FROM measures WHERE code=? ORDER BY ordinal""",(code,)))
+                        # Verify EVERY shard, including overlapping rows, before
+                        # deduplication. Otherwise a tampered duplicate can bypass
+                        # exact replay of its persisted measure records.
                         if status=="ok":
                             original=decompress_checked(body)
                             if size!=len(original) or hashlib.sha256(original).hexdigest()!=digest:
@@ -91,14 +85,22 @@ def combine(catalogue: str, sources: list[str], output: str, *,
                                      for i,m in enumerate(verified)]
                             if rows!=compare:
                                 raise ValueError(f"XI shard measure rows differ from official bytes: {code}")
-                            counts["success"]+=1
                         elif status=="source_error":
                             if rows:
                                 raise ValueError(f"Failed XI source request has measure rows: {code}")
-                            counts["source_error"]+=1
                         else:
                             raise ValueError(f"Unsupported XI source request status: {status}")
-                        accepted[code]=row
+                        # A compact evidence fingerprint avoids retaining every
+                        # compressed response in Python RAM during large merges.
+                        signature=(status,digest,size,error,
+                                   hashlib.sha256(body).hexdigest() if body else None)
+                        if code in accepted:
+                            if signature!=accepted[code]:
+                                raise ValueError(f"Conflicting XI shard responses: {code}")
+                            counts["duplicates_identical"]+=1
+                            continue
+                        accepted[code]=signature
+                        counts["success" if status=="ok" else "source_error"]+=1
                         db.execute("INSERT INTO requests VALUES (?,?,?,?,?,?,?)",row)
                         db.executemany("INSERT INTO measures VALUES (?,?,?,?,?,?,?,?,?)",
                                        [(code,*m) for m in rows])
