@@ -139,6 +139,22 @@ class XICollectorTests(unittest.TestCase):
             collect(str(self.cat),str(prior),as_of=DAY,limit=1,
                     skip_successes_from=str(prior),fetcher=next_source)
 
+    def test_local_checkpoint_cannot_skip_corrupted_success_on_rerun(self):
+        collect(str(self.cat),str(self.out),as_of=DAY,limit=1,
+                fetcher=lambda c,d:measure_payload(c))
+        with sqlite3.connect(self.out) as db:
+            db.execute("UPDATE measures SET duty_expression='tampered 0%' "
+                       "WHERE code='0101210000'")
+        fetched=[]
+        with self.assertRaisesRegex(ValueError,"discrepancy"):
+            collect(str(self.cat),str(self.out),as_of=DAY,limit=2,
+                    fetcher=lambda c,d:fetched.append(c))
+        self.assertEqual(fetched,[])
+        with sqlite3.connect(self.out) as db:
+            self.assertEqual(db.execute(
+                "SELECT duty_expression FROM measures WHERE code='0101210000'"
+            ).fetchone()[0],"tampered 0%")
+
     def test_independent_collector_rejects_tampered_prior_ok_without_fetching(self):
         prior=self.base/"tampered-prior.db"
         collect(str(self.cat),str(prior),as_of=DAY,limit=1,start_index=0,
