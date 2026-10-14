@@ -11,6 +11,8 @@ on:
       - 'tests/test_xi_measure_crawl.py'
       - 'src/target_duty/xi_acceptance.py'
       - 'tests/test_xi_acceptance.py'
+      - 'src/target_duty/xi_origin_compare.py'
+      - 'tests/test_xi_origin_compare.py'
       - '.github/workflows/full-gb-xi-foundation.yml'
   workflow_dispatch:
 
@@ -34,5 +36,7 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_xi_measure_crawl.py' -v
       - name: XI source replay and Other semantics acceptance tests
         run: python -m unittest discover -s tests -p 'test_xi_acceptance.py' -v
+      - name: XI country-of-origin official filter comparison safety tests
+        run: python -m unittest discover -s tests -p 'test_xi_origin_compare.py' -v
       - name: Existing region evidence contract regression
         run: python -m unittest discover -s tests -p 'test_region_measures.py' -v
