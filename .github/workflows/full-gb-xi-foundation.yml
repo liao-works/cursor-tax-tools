@@ -9,6 +9,8 @@ on:
       - 'tests/test_xi_catalogue.py'
       - 'src/target_duty/xi_measure_crawl.py'
       - 'tests/test_xi_measure_crawl.py'
+      - 'src/target_duty/xi_acceptance.py'
+      - 'tests/test_xi_acceptance.py'
       - '.github/workflows/full-gb-xi-foundation.yml'
   workflow_dispatch:
 
@@ -30,5 +32,7 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_xi_catalogue.py' -v
       - name: XI bounded raw measure collection regression
         run: python -m unittest discover -s tests -p 'test_xi_measure_crawl.py' -v
+      - name: XI source replay and Other semantics acceptance tests
+        run: python -m unittest discover -s tests -p 'test_xi_acceptance.py' -v
       - name: Existing region evidence contract regression
         run: python -m unittest discover -s tests -p 'test_region_measures.py' -v
