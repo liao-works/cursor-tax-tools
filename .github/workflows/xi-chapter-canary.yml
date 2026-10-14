@@ -17,6 +17,8 @@ on:
       - 'tests/test_xi_coverage_receipt.py'
       - 'src/target_duty/xi_checkpoint_chain.py'
       - 'tests/test_xi_checkpoint_chain.py'
+      - 'src/target_duty/xi_archive.py'
+      - 'tests/test_xi_archive.py'
       - 'src/target_duty/xi_origin_compare.py'
       - 'tests/test_xi_origin_compare.py'
       - '.github/workflows/xi-chapter-canary.yml'
@@ -150,6 +152,29 @@ jobs:
           assert p["chain_authenticated_or_signed"] is False
           print("Partial canary checkpoint linkage verified; full NI source NOT certified")
           PY
+      - name: Package, restore and replay partial XI source archive (UNSIGNED canary)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.xi_archive pack \
+            --catalogue xi-catalogue-canary.db \
+            --checkpoint xi-merged-canary.db \
+            --merge-report xi-merged-canary.json \
+            --chain xi-canary-continuity.json \
+            --public-canary --output xi-public-source-archive.zip
+          python -m src.target_duty.xi_archive restore \
+            --archive xi-public-source-archive.zip \
+            --destination xi-archive-restored \
+            --public-canary
+          python - <<'PY'
+          import json,sqlite3
+          from pathlib import Path
+          assert Path("xi-archive-restored/chain.json").is_file()
+          with sqlite3.connect("xi-archive-restored/checkpoint.db") as db:
+              assert db.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
+              assert db.execute("SELECT COUNT(*) FROM requests").fetchone()[0]==5
+          print("Public XI archive restored; UNSIGNED and not eligible for managed production")
+          PY
       - name: Preserve only limited XI public probe evidence
         uses: actions/upload-artifact@v4
         if: always()
@@ -168,6 +193,7 @@ jobs:
             xi-merged-canary.db
             xi-merged-canary.json
             xi-canary-continuity.json
+            xi-public-source-archive.zip
             xi-origin-comparison-canary.json
             xi-origin-comparison-canary.db
           if-no-files-found: warn
