@@ -194,6 +194,11 @@ def main() -> None:
     parser.add_argument("--min-records", type=int, default=10000)
     parser.add_argument("--min-verified-ratio", type=float, default=0.85)
     args = parser.parse_args()
+    if not args.csv:
+        # Online latest aliases can expose a new version before its tables
+        # are published. Fail closed unless official version + schema is ready.
+        from .dbt_version_discovery import resolve_requested_version
+        args.version=resolve_requested_version(args.version)
     url = build_url(args.version)
     if args.csv:
         meta = build(args.csv, args.output, version=args.version,
