@@ -83,7 +83,15 @@ class PublicGapLedgerTests(unittest.TestCase):
         self.assertEqual(complete["replayed_successful_responses"],97)
         self.assertEqual(complete["missing_responses"],0)
         self.assertEqual(complete["source_errors"],0)
+        self.assertEqual(complete["raw_response_with_zero_import_measures"],97)
+        self.assertEqual(complete["raw_response_without_103_105_candidates"],97)
+        self.assertEqual(complete["raw_response_with_103_105_candidates"],0)
         self.assertFalse(complete["production_eligible"])
+        rows=list(csv.DictReader(open(self.root/"all-codes.csv")))
+        self.assertTrue(all(row["review_state"] ==
+                            "no_third_country_candidate_needs_source_review"
+                            for row in rows))
+        self.assertTrue(all(row["raw_import_measure_count"]=="0" for row in rows))
         self.assertEqual(len(complete["original_shards"]),4)
 
     def test_http_failure_remains_explicit_and_recoverable(self):
