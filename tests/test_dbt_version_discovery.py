@@ -5,7 +5,7 @@ import unittest
 import urllib.error
 
 from src.target_duty.dbt_version_discovery import (
-    BASE,discover,inspect_csvw,parse_tables,parse_versions,version_key
+    BASE,discover,inspect_csvw,parse_tables,parse_versions,version_key,resolve_requested_version
 )
 from src.target_duty.catalog import FIELDS as COMMODITY_FIELDS
 from src.target_duty.gap_measures import REQUIRED as MEASURE_FIELDS
@@ -100,6 +100,24 @@ class DBTDiscoveryTests(unittest.TestCase):
         self.assertEqual(x["official_tables_with_metadata"],2)
         self.assertEqual(x["required_columns_missing"]
                          ["measures-on-declarable-commodities"],[])
+
+    def test_cli_uses_immutable_explicit_pin_or_strict_latest_resolution(self):
+        self.assertEqual(resolve_requested_version("v4.0.1626"),
+                         "v4.0.1626")
+        self.assertEqual(resolve_requested_version("latest",opener=inventory()),
+                         "v4.0.1628")
+        with self.assertRaisesRegex(ValueError,"registered_without_tables"):
+            def unavailable(req,timeout):
+                if req.full_url.endswith("/versions?format=json"):
+                    return FakeHTTP(req.full_url,{"versions":[
+                        {"id":"v4.0.1626"},{"id":"v4.0.1627"}]})
+                if req.full_url.endswith("/versions/v4.0.1627/tables?format=json"):
+                    return FakeHTTP(req.full_url,{"tables":[]})
+                return FakeHTTP(req.full_url,{"tables":[
+                    {"id":"commodities-report"}]})
+            resolve_requested_version("latest",opener=unavailable)
+        with self.assertRaises(ValueError):
+            resolve_requested_version("latest-v4")
 
     def test_version_inventory_failure_is_explicit(self):
         calls=[]
