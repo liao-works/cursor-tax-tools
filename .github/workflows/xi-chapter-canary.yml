@@ -1,0 +1,40 @@
+name: XI official chapter source canary (untrusted public shadow)
+
+on:
+  pull_request:
+    paths:
+      - 'src/target_duty/xi_catalogue.py'
+      - 'tests/test_xi_catalogue.py'
+      - '.github/workflows/xi-chapter-canary.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  xi-source-schema-canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate XI nomenclature schema locally
+        run: python -m unittest discover -s tests -p 'test_xi_catalogue.py' -v
+      - name: Probe ONLY two official XI chapter endpoints (not production coverage)
+        run: |
+          python -m src.target_duty.xi_catalogue \
+            --as-of 2026-10-14 \
+            --public-canary --max-chapters 2 \
+            --output xi-catalogue-canary.db
+      - name: Preserve only limited XI public probe evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xi-public-chapter-canary-${{ github.run_id }}
+          path: |
+            xi-catalogue-canary.db
+            xi-catalogue-canary.json
+          if-no-files-found: warn
+          retention-days: 7
