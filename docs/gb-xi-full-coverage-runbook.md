@@ -108,3 +108,44 @@ Sources:
 The HMRC annual/monthly/daily bulk feed excludes some EU measures and
 has **not** been proven equivalent to NI country-specific tariff filters.
 Do not silently switch data sources.
+
+## Real full-source launch attempt — 2026-10-14
+
+A bounded four-worker managed acquisition workflow is implemented in
+`.github/workflows/xi-full-managed-one-shot.yml`, with a separately
+triggered source-only launch marker `ops/xi-full-managed-launch.txt`.
+The 97-chapter offline multi-shard/merge/strict-acceptance regression
+passed in [foundation CI 38563303577](https://github.com/liao-works/cursor-tax-tools/actions/runs/38563303577).
+
+**Actual attempted run:**
+[GitHub Actions 38563372005](https://github.com/liao-works/cursor-tax-tools/actions/runs/38563372005).
+
+**Actual result: BLOCKED BEFORE FIRST API REQUEST.** The `catalogue`
+job failed the authorization preflight with the exact diagnostic
+"Missing HMRC_CLIENT_ID / HMRC_CLIENT_SECRET. No API requests made".
+Both parallel collection and final replay acceptance were skipped.
+The real 16,728-code XI raw-measure gap is NOT closed.
+
+To resume legitimately, the repository operator must obtain official
+Trade Tariff managed API OAuth client credentials, then configure
+**GitHub repository Actions secrets** under
+Settings → Secrets and variables → Actions:
+
+- `HMRC_CLIENT_ID` — the OAuth client ID (not a data/API sample token)
+- `HMRC_CLIENT_SECRET` — the OAuth client secret
+
+**Never send these values in a chat, issue, commit, workflow input or log.**
+The workflow reads them only as GitHub Actions secrets. On the Draft
+feature branch, re-trigger by updating
+`ops/xi-full-managed-launch.txt` after the secrets are present. If
+manually dispatching the workflow, GitHub normally requires it to have
+been registered on the default branch; keep production changes out of
+the default branch unless explicitly approved.
+
+At four workers with per-worker `--interval=2.0`, expected request
+pressure is nominally at most ~2 commodity requests per second across
+the four runners. Actual upstream limits/errors are still binding:
+all source responses must be checkpointed, replayed and independently
+accepted. Raw data collection may fail on quota, source drift or
+response parsing; source completeness cannot be assumed from job start.
+No workflow may mark NI Other payable duty or publish `latest-data`.
