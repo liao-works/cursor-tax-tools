@@ -182,16 +182,21 @@ def main() -> None:
                  batch_size=args.batch_size, max_batches=args.max_batches,
                  delay=args.min_interval, drift_delay=args.drift_interval,
                  report_path=str(root/"xi-full-capture-progress.json"))
+    joined_complete = True
     if args.gb_review_db:
         from .gb_xi_coverage_matrix import matrix
-        matrix(args.legacy_db, args.gb_review_db, str(cat), str(checkpoint),
-               output_csv=str(root/"gb-xi-legacy-source-matrix.csv"),
-               output_report=str(root/"gb-xi-legacy-source-matrix.json"))
+        coverage = matrix(
+            args.legacy_db, args.gb_review_db, str(cat), str(checkpoint),
+            output_csv=str(root/"gb-xi-legacy-source-matrix.csv"),
+            output_report=str(root/"gb-xi-legacy-source-matrix.json"))
+        joined_complete = coverage["both_regional_sources_complete"]
     print(json.dumps({key: result[key] for key in
                       ("status", "verified", "expected", "missing", "source_errors",
                        "production_eligible")}, indent=2))
     if not result.get("source_coverage_verified"):
         raise SystemExit("XI managed full capture incomplete; durable checkpoint retained")
+    if not joined_complete:
+        raise SystemExit("GB/XI source dates or completeness differ; matrix retained")
 
 
 if __name__ == "__main__":
