@@ -147,7 +147,11 @@ def main() -> None:
     parser.add_argument("--max-batches", type=int, default=50)
     parser.add_argument("--min-interval", type=float, default=2.0)
     parser.add_argument("--drift-interval", type=float, default=2.0)
+    parser.add_argument("--gb-review-db", help="Optional SHA-validated GB compact shadow database")
+    parser.add_argument("--legacy-db", help="Optional read-only installed desktop reference DB")
     args = parser.parse_args()
+    if bool(args.gb_review_db) != bool(args.legacy_db):
+        parser.error("GB compact review and legacy reference must be supplied together")
     if not os.getenv("HMRC_CLIENT_ID") or not os.getenv("HMRC_CLIENT_SECRET"):
         parser.error("Authorized HMRC_CLIENT_ID and HMRC_CLIENT_SECRET required")
     root = Path(args.work_dir).resolve()
@@ -178,6 +182,11 @@ def main() -> None:
                  batch_size=args.batch_size, max_batches=args.max_batches,
                  delay=args.min_interval, drift_delay=args.drift_interval,
                  report_path=str(root/"xi-full-capture-progress.json"))
+    if args.gb_review_db:
+        from .gb_xi_coverage_matrix import matrix
+        matrix(args.legacy_db, args.gb_review_db, str(cat), str(checkpoint),
+               output_csv=str(root/"gb-xi-legacy-source-matrix.csv"),
+               output_report=str(root/"gb-xi-legacy-source-matrix.json"))
     print(json.dumps({key: result[key] for key in
                       ("status", "verified", "expected", "missing", "source_errors",
                        "production_eligible")}, indent=2))
