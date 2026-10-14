@@ -8,6 +8,8 @@ on:
       - 'src/target_duty/gb_compact_review.py'
       - 'tests/test_gb_compact_review.py'
       - 'src/target_duty/gb_review_diff.py'
+      - 'src/target_duty/gb_source_ledger.py'
+      - 'tests/test_gb_source_ledger.py'
       - 'tests/test_gb_review_diff.py'
       - 'src/target_duty/dbt_source_health.py'
       - 'tests/test_dbt_source_health.py'
@@ -37,6 +39,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_dbt_source_health.py' -v
       - name: Offline full GB-to-GB source version diff safety tests
         run: python -m unittest discover -s tests -p 'test_gb_review_diff.py' -v
+      - name: Source catalogue usability ledger preserves unresolved rate codes
+        run: python -m unittest discover -s tests -p 'test_gb_source_ledger.py' -v
       - name: Download independently pinned official catalogue v4.0.1626
         run: |
           set -euo pipefail
