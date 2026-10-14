@@ -56,7 +56,27 @@ def active(attrs: dict, as_of: date) -> bool:
     return first <= as_of and (last is None or as_of <= last)
 
 
+def require_unpaginated(payload: dict, *, scope: str) -> None:
+    """Reject any JSON:API continuation that the current crawler would omit."""
+    if not isinstance(payload,dict):
+        raise ValueError(f"XI {scope} response must be a JSON object")
+    links=payload.get("links")
+    if links is not None:
+        if not isinstance(links,dict):
+            raise ValueError(f"XI {scope} links must be a JSON object")
+        if links.get("next"):
+            raise ValueError(f"XI {scope} pagination next link: incomplete source page")
+    meta=payload.get("meta")
+    if isinstance(meta,dict):
+        pagination=meta.get("pagination")
+        if isinstance(pagination,dict):
+            next_page=pagination.get("next")
+            if next_page not in (None,False,0,""):
+                raise ValueError(f"XI {scope} metadata indicates more pages")
+
+
 def chapters(payload: dict) -> list[str]:
+    require_unpaginated(payload,scope="chapter listing")
     collection = payload.get("data")
     if not isinstance(collection, list) or not collection:
         raise ValueError("HMRC XI chapters list missing or empty")
@@ -83,6 +103,7 @@ def chapters(payload: dict) -> list[str]:
 
 
 def records(chapter: str, payload: dict, as_of: date) -> list[dict]:
+    require_unpaginated(payload,scope=f"chapter {chapter}")
     items = payload.get("data")
     if not isinstance(items, list):
         raise ValueError("XI goods nomenclature chapter result must be an array")
