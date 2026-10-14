@@ -62,10 +62,20 @@ def chapters(payload: dict) -> list[str]:
         raise ValueError("HMRC XI chapters list missing or empty")
     values = []
     for node in collection:
-        key = str(node.get("id") or "")
-        if not re.fullmatch(r"\d{1,2}", key):
-            raise ValueError(f"Unexpected XI chapter id: {key!r}, node keys={list(node)}")
-        key = key.zfill(2)
+        internal_id = str(node.get("id") or "")
+        attrs = node.get("attributes") or {}
+        goods_code = attrs.get("goods_nomenclature_item_id")
+        # The actual HMRC chapter resource ID is a goods-nomenclature SID
+        # (e.g. 27623), not the 2-digit chapter display code.
+        if goods_code is not None:
+            if not isinstance(goods_code, str) or not CODE.fullmatch(goods_code):
+                raise ValueError("Malformed XI chapter goods nomenclature code")
+            key = goods_code[:2]
+        elif re.fullmatch(r"\d{1,2}", internal_id):
+            # Fixtures and deliberately reduced canary chapter selections.
+            key = internal_id.zfill(2)
+        else:
+            raise ValueError(f"Unexpected XI chapter resource without code: {internal_id!r}")
         if key == "00" or key in values:
             raise ValueError("Invalid or duplicate XI chapter")
         values.append(key)
