@@ -20,7 +20,7 @@ class GBSourceLedgerTests(unittest.TestCase):
         make_snapshot(self.src,"v4.0.1627",{
             "0101210000":(ACTIVE,[row(rate="8% + 5 GBP / 100 kg",
                                      condition="certificate")]),
-            "0207412010":(ACTIVE,[row(rate="0%",sid="22")]),
+            "0207412010":(ACTIVE,[row(rate="0%",sid="22",condition="")]),
             "9930240000":(MISSING,[]),
             "9930270000":(CONTEXT,[row(rate="0%",geo="1080",sid="24")]),
         })
