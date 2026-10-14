@@ -245,6 +245,27 @@ def discover(*, previous_pin: str | None = None,
     return result
 
 
+def resolve_requested_version(requested: str, *, opener: Callable | None = None) -> str:
+    """Return an immutable DBT pin or fail closed for an unavailable latest.
+
+    Called by CLI online downloads. Existing explicitly pinned, reproducible
+    source runs do not need to contact the current metadata endpoint.
+    """
+    if requested!="latest":
+        version_key(requested)
+        return requested
+    result=discover(opener=opener)
+    if result["state"]!="ready_for_full_data_replay":
+        raise ValueError(
+            "Official DBT newest version cannot be ingested: "
+            +str(result["state"])+", version="
+            +str(result["newest_official_version"])+", error="
+            +str(result.get("error"))
+            +". Do NOT fall back to an older cached tariff as current."
+        )
+    return result["newest_official_version"]
+
+
 def main() -> None:
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--previous-pin",default="v4.0.1626")
