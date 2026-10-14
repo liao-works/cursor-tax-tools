@@ -5,6 +5,8 @@ on:
     paths:
       - 'src/target_duty/gb_full_measures.py'
       - 'tests/test_gb_full_measures.py'
+      - 'src/target_duty/gb_compact_review.py'
+      - 'tests/test_gb_compact_review.py'
       - '.github/workflows/full-gb-official-validation.yml'
   workflow_dispatch:
 
@@ -22,6 +24,8 @@ jobs:
           python-version: '3.11'
       - name: Offline full-GB contract tests
         run: python -m unittest discover -s tests -p 'test_gb_full_measures.py' -v
+      - name: Offline compact GB targeted candidate contract tests
+        run: python -m unittest discover -s tests -p 'test_gb_compact_review.py' -v
       - name: Download independent catalogue and pin immutable source version
         run: |
           set -euo pipefail
@@ -67,7 +71,32 @@ jobs:
           python -m src.target_duty.region_measures query \
             --database gb-full-measures-shadow.db \
             --region GB --code 0207412010 > gb-full-sample.json
-      - name: Archive only immutable source fingerprints and coverage, not huge data
+      - name: Derive review-only compact GB 103/1011 target evidence and compare manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.gb_compact_review \
+            --full-db gb-full-measures-shadow.db \
+            --catalogue gb-commodity-catalogue.db \
+            --output gb-compact-103-review.db \
+            --max-mb 256
+          python - <<'PY'
+          import json,sqlite3
+          full=json.load(open("gb-full-measures-shadow.json"))
+          compact=json.load(open("gb-compact-103-review.json"))
+          assert compact["production_eligible"] is False
+          assert compact["rate_applicability_verified"] is False
+          assert compact["ni_other_verified"] is False
+          assert compact["official_active_leaf_codes"]==full["official_active_leaves"]
+          assert compact["active_target_codes"]==full["active_103_1011_codes"]
+          assert compact["statuses"]["no_expanded_measure_rows_unverified"]==full["active_leaves_without_any_export_rows"]
+          with sqlite3.connect("gb-compact-103-review.db") as db:
+              assert db.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
+              assert db.execute("SELECT COUNT(*) FROM commodities").fetchone()[0]==full["official_active_leaves"]
+              assert db.execute("SELECT COUNT(*) FROM evidence WHERE role='non_gb_103_1080_context' AND geography!='1080'").fetchone()[0]==0
+          print("GB official source parity, compact evidence and scope verified")
+          PY
+      - name: Archive targeted review evidence and immutable source proofs
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -79,5 +108,7 @@ jobs:
             gb-full-download.json
             gb-full-measures-shadow.json
             gb-full-sample.json
+            gb-compact-103-review.json
+            gb-compact-103-review.db
           if-no-files-found: warn
           retention-days: 14
