@@ -32,8 +32,10 @@ Commodity 0101210000:
 - Unfiltered XI: 42 import measures.
 - US-filtered: 6 import measures, 1 candidate type 103, geography 1011.
 - CN-filtered: 6 import measures, 1 candidate type 103, geography 1011.
-- In this example the resolved measure string is empty, and an official
-  condition relationship exists. It is NOT a proved zero rate.
+- In this example the measure's directly resolved string is empty, BUT its
+  linked official `duty_expression.base` is `0.00 %`, and it has multiple
+  condition relationships. The linked base is correctly preserved as
+  official evidence but is NOT automatically a payable 0% duty.
 - This pair is a **canary**, not proof that US/CN or "Other" always match.
   Other chapters, 105 measures, Meursing, additional codes, exclusions and
   mixed/conditional expressions require representative UI reconciliation.
