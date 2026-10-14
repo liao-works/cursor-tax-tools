@@ -22,6 +22,24 @@ jobs:
           python-version: '3.11'
       - name: Unit-test official semver and fail-closed newest-version discovery
         run: python -m unittest discover -s tests -p 'test_dbt_version_discovery.py' -v
+      - name: Validate CSVW schema parser against separately verified official pinned version
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from src.target_duty.dbt_version_discovery import BASE,_get,inspect_csvw
+          doc=_get(BASE+"/versions/v4.0.1626/metadata?format=csvw")
+          review=inspect_csvw(doc)
+          review["version"]="v4.0.1626"
+          review["production_eligible"]=False
+          Path("dbt-pinned-csvw-schema.json").write_text(
+              json.dumps(review,indent=2)+"\n")
+          print(json.dumps(review,indent=2))
+          if not review["source_column_schema_compatible"]:
+              raise SystemExit("Previous pinned DBT CSVW contract has changed")
+          PY
       - name: Query official DBT versions and newest version table inventory
         shell: bash
         run: |
@@ -45,7 +63,9 @@ jobs:
         if: always()
         with:
           name: dbt-version-preflight-${{ github.run_id }}
-          path: dbt-version-discovery.json
+          path: |
+            dbt-version-discovery.json
+            dbt-pinned-csvw-schema.json
           if-no-files-found: warn
           retention-days: 30
       - name: Explicit official metadata / schema acceptance gate (fail closed)
