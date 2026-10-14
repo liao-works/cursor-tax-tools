@@ -101,7 +101,7 @@ def _snapshot(path: str) -> dict:
                     or (role == "gb_103_1011_candidate" and geo != "1011")
                     or (role == "non_gb_103_1080_context" and geo != "1080")):
                 raise ValueError("GB candidate measure geography/type integrity failure")
-            if data["effective_status"] not in ("active","future","expired"):
+            if data["effective_status"] not in ("active","inactive","unknown"):
                 raise ValueError("Invalid measure effective state")
             semantic = json.dumps([role,geo,*[data[k] for k in IDENTITY]],
                                   ensure_ascii=False,separators=(",",":"))
