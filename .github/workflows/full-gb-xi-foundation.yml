@@ -23,6 +23,8 @@ on:
       - 'tests/test_xi_run_plan.py'
       - 'src/target_duty/xi_coverage_receipt.py'
       - 'tests/test_xi_coverage_receipt.py'
+      - 'src/target_duty/xi_checkpoint_chain.py'
+      - 'tests/test_xi_checkpoint_chain.py'
       - 'src/target_duty/xi_origin_compare.py'
       - 'tests/test_xi_origin_compare.py'
       - 'src/target_duty/xi_merge.py'
@@ -71,5 +73,7 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_xi_coverage_receipt.py' -v
       - name: Replay verified XI cross-run source drift guard contract
         run: python -m unittest discover -s tests -p 'test_xi_drift_guard.py' -v
+      - name: XI prior-to-current source checkpoint continuity and tamper tests
+        run: python -m unittest discover -s tests -p 'test_xi_checkpoint_chain.py' -v
       - name: Existing region evidence contract regression
         run: python -m unittest discover -s tests -p 'test_region_measures.py' -v
