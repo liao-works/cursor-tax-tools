@@ -73,6 +73,8 @@ def evaluate(catalogue_db: str, measure_db: str, *, min_chapters: int = 90,
         if config.get("production_eligible") != "false" or config.get("other_semantics_verified") != "false":
             raise ValueError("XI source has illegal production or Other certification marker")
         chapter_total = catalog.execute("SELECT COUNT(*) FROM chapters").fetchone()[0]
+        listing_scope = metadata.get("listing_scope", "unknown")
+        listed_chapters = int(metadata.get("listed_chapters", "0"))
         unknown = catalog.execute("""SELECT COUNT(*) FROM nomenclature
                 WHERE active=1 AND declarable IS NULL""").fetchone()[0]
         codes = candidates(catalogue_db)
@@ -117,7 +119,11 @@ def evaluate(catalogue_db: str, measure_db: str, *, min_chapters: int = 90,
         complete = not missing and not source_failures and len(requested)==len(expected)
         # A full pass of ALL XI chapter records is not equivalent to a proven
         # atomic official snapshot or a verified country-specific tax rate.
-        catalogue_scope_complete = chapter_total >= min_chapters and unknown == 0
+        catalogue_scope_complete = (
+            chapter_total >= min_chapters and unknown == 0
+            and listing_scope == "managed_full"
+            and listed_chapters == chapter_total
+        )
         checked = complete and catalogue_scope_complete
         report = {
             "kind": "xi-independent-catalogue-raw-measure-acceptance-v1",
@@ -126,6 +132,8 @@ def evaluate(catalogue_db: str, measure_db: str, *, min_chapters: int = 90,
             "atomic_official_snapshot_verified": False,
             "date": as_of,
             "official_chapters_collected": chapter_total,
+            "listing_scope": listing_scope,
+            "official_listed_chapters": listed_chapters,
             "minimum_chapters": min_chapters,
             "unknown_active_declarability": unknown,
             "active_declarable_codes": len(expected),
