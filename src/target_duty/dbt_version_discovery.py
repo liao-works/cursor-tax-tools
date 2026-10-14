@@ -135,7 +135,14 @@ def discover(*, previous_pin: str | None = None,
         )
         tables_url=BASE+"/versions/"+newest+"/tables?format=json"
         result["table_inventory_url"]=tables_url
-        tables=parse_tables(_get(tables_url,opener=opener))
+        table_doc=_get(tables_url,opener=opener)
+        raw_tables=table_doc.get("tables")
+        result["table_inventory_diagnostic"]={
+            "keys":sorted(table_doc),
+            "tables_type":type(raw_tables).__name__,
+            "tables_length":len(raw_tables) if isinstance(raw_tables,list) else None,
+        }
+        tables=parse_tables(table_doc)
         result["newest_version_tables"]=tables
         missing=sorted(REQUIRED_TABLES-set(tables))
         result["missing_required_tables"]=missing
@@ -145,6 +152,17 @@ def discover(*, previous_pin: str | None = None,
         result["error"]=f"{type(err).__name__}: {str(err)[:400]}"
         if result["version_discovered"]:
             result["state"]="table_inventory_unavailable"
+            if previous_pin and previous_pin!=result.get("newest_official_version"):
+                # Diagnose whether only the new release is incomplete, without
+                # substituting an older version for the newest one.
+                try:
+                    older=_get(BASE+"/versions/"+previous_pin+"/tables?format=json",
+                               opener=opener)
+                    result["older_pinned_tables_for_diagnostics"]=parse_tables(older)
+                except (ValueError,urllib.error.HTTPError,urllib.error.URLError,
+                        TimeoutError,OSError) as previous_err:
+                    result["older_table_diagnostic_error"]=(
+                        f"{type(previous_err).__name__}: {str(previous_err)[:180]}")
     # A metadata-only check never proves columns, row counts or publication fitness.
     return result
 
