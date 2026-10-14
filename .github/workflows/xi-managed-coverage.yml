@@ -83,6 +83,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_xi_merge.py' -v
           python -m unittest discover -s tests -p 'test_xi_acceptance.py' -v
           python -m unittest discover -s tests -p 'test_xi_run_plan.py' -v
+          python -m unittest discover -s tests -p 'test_xi_drift_guard.py' -v
           python -m unittest discover -s tests -p 'test_xi_coverage_receipt.py' -v
       - name: Retrieve original frozen managed XI catalogue from an earlier run
         if: ${{ inputs.catalogue_run_id != '' }}
@@ -156,6 +157,18 @@ jobs:
                 "missing:",plan["missing_requests"],
                 "next absolute start:",segment["start_index"])
           PY
+      - name: Refetch old XI first-middle-last anchors before extending frozen checkpoint
+        if: ${{ inputs.prior_checkpoint_run_id != '' && env.SOURCE_COLLECTION_COMPLETE != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          DAY="$(python -c 'import json;print(json.load(open("xi-frozen-manifest.json"))["as_of"])')"
+          python -m src.target_duty.xi_drift_guard \
+            --catalogue xi-full-catalogue-shadow.db \
+            --manifest xi-frozen-manifest.json \
+            --checkpoint previous/xi-merged-shadow.db \
+            --as-of "$DAY" --count 3 --min-interval 2 \
+            --require-stable --output xi-source-drift-review.json
       - name: Download fixed bounded XI shard with managed OAuth (source errors recorded)
         if: env.SOURCE_COLLECTION_COMPLETE != 'true'
         id: crawl
@@ -257,6 +270,7 @@ jobs:
             xi-shard-plan.json
             xi-managed-coverage-gate.json
             xi-chapter-coverage-receipt.json
+            xi-source-drift-review.json
             xi-merged-shadow.db
             xi-merged-shadow.json
           if-no-files-found: warn
