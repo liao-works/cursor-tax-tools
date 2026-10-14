@@ -108,3 +108,32 @@ within the partial sample. This is **not** a managed full 97-chapter crawl.
 
 See `docs/xi-frozen-managed-runbook.md` and
 `docs/xi-other-acceptance.md` for prerequisites and consumer limits.
+
+## Failed-first recovery and chapter gap visibility (2026-10-14)
+
+The read-only managed batch planner now emits `incomplete_chapters` and
+`chapter_gaps` for every chapter with missing or failed requests, including
+counts, first pending index, and up to five previously failed codes. These are
+planning diagnostics, not certified NI rates.
+
+Use `--retry-failed-first` to select the earliest failed request before
+never-attempted ones. The default still walks the earliest pending code.
+An explicit `--start-index` always takes precedence. The selected batch
+remains a bounded contiguous index window; already verified successes are
+skipped by the collector and never re-fetched just to fill the window.
+
+Example (managed source with frozen catalogue):
+
+    python -m src.target_duty.xi_run_plan \\
+      --catalogue xi-full-catalogue-shadow.db \\
+      --manifest xi-frozen-manifest.json \\
+      --checkpoint xi-merged-shadow.db \\
+      --batch-size 500 --retry-failed-first \\
+      --output xi-retry-plan.json
+
+This only generates a plan. Collection still needs authorized HMRC credentials,
+unchanged source catalogue/checkpoints, independent original response replay,
+and final all-chapter acceptance. A failed response stays pending until a newly
+verified official response replaces it through the existing checkpoint merge.
+Neither this planning option nor full raw-source coverage authorizes automatic
+NI Other interpretation, desktop database replacement or publishing.
