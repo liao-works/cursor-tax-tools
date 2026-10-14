@@ -153,8 +153,8 @@ def main() -> None:
                        "xi_official_active_declarable_codes",
                        "xi_source_response_complete","production_eligible")},
                      ensure_ascii=False,indent=2))
-    if a.require_complete and not report["xi_source_response_complete"]:
-        raise SystemExit("XI source remains incomplete; matrix saved for repair")
+    if a.require_complete and not report["both_regional_sources_complete"]:
+        raise SystemExit("GB/XI source incomplete or pinned dates differ; matrix saved for repair")
 
 
 if __name__ == "__main__":
