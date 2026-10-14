@@ -22,6 +22,12 @@ on:
         default: '40'
         type: choice
         options: ['10', '40', '100', '500']
+      archive_mode:
+        description: 'Optional provenance archive: none (data first), signed, or offsite'
+        required: true
+        default: 'none'
+        type: choice
+        options: ['none', 'signed', 'offsite']
 
 permissions:
   contents: read
@@ -283,7 +289,8 @@ jobs:
                 "/",p["total_official_codes"],
                 "parent SHA:",p["parent_chain_sha256"])
           PY
-      - name: Sign and verify managed XI source archive (review only)
+      - name: Sign and verify managed XI source archive (optional review only)
+        if: ${{ inputs.archive_mode == 'signed' || inputs.archive_mode == 'offsite' }}
         shell: bash
         env:
           XI_SIGNING_PEM: ${{ secrets.XI_ARCHIVE_ED25519_PRIVATE_KEY_PEM }}
@@ -330,12 +337,14 @@ jobs:
           print("Managed source archive operator-signed and replayed; no NI Other certification")
           PY
       - name: Obtain temporary review-only AWS credentials through GitHub OIDC
+        if: ${{ inputs.archive_mode == 'offsite' }}
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.XI_S3_ARCHIVE_ROLE_ARN }}
           aws-region: ${{ vars.XI_S3_REGION }}
           role-session-name: xi-review-${{ github.run_id }}
       - name: Upload compliance-locked XI source archive and independently restore pinned S3 version
+        if: ${{ inputs.archive_mode == 'offsite' }}
         shell: bash
         env:
           XI_BUCKET: ${{ vars.XI_S3_ARCHIVE_BUCKET }}
