@@ -149,6 +149,24 @@ jobs:
         with:
           pattern: xi-public-full-shard-*-${{ github.run_id }}
           path: shards
+      - name: Independently replay each available raw source shard and export ALL per-code gaps
+        if: always()
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import glob
+          from src.target_duty.xi_public_gap_ledger import gaps
+          parts=sorted(glob.glob("shards/xi-public-full-shard-*-*/xi-public-shard-*.db"))
+          result=gaps(
+            "xi-public-full-catalogue.db", "xi-public-frozen-manifest.json",
+            parts, output_report="xi-public-all-code-gaps.json",
+            output_csv="xi-public-all-code-gaps.csv")
+          print("Actual PUBLIC source replay:",result["replayed_successful_responses"],
+                "/",result["expected_commodity_codes"],
+                "missing",result["missing_responses"],
+                "source errors",result["source_errors"],
+                "chapters incomplete",result["incomplete_chapters"])
+          PY
       - name: Replay, merge and check all four source partitions
         id: merge
         continue-on-error: true
@@ -179,6 +197,8 @@ jobs:
             xi-public-full-merged.db
             xi-public-full-merged.json
             xi-public-full-acceptance.json
+            xi-public-all-code-gaps.json
+            xi-public-all-code-gaps.csv
           if-no-files-found: warn
           retention-days: 30
       - name: Fail closed on source gaps
