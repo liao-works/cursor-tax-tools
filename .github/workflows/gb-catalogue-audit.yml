@@ -42,8 +42,14 @@ jobs:
           PY
       - name: Obtain checksum-verified existing production snapshot
         run: python -m src.target_duty.legacy --output legacy-tariffs.db
-      - name: Build separate 103/1011 comparison candidate (never promoted)
-        run: python -m src.target_duty.build --output focused-gb.db --legacy-db legacy-tariffs.db
+      - name: Build separate 103/1011 comparison from SAME official source version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(python -c 'import json; print(json.load(open("gb-commodity-catalogue.metadata.json"))["resolved_version"] or "")')"
+          [[ "$VERSION" =~ ^v[0-9]+(\.[0-9]+)*$ ]] || { echo "DBT alias did not resolve to a pinned version"; exit 1; }
+          echo "Reconciliation pinned to $VERSION"
+          python -m src.target_duty.build             --version "$VERSION"             --output focused-gb.db             --legacy-db legacy-tariffs.db
       - name: Compare catalogue, legacy and focused GB scopes
         run: |
           python -m src.target_duty.catalog compare \
