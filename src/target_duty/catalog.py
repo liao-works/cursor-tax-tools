@@ -13,8 +13,9 @@ import json
 import re
 import sqlite3
 import tempfile
-import urllib.parse
+import urllib.error
 import urllib.request
+import time
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -51,9 +52,10 @@ CREATE TABLE provenance (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 def source_url(version: str) -> str:
     if not re.fullmatch(r"(?:latest|v[0-9]+(?:\.[0-9]+)*)", version):
         raise ValueError("Unsafe DBT version")
-    query = [("format", "csv"), ("query-simple", "")]
-    query.extend(("_columns", name) for name in FIELDS)
-    return BASE.format(version=version) + "?" + urllib.parse.urlencode(query)
+    # The documented unfiltered export is the authoritative source for
+    # ALL commodity rows. Query-simple on an unfiltered catalogue currently
+    # returns HTTP 500 for some live DBT versions (2026-10-14).
+    return BASE.format(version=version) + "?format=csv"
 
 
 def optional(value: str | None) -> str | None:
@@ -77,19 +79,29 @@ def effective(start: date, end: date | None, as_of: date) -> bool:
 def download_catalog(version: str, destination: Path, *, max_bytes: int = 80_000_000) -> str:
     req = urllib.request.Request(source_url(version), headers={
         "Accept": "text/csv", "User-Agent": "liao-target-duty-catalog-shadow/1.0"})
-    total = 0
-    with urllib.request.urlopen(req, timeout=180) as response, destination.open("wb") as dst:
-        if response.status != 200:
-            raise RuntimeError(f"DBT catalogue returned HTTP {response.status}")
-        resolved_url = response.geturl()
-        while chunk := response.read(1024 * 1024):
-            total += len(chunk)
-            if total > max_bytes:
-                raise ValueError("DBT catalogue exceeds bounded download")
-            dst.write(chunk)
-    if not total:
-        raise ValueError("DBT catalogue response was empty")
-    return resolved_url
+    for attempt in range(3):
+        total = 0
+        try:
+            with urllib.request.urlopen(req, timeout=180) as response, destination.open("wb") as dst:
+                if response.status != 200:
+                    raise RuntimeError(f"DBT catalogue returned HTTP {response.status}")
+                resolved_url = response.geturl()
+                while chunk := response.read(1024 * 1024):
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise ValueError("DBT catalogue exceeds bounded download")
+                    dst.write(chunk)
+            if not total:
+                raise ValueError("DBT catalogue response was empty")
+            return resolved_url
+        except (urllib.error.HTTPError, urllib.error.URLError) as error:
+            destination.unlink(missing_ok=True)
+            if isinstance(error, urllib.error.HTTPError) and error.code not in (429, 500, 502, 503, 504):
+                raise
+            if attempt == 2:
+                raise
+            time.sleep(3 * (attempt + 1))
+    raise RuntimeError("Unexpected unreachable DBT retry state")
 
 
 def build(csv_path: str, output: str, *, as_of: date, source_version: str,
