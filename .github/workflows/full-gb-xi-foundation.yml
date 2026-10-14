@@ -22,6 +22,9 @@ on:
       - 'src/target_duty/xi_run_plan.py'
       - 'src/target_duty/xi_full_capture.py'
       - 'tests/test_xi_full_capture.py'
+      - 'src/target_duty/xi_parallel_capture.py'
+      - 'tests/test_xi_parallel_capture.py'
+      - '.github/workflows/xi-full-managed-one-shot.yml'
       - 'src/target_duty/gb_xi_coverage_matrix.py'
       - 'tests/test_gb_xi_coverage_matrix.py'
       - 'tests/test_xi_run_plan.py'
@@ -85,6 +88,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_xi_frozen_catalogue.py' -v
       - name: Frozen XI full-source completion, retries, tamper and next-shard tests
         run: python -m unittest discover -s tests -p 'test_xi_run_plan.py' -v
+      - name: Four-way XI full managed source partition and strict offline merge tests
+        run: python -m unittest discover -s tests -p 'test_xi_parallel_capture.py' -v
       - name: Durable full managed XI source capture and recovery tests
         run: python -m unittest discover -s tests -p 'test_xi_full_capture.py' -v
       - name: GB and XI independently replayed source-to-desktop coverage matrix
