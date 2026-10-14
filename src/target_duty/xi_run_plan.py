@@ -29,7 +29,8 @@ def _read(path: str) -> sqlite3.Connection:
 
 def build_plan(catalogue: str, *, manifest: str | None = None,
                checkpoint: str | None = None, batch_size: int = 100,
-               start_index: int | None = None, canary: bool = False) -> dict:
+               start_index: int | None = None, canary: bool = False,
+               retry_failed_first: bool = False) -> dict:
     if not 1 <= batch_size <= 1000:
         raise ValueError("XI batch size must be between 1 and 1000")
     if canary:
@@ -82,7 +83,9 @@ def build_plan(catalogue: str, *, manifest: str | None = None,
     missing = [i for i in pending if codes[i] not in statuses]
     if start_index is not None and not 0 <= start_index < len(codes):
         raise ValueError("Requested XI shard index outside official catalogue")
-    first = start_index if start_index is not None else (pending[0] if pending else None)
+    first = (start_index if start_index is not None else
+             (failed[0] if retry_failed_first and failed else
+              (pending[0] if pending else None)))
     if first is None:
         next_shard = None
     else:
@@ -100,6 +103,21 @@ def build_plan(catalogue: str, *, manifest: str | None = None,
         }
         if not shard_pending:
             raise ValueError("Selected XI shard contains no pending source requests")
+    pending_set, failed_set = set(pending), set(failed)
+    chapter_gaps = []
+    for chapter in sorted({code[:2] for code in codes}):
+        indices = [i for i, code in enumerate(codes) if code.startswith(chapter)]
+        pending_here = [i for i in indices if i in pending_set]
+        failed_here = [i for i in pending_here if i in failed_set]
+        if pending_here:
+            chapter_gaps.append({
+                "chapter": chapter,
+                "remaining": len(pending_here),
+                "failed": len(failed_here),
+                "missing": len(pending_here) - len(failed_here),
+                "next_index": pending_here[0],
+                "failed_samples": [codes[i] for i in failed_here[:5]],
+            })
     full = source_scope == "managed_full" and not pending
     return {
         "kind": "xi-next-managed-source-shard-plan-v1",
@@ -119,6 +137,9 @@ def build_plan(catalogue: str, *, manifest: str | None = None,
         "all_managed_source_responses_verified": full,
         "previous_checkpoint_replayed": bool(replay),
         "next_shard": next_shard,
+        "retry_failed_first": retry_failed_first,
+        "incomplete_chapters": len(chapter_gaps),
+        "chapter_gaps": chapter_gaps,
         "next_step": (
             "source_collection_complete_but_business_unverified" if full
             else "partial_canary_finished_not_full_ni" if not pending
@@ -135,13 +156,16 @@ def main() -> None:
     p.add_argument("--checkpoint", help="Prior merged XI checkpoint to replay-verify")
     p.add_argument("--batch-size", type=int, default=100)
     p.add_argument("--start-index", type=int, help="Optional explicit shard override")
+    p.add_argument("--retry-failed-first", action="store_true",
+                   help="Choose earliest failed source request before never-attempted codes")
     p.add_argument("--public-canary", action="store_true",
                    help="Only for small public/fixture partial catalogues; never production")
     p.add_argument("--output", default="xi-next-shard-plan.json")
     args = p.parse_args()
     result = build_plan(args.catalogue, manifest=args.manifest,
                         checkpoint=args.checkpoint,batch_size=args.batch_size,
-                        start_index=args.start_index,canary=args.public_canary)
+                        start_index=args.start_index,canary=args.public_canary,
+                        retry_failed_first=args.retry_failed_first)
     dest = Path(args.output)
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(result,ensure_ascii=False,indent=2)+"\n",
