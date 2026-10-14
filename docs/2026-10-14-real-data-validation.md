@@ -42,3 +42,43 @@ A self-contained independent audit script, its JSON evidence report, chapter
 counts and cross-region 14-code CSV were also generated as conversation
 attachments for the owner. The original GitHub Actions artifacts remain the
 authoritative bytes for these specific checks.
+
+## Follow-up: field-level staleness, commodity-code deltas and upcoming expiries (2026-10-14)
+
+Independent SQLite audit of original latest-data legacy reference and
+2026-10-14 DBT v4.0.1627 / XI public full catalogue artifacts:
+
+- Released legacy reference has **16,592** rows. Its `last_updated` field
+  records **14,539** rows in **2026-01** and **2,053** in **2026-10**;
+  maximum row update time **2026-10-01 11:07:16**. This is source update
+  staleness evidence, NOT proof an individual legal tariff expired.
+- Production reference missing values: **105 GB rate**, **456 NI rate**,
+  **16,592 other_rate** (entire column), and **4 descriptions**. The
+  legacy database lacks legal measure-effective-period fields, so expiry
+  cannot safely be inferred for each old duty expression.
+- Reconcile against ALL active GB official leaves, not just the target
+  103/1011 subset: **303** current GB leaf codes absent from legacy;
+  **153** legacy codes absent from current GB leaf catalogue. XI public
+  current active inventory has **289** codes absent from legacy, and
+  **153** legacy codes not found in XI active inventory. Some changes may
+  be split/successor codes; missing status is not automatically a scrape bug.
+- For all **16,919** stored GB active target/context evidence records in
+  the pinned compact DB, effective start/end was parsed using official
+  `#NA` as an open-ended marker: **0** records ended before 2026-10-14,
+  **0** have future effective starts and **0** malformed dates. This does
+  not verify legal validity of the legacy DB or omitted non-target measures.
+- **11 GB 103/1011 candidate measures end 2026-10-31**:
+  0702001007, 0702001099, 0702009100, 0702009907, 0702009999,
+  0805102210, 0805102290, 0805102410, 0805102490, 0805102810,
+  0805102890. Recheck on / after 2026-11-01, not indefinite carryover.
+- **1,918** GB candidate codes contain complex or ambiguous duty evidence
+  which is not a certified payable rate, in addition to **366** missing
+  direct GB 103/1011 candidates. Never assign `0%` by default.
+- New XI public full raw-measure capture [38567997207](https://github.com/liao-works/cursor-tax-tools/actions/runs/38567997207)
+  had 97/97 chapter catalogue completed; all four raw source worker jobs
+  were in progress and **no complete merged zero-gap acceptance artifact**
+  was present at the time of this follow-up audit. The prior 20-response
+  five-chapter sample must not be counted as a new complete source snapshot.
+
+**Decision remains BLOCKED:** all new raw source data are review only and
+must not replace production `tariffs.db` or `latest-data`.
