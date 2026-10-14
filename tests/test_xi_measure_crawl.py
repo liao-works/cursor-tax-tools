@@ -127,9 +127,10 @@ class XICollectorTests(unittest.TestCase):
                        fetcher=next_source)
         self.assertEqual(seen,["0101290000"])
         self.assertEqual(report["attempted_this_run"],1)
-        self.assertEqual(report["previous_checkpoint_successes_skipped"],1)
+        self.assertEqual(report["previous_checkpoint_successes_available"],1)
         self.assertEqual(report["successful_codes"],1)
-        self.assertEqual(report["remaining_codes"],1)
+        self.assertEqual(report["cumulative_known_successes"],2)
+        self.assertEqual(report["remaining_codes"],0)
         with self.assertRaisesRegex(ValueError,"provenance mismatch"):
             collect(str(self.cat),str(self.base/"wrong-day.db"),
                     as_of=date(2026,10,13),limit=2,
