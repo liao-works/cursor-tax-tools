@@ -114,6 +114,30 @@ class XICollectorTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"another code"):
             parse(blank,"0101210000")
 
+    def test_fixed_shard_skips_prior_successes_without_refetch(self):
+        prior=self.base/"prior.db"
+        collect(str(self.cat),str(prior),as_of=DAY,limit=1,start_index=0,
+                fetcher=lambda c,d:measure_payload(c))
+        seen=[]
+        def next_source(code,day):
+            seen.append(code)
+            return measure_payload(code)
+        report=collect(str(self.cat),str(self.out),as_of=DAY,
+                       start_index=0,limit=2,skip_successes_from=str(prior),
+                       fetcher=next_source)
+        self.assertEqual(seen,["0101290000"])
+        self.assertEqual(report["attempted_this_run"],1)
+        self.assertEqual(report["previous_checkpoint_successes_skipped"],1)
+        self.assertEqual(report["successful_codes"],1)
+        self.assertEqual(report["remaining_codes"],1)
+        with self.assertRaisesRegex(ValueError,"provenance mismatch"):
+            collect(str(self.cat),str(self.base/"wrong-day.db"),
+                    as_of=date(2026,10,13),limit=2,
+                    skip_successes_from=str(prior),fetcher=next_source)
+        with self.assertRaisesRegex(ValueError,"cannot be overwritten"):
+            collect(str(self.cat),str(prior),as_of=DAY,limit=1,
+                    skip_successes_from=str(prior),fetcher=next_source)
+
     def test_bounded_batch_and_independent_catalogue(self):
         self.assertEqual(len(candidates(str(self.cat))),2)
         with self.assertRaisesRegex(ValueError,"bounds"):
