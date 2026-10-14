@@ -91,6 +91,16 @@ def store(archive: str,*,bucket: str,owner: str,kms_key: str,
         raise ValueError("XI signed archive missing, symlinked, or over single-PUT limit")
     if not Path(public_key).is_file():
         raise ValueError("Trusted operator public key not present")
+    # Verify the operator signature, archive format and all original
+    # HMRC source rows BEFORE creating any expensive, non-deletable S3
+    # COMPLIANCE object. Bad/unsigned artifacts must never reach the vault.
+    with tempfile.TemporaryDirectory() as td:
+        local=restore(str(file),str(Path(td)/"pre-upload"),
+                      trusted_public_key=public_key)
+        if (not local["operator_signature_verified"]
+                or not local["source_replay_verified"]
+                or local["production_eligible"]):
+            raise ValueError("XI local archive signature/source verification failed")
     sha=digest_file(str(file))
     key=f"{prefix}/{sha[:2]}/{sha}.zip"
     preflight(bucket,owner,runner=runner)
