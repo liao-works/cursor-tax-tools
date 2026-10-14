@@ -53,11 +53,13 @@ def aws(args: list[str]) -> dict:
 
 
 def _validate(bucket: str,owner: str,kms_key: str,prefix: str,days: int) -> None:
-    if (not BUCKET.fullmatch(bucket) or ".." in bucket or
-        not OWNER.fullmatch(owner) or not KMS.fullmatch(kms_key) or
-        kms_key.split(":")[4]!=owner or not PREFIX.fullmatch(prefix)
-        or ".." in prefix or "//" in prefix or
-        not MIN_DAYS<=days<=3650):
+    if (not all(isinstance(x,str) for x in (bucket,owner,kms_key,prefix))
+        or not isinstance(days,int) or isinstance(days,bool)
+        or not BUCKET.fullmatch(bucket) or ".." in bucket
+        or not OWNER.fullmatch(owner) or not KMS.fullmatch(kms_key)
+        or kms_key.split(":")[4]!=owner or not PREFIX.fullmatch(prefix)
+        or ".." in prefix or "//" in prefix
+        or not MIN_DAYS<=days<=3650):
         raise ValueError("Unsafe S3 vault bucket, owner, KMS key, prefix or retention")
 
 
@@ -206,6 +208,7 @@ def recover(receipt_file: str,destination: str,*,trusted_public_key: str,
         raise ValueError("XI pinned version no longer meets S3 vault policy")
     if not isinstance(head.get("ObjectLockRetainUntilDate"),str):
         raise ValueError("XI pinned S3 lock retention missing")
+    target.parent.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(dir=target.parent) as td:
         downloaded=Path(td)/"source.zip"
         runner(["get-object","--bucket",bucket,"--key",key,
