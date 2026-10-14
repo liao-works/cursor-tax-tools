@@ -179,6 +179,14 @@ def collect(catalogue: str, output: str, *, as_of: date, limit: int=20,
                 raise ValueError("Previous XI checkpoint contains unlisted commodity codes")
         finally:
             prior.close()
+        # This collector is also a public CLI/API; callers can bypass the
+        # planning workflow. Never trust status='ok' alone when skipping.
+        # Lazy import avoids circular imports (acceptance -> collector.parse).
+        from .xi_acceptance import evaluate
+        verified=evaluate(catalogue,str(prior_path),min_chapters=1)
+        if (verified["requests_recorded"]<len(prior_ok)
+                or verified["active_declarable_codes"]!=len(codes)):
+            raise ValueError("Previous XI checkpoint replay disagrees with source catalogue")
     target=Path(output)
     target.parent.mkdir(parents=True,exist_ok=True)
     db=sqlite3.connect(target)
