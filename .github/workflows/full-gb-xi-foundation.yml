@@ -5,6 +5,8 @@ on:
     paths:
       - 'src/target_duty/gb_full_measures.py'
       - 'tests/test_gb_full_measures.py'
+      - 'src/target_duty/gb_compact_review.py'
+      - 'tests/test_gb_compact_review.py'
       - 'src/target_duty/xi_catalogue.py'
       - 'tests/test_xi_catalogue.py'
       - 'src/target_duty/xi_measure_crawl.py'
@@ -35,6 +37,8 @@ jobs:
           python-version: '3.11'
       - name: Full DBT expanded measures contract regression
         run: python -m unittest discover -s tests -p 'test_gb_full_measures.py' -v
+      - name: Compact GB target evidence contract regression
+        run: python -m unittest discover -s tests -p 'test_gb_compact_review.py' -v
       - name: Independent XI chapter inventory contract regression
         run: python -m unittest discover -s tests -p 'test_xi_catalogue.py' -v
       - name: XI bounded raw measure collection regression
