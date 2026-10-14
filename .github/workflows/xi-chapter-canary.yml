@@ -9,6 +9,8 @@ on:
       - 'tests/test_xi_measure_crawl.py'
       - 'src/target_duty/xi_acceptance.py'
       - 'tests/test_xi_acceptance.py'
+      - 'src/target_duty/xi_run_plan.py'
+      - 'tests/test_xi_run_plan.py'
       - 'src/target_duty/xi_origin_compare.py'
       - 'tests/test_xi_origin_compare.py'
       - '.github/workflows/xi-chapter-canary.yml'
@@ -53,6 +55,23 @@ jobs:
             --origins US,CN --public-canary \
             --min-interval 1.5 \
             --output xi-origin-comparison-canary.db
+      - name: Independently plan next XI public canary shard from verified checkpoint
+        run: |
+          python -m src.target_duty.xi_run_plan \
+            --catalogue xi-catalogue-canary.db \
+            --checkpoint xi-measures-canary.db \
+            --public-canary --batch-size 5 \
+            --output xi-next-shard-canary.json
+          python - <<'PY'
+          import json
+          a=json.load(open("xi-next-shard-canary.json"))
+          assert a["source_scope"]=="partial_or_fixture"
+          assert a["remaining_codes"]==511
+          assert a["next_shard"]["start_index"]==5
+          assert a["all_managed_source_responses_verified"] is False
+          assert a["ni_other_verified"] is False
+          print("XI limited canary next shard and missing codes verified")
+          PY
       - name: Preserve only limited XI public probe evidence
         uses: actions/upload-artifact@v4
         if: always()
@@ -64,6 +83,7 @@ jobs:
             xi-measures-canary.db
             xi-measures-canary.db.metadata.json
             xi-acceptance-canary.json
+            xi-next-shard-canary.json
             xi-origin-comparison-canary.json
             xi-origin-comparison-canary.db
           if-no-files-found: warn
