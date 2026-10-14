@@ -86,6 +86,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_xi_drift_guard.py' -v
           python -m unittest discover -s tests -p 'test_xi_coverage_receipt.py' -v
           python -m unittest discover -s tests -p 'test_xi_checkpoint_chain.py' -v
+          python -m unittest discover -s tests -p 'test_xi_archive.py' -v
       - name: Retrieve original frozen managed XI catalogue from an earlier run
         if: ${{ inputs.catalogue_run_id != '' }}
         uses: actions/download-artifact@v4
@@ -280,6 +281,52 @@ jobs:
                 "/",p["total_official_codes"],
                 "parent SHA:",p["parent_chain_sha256"])
           PY
+      - name: Sign and verify managed XI source archive (review only)
+        shell: bash
+        env:
+          XI_SIGNING_PEM: ${{ secrets.XI_ARCHIVE_ED25519_PRIVATE_KEY_PEM }}
+          XI_PUBLIC_PEM: ${{ vars.XI_ARCHIVE_ED25519_PUBLIC_KEY_PEM }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$XI_SIGNING_PEM" || -z "$XI_PUBLIC_PEM" ]]; then
+            echo "::error::XI operator signing secret and pinned trusted public key are required"
+            exit 1
+          fi
+          umask 077
+          KEY="$RUNNER_TEMP/xi-signing-$.pem"
+          PUBLIC="$RUNNER_TEMP/xi-public-$.pem"
+          trap 'rm -f "$KEY" "$PUBLIC"' EXIT
+          printf '%s' "$XI_SIGNING_PEM" > "$KEY"
+          printf '%s' "$XI_PUBLIC_PEM" > "$PUBLIC"
+          EXTRA=()
+          if [[ -n "$PRIOR_CHECKPOINT_RUN_ID" ]]; then
+            EXTRA=(--previous-checkpoint previous/xi-merged-shadow.db
+                   --previous-report previous/xi-merged-shadow.json
+                   --previous-chain previous/xi-checkpoint-chain.json)
+          fi
+          python -m src.target_duty.xi_archive pack \
+            --catalogue xi-full-catalogue-shadow.db \
+            --frozen-manifest xi-frozen-manifest.json \
+            --checkpoint xi-merged-shadow.db \
+            --merge-report xi-merged-shadow.json \
+            --chain xi-checkpoint-chain.json \
+            "${EXTRA[@]}" \
+            --signing-private-key "$KEY" \
+            --output xi-managed-signed-checkpoint.zip > xi-signed-archive-report.json
+          python -m src.target_duty.xi_archive restore \
+            --archive xi-managed-signed-checkpoint.zip \
+            --trusted-public-key "$PUBLIC" \
+            --destination xi-managed-archive-replay > xi-archive-restore-report.json
+          python - <<'PY'
+          import json
+          a=json.load(open("xi-signed-archive-report.json"))
+          b=json.load(open("xi-archive-restore-report.json"))
+          assert a["operator_signature_present"] is True
+          assert b["operator_signature_verified"] is True
+          assert b["source_replay_verified"] is True
+          assert b["production_eligible"] is False
+          print("Managed source archive operator-signed and replayed; no NI Other certification")
+          PY
       - name: Archive immutable original catalogue for future runs (max 30-day Actions retention)
         if: always()
         uses: actions/upload-artifact@v4
@@ -305,6 +352,9 @@ jobs:
             xi-source-drift-review.json
             xi-source-drift-raw-evidence.db
             xi-checkpoint-chain.json
+            xi-managed-signed-checkpoint.zip
+            xi-signed-archive-report.json
+            xi-archive-restore-report.json
             xi-merged-shadow.db
             xi-merged-shadow.json
           if-no-files-found: warn
