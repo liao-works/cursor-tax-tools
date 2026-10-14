@@ -140,6 +140,8 @@ def store(archive: str,*,bucket: str,owner: str,kms_key: str,
         "kind":KIND,
         "archive_sha256":sha,
         "s3_bucket":bucket,
+        "expected_bucket_owner":owner,
+        "kms_key_id":kms_key,
         "s3_key":key,
         "s3_version_id":version,
         "s3_storage_class":head.get("StorageClass","STANDARD"),
@@ -158,24 +160,102 @@ def store(archive: str,*,bucket: str,owner: str,kms_key: str,
     }
 
 
+def recover(receipt_file: str,destination: str,*,trusted_public_key: str,
+            runner: Callable=aws) -> dict:
+    """Restore an EXACT pinned S3 Object Version after Actions artifacts expire.
+
+    Receipt may be untrusted; verify all S3 values against strict input
+    contracts, then reauthenticate the *whole* signed source archive with
+    an independently trusted operator public key.
+    """
+    r=json.loads(Path(receipt_file).read_text(encoding="utf-8"))
+    if not isinstance(r,dict) or r.get("kind")!=KIND or any(
+        r.get(k) is not False for k in (
+            "production_eligible","ni_other_verified",
+            "atomic_official_snapshot_verified")):
+        raise ValueError("Not a review-only XI S3 pinned archive receipt")
+    sha=r.get("archive_sha256")
+    bucket=r.get("s3_bucket")
+    owner=r.get("expected_bucket_owner")
+    kms_key=r.get("kms_key_id")
+    key=r.get("s3_key")
+    version=r.get("s3_version_id")
+    if not isinstance(sha,str) or not HEX.fullmatch(sha):
+        raise ValueError("XI pinned S3 source SHA-256 malformed")
+    if not isinstance(key,str) or not key.endswith(f"/{sha[:2]}/{sha}.zip"):
+        raise ValueError("XI pinned object key must be content-addressed")
+    prefix=key[:-(len(sha)+len(sha[:2])+6)]
+    # key consists of prefix/<2 hex>/<64 hex>.zip; remove exactly those
+    # suffix characters without permitting arbitrary object path prefixes.
+    if key!=f"{prefix}/{sha[:2]}/{sha}.zip":
+        raise ValueError("XI pinned source key prefix not canonical")
+    _validate(bucket,owner,kms_key,prefix,MIN_DAYS)
+    if not isinstance(version,str) or not version or version=="null" or len(version)>512:
+        raise ValueError("XI pinned object VersionId missing")
+    if r.get("object_lock_mode")!="COMPLIANCE" or r.get("sse_kms_verified") is not True:
+        raise ValueError("XI receipt does not establish mandatory storage protections")
+    target=Path(destination).resolve()
+    if target.exists():
+        raise ValueError("Refuse to replace existing XI recovery directory")
+    preflight(bucket,owner,runner=runner)
+    head=_head(bucket,key,owner,version,runner=runner)
+    if (head.get("ServerSideEncryption")!="aws:kms"
+            or head.get("SSEKMSKeyId")!=kms_key
+            or head.get("ObjectLockMode")!="COMPLIANCE"
+            or head.get("Metadata",{}).get("sha256")!=sha):
+        raise ValueError("XI pinned version no longer meets S3 vault policy")
+    if not isinstance(head.get("ObjectLockRetainUntilDate"),str):
+        raise ValueError("XI pinned S3 lock retention missing")
+    with tempfile.TemporaryDirectory(dir=target.parent) as td:
+        downloaded=Path(td)/"source.zip"
+        runner(["get-object","--bucket",bucket,"--key",key,
+                "--version-id",version,"--expected-bucket-owner",owner,
+                str(downloaded)])
+        if not downloaded.is_file() or digest_file(str(downloaded))!=sha:
+            raise ValueError("XI pinned S3 downloaded archive checksum mismatch")
+        out=restore(str(downloaded),str(target),trusted_public_key=trusted_public_key)
+    if not out["operator_signature_verified"] or not out["source_replay_verified"]:
+        raise ValueError("XI independent recovery missing signature or source replay")
+    return {
+        "kind":KIND,"archive_sha256":sha,
+        "s3_version_id":version,
+        "restored_to":str(target),
+        "operator_signature_verified":True,
+        "raw_source_replay_verified":True,
+        "production_eligible":False,
+        "ni_other_verified":False,
+        "atomic_official_snapshot_verified":False,
+    }
+
+
 def main() -> None:
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--archive",required=True)
-    p.add_argument("--bucket",required=True)
-    p.add_argument("--owner",required=True)
-    p.add_argument("--kms-key",required=True)
-    p.add_argument("--trusted-public-key",required=True)
-    p.add_argument("--prefix",default="xi-review")
-    p.add_argument("--retention-days",type=int,default=90)
-    p.add_argument("--output",required=True)
+    sub=p.add_subparsers(dest="command",required=True)
+    s=sub.add_parser("store",help="Store and independently verify a signed archive")
+    s.add_argument("--archive",required=True)
+    s.add_argument("--bucket",required=True)
+    s.add_argument("--owner",required=True)
+    s.add_argument("--kms-key",required=True)
+    s.add_argument("--trusted-public-key",required=True)
+    s.add_argument("--prefix",default="xi-review")
+    s.add_argument("--retention-days",type=int,default=90)
+    s.add_argument("--output",required=True)
+    r=sub.add_parser("recover",help="Recover exact pinned S3 Object Version")
+    r.add_argument("--receipt",required=True)
+    r.add_argument("--trusted-public-key",required=True)
+    r.add_argument("--destination",required=True)
     a=p.parse_args()
+    if a.command=="recover":
+        result=recover(a.receipt,a.destination,trusted_public_key=a.trusted_public_key)
+        print(json.dumps(result,ensure_ascii=False,indent=2))
+        return
+    dest=Path(a.output)
+    if dest.exists():
+        raise SystemExit("Do not overwrite existing independent XI S3 vault receipt")
     result=store(a.archive,bucket=a.bucket,owner=a.owner,
                  kms_key=a.kms_key,public_key=a.trusted_public_key,
                  prefix=a.prefix,days=a.retention_days)
-    dest=Path(a.output)
     dest.parent.mkdir(parents=True,exist_ok=True)
-    if dest.exists():
-        raise SystemExit("Do not overwrite existing independent XI S3 vault receipt")
     dest.write_text(json.dumps(result,ensure_ascii=False,indent=2)+"\n",
                     encoding="utf-8")
     print(json.dumps(result,ensure_ascii=False,indent=2))
