@@ -311,11 +311,16 @@ def main() -> None:
         result = build(args.csv, args.output, as_of=date.fromisoformat(args.as_of),
                        source_version=args.version, min_active=args.min_active)
     else:
+        # Resolve the official *current* version through metadata (not the
+        # /versions/latest/ URL, which can 404 during partial publishing).
+        # Explicit pinned replay remains unaffected.
+        from .dbt_version_discovery import resolve_requested_version
+        resolved_pin=resolve_requested_version(args.version)
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "commodities.csv"
-            resolved = download_catalog(args.version, path)
+            resolved = download_catalog(resolved_pin, path)
             result = build(str(path), args.output, as_of=date.fromisoformat(args.as_of),
-                           source_version=args.version, resolved_url=resolved,
+                           source_version=resolved_pin, resolved_url=resolved,
                            min_active=args.min_active)
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
