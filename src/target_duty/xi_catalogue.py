@@ -222,9 +222,13 @@ def main():
     parser.add_argument("--public-canary", action="store_true")
     parser.add_argument("--max-chapters", type=int, default=0,
                         help="Canary cap; 0 means all officially enumerated chapters")
+    parser.add_argument("--min-chapter-interval", type=float, default=1.0,
+                        help="Delay between managed official chapter requests")
     args = parser.parse_args()
     if args.max_chapters < 0 or args.max_chapters > 99:
         raise ValueError("Invalid canary cap")
+    if args.min_chapter_interval < 0.5 or args.min_chapter_interval > 60:
+        raise ValueError("XI chapter API interval must be 0.5-60 seconds")
     if args.public_canary and not 1 <= args.max_chapters <= 5:
         raise ValueError("Public XI API limited to at most five canary chapters")
     if args.fixtures:
@@ -243,7 +247,9 @@ def main():
         else:
             selected = all_chapters
         payloads = {}
-        for chapter in selected:
+        for index, chapter in enumerate(selected):
+            if index:
+                time.sleep(args.min_chapter_interval)
             payloads[chapter] = json.loads(fetch(
                 f"/goods_nomenclatures/chapter/{chapter}",token,public=args.public_canary))
     result = build(listing,payloads,args.output,
