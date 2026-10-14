@@ -168,7 +168,9 @@ jobs:
             --manifest xi-frozen-manifest.json \
             --checkpoint previous/xi-merged-shadow.db \
             --as-of "$DAY" --count 3 --min-interval 2 \
-            --require-stable --output xi-source-drift-review.json
+            --require-stable \
+            --evidence-db xi-source-drift-raw-evidence.db \
+            --output xi-source-drift-review.json
       - name: Download fixed bounded XI shard with managed OAuth (source errors recorded)
         if: env.SOURCE_COLLECTION_COMPLETE != 'true'
         id: crawl
@@ -271,6 +273,7 @@ jobs:
             xi-managed-coverage-gate.json
             xi-chapter-coverage-receipt.json
             xi-source-drift-review.json
+            xi-source-drift-raw-evidence.db
             xi-merged-shadow.db
             xi-merged-shadow.json
           if-no-files-found: warn
