@@ -361,7 +361,7 @@ jobs:
             --kms-key "$XI_KMS_KEY_ARN" \
             --trusted-public-key "$PUBLIC" \
             --prefix xi-managed-reviews \
-            --retention-days 90 \
+            --retention-days 365 \
             --output xi-s3-version-restore-proof.json
           python - <<'PY'
           import json
