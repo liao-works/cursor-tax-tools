@@ -1,0 +1,7 @@
+NI full managed official source acquisition launch
+Date: 2026-10-14
+Scope: 97 official XI chapters, all active declarable commodity responses
+Execution: four disjoint managed OAuth workers, 2 seconds between requests per worker
+Outputs: frozen catalogue, four raw-response checkpoints, strict independent zero-gap acceptance and chapter coverage receipt
+Safety: SHADOW ONLY. No NI Other rate is asserted, no published release, no desktop database mutation
+Stop condition: no credentials, missing response, source drift or replay mismatch => block acceptance
