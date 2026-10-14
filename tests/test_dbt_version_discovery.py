@@ -84,6 +84,23 @@ class DBTDiscoveryTests(unittest.TestCase):
             inspect_csvw({"tables":[{"id":"commodities-report",
                                      "tableSchema":{"columns":[{"name":"a"},{"name":"a"}]}}]})
 
+    def test_real_official_csvw_url_format_and_ods_duplicates(self):
+        doc={"tables":[
+            {"url":"tables/commodities-report/data?format=csv&download",
+             "tableSchema":{"columns":[{"name":x} for x in COMMODITY_FIELDS]}},
+            {"url":"tables/commodities-report/data?format=ods&download",
+             "tableSchema":{"columns":[{"name":x} for x in COMMODITY_FIELDS]}},
+            {"url":"tables/measures-on-declarable-commodities/data?format=csv&download",
+             "tableSchema":{"columns":[{"name":x} for x in MEASURE_FIELDS]}},
+            {"url":"reports/measures-on-declarable-commodities/data?format=ods&download",
+             "tableSchema":{"columns":[{"name":x} for x in MEASURE_FIELDS]}},
+        ]}
+        x=inspect_csvw(doc)
+        self.assertTrue(x["source_column_schema_compatible"])
+        self.assertEqual(x["official_tables_with_metadata"],2)
+        self.assertEqual(x["required_columns_missing"]
+                         ["measures-on-declarable-commodities"],[])
+
     def test_version_inventory_failure_is_explicit(self):
         calls=[]
         def missing(req,timeout):
