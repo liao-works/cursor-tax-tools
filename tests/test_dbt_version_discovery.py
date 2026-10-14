@@ -7,7 +7,7 @@ import urllib.error
 from src.target_duty.dbt_version_discovery import (
     BASE,discover,inspect_csvw,parse_tables,parse_versions,version_key,resolve_requested_version
 )
-from src.target_duty.catalog import FIELDS as COMMODITY_FIELDS
+from src.target_duty.catalog import download_catalog, FIELDS as COMMODITY_FIELDS
 from src.target_duty.gap_measures import REQUIRED as MEASURE_FIELDS
 
 
@@ -118,6 +118,21 @@ class DBTDiscoveryTests(unittest.TestCase):
             resolve_requested_version("latest",opener=unavailable)
         with self.assertRaises(ValueError):
             resolve_requested_version("latest-v4")
+
+    def test_direct_catalogue_download_latest_is_blocked_before_network(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as folder:
+            dst=Path(folder)/"untrusted.csv"
+            with patch("src.target_duty.dbt_version_discovery.resolve_requested_version",
+                       side_effect=ValueError("newest_version_registered_without_tables")) as resolve:
+                with patch("src.target_duty.catalog.urllib.request.urlopen") as network:
+                    with self.assertRaisesRegex(ValueError,"registered_without_tables"):
+                        download_catalog("latest",dst)
+                    resolve.assert_called_once_with("latest")
+                    network.assert_not_called()
+            self.assertFalse(dst.exists())
 
     def test_version_inventory_failure_is_explicit(self):
         calls=[]
