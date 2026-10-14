@@ -7,6 +7,8 @@ on:
       - 'src/target_duty/gb_full_measures.py'
       - 'src/target_duty/gb_compact_review.py'
       - 'src/target_duty/gb_review_diff.py'
+      - 'src/target_duty/gb_source_ledger.py'
+      - 'tests/test_gb_source_ledger.py'
       - 'src/target_duty/dbt_version_discovery.py'
       - 'src/target_duty/catalog.py'
       - 'src/target_duty/build.py'
@@ -121,6 +123,24 @@ jobs:
             --full-db gb-newest-full-shadow.db \
             --catalogue gb-newest-catalogue.db \
             --output gb-newest-compact-review.db --max-mb 256
+      - name: Generate a full one-row-per-commodity GB source usability ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests -p 'test_gb_source_ledger.py' -v
+          python -m src.target_duty.gb_source_ledger \
+            --database gb-newest-compact-review.db \
+            --output-csv gb-newest-all-codes.csv \
+            --output-report gb-newest-code-coverage.json
+          python - <<'PY'
+          import csv,json
+          r=json.load(open("gb-newest-code-coverage.json"))
+          with open("gb-newest-all-codes.csv",encoding="utf-8",newline="") as f:
+              assert sum(1 for _ in csv.DictReader(f))==r["official_active_leaf_codes"]
+          assert r["candidate_codes"]+r["unresolved_codes"]==r["official_active_leaf_codes"]
+          assert not r["production_eligible"] and not r["all_rates_payable_verified"]
+          print("All official GB active commodity codes are accounted for; rates still require applicability review")
+          PY
       - name: Recheck official newest metadata after full download (no source drift)
         shell: bash
         run: |
@@ -186,5 +206,7 @@ jobs:
             gb-newest-compact-review.json
             gb-newest-compact-review.db
             gb-newest-versus-baseline.json
+            gb-newest-all-codes.csv
+            gb-newest-code-coverage.json
           if-no-files-found: warn
           retention-days: 14
