@@ -63,6 +63,26 @@ class TargetDutyTest(unittest.TestCase):
             self.assertEqual(con.execute("SELECT rate,uk_rate_status FROM tariffs WHERE code='0101290000'").fetchone(), ("","conditional"))
             con.close()
 
+    def test_invalid_official_rows_fail_closed_without_snapshot(self):
+        invalids = [
+            (self.row(code="not-a-code"), "invalid commodity code"),
+            (self.row(measure__effective_start_date=""), "missing effective_start_date"),
+            (self.row(measure__effective_start_date="not-a-date"), "Malformed"),
+            (self.row(measure__effective_start_date="2026-09-01",
+                      measure__effective_end_date="2026-08-31"), "reversed"),
+        ]
+        for row, expected in invalids:
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as temp:
+                source, output = Path(temp)/"official.csv", Path(temp)/"shadow.db"
+                with source.open("w", newline="") as file:
+                    writer=csv.DictWriter(file,fieldnames=COLUMNS)
+                    writer.writeheader()
+                    writer.writerow(row)
+                with self.assertRaisesRegex(ValueError,expected):
+                    build(str(source),str(output),version="v4.0.1627",
+                          as_of=date(2026,10,14),min_records=1)
+                self.assertFalse(output.exists())
+
     def test_rejects_low_coverage_without_publishing(self):
         with tempfile.TemporaryDirectory() as temp:
             source, output = Path(temp)/"s.csv", Path(temp)/"o.db"
