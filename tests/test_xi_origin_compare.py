@@ -121,6 +121,32 @@ class XIOriginComparison(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"1-3"):
             build(CODE,DAY,["US","CN","FR","DE"],str(self.db),public=True,fetcher=source)
 
+    def test_linked_official_zero_base_preserved_without_rate_certification(self):
+        doc=json.loads(payload(CODE,[("88","103","1011","",True)]))
+        node=doc["included"][0]
+        node["relationships"]["duty_expression"]={
+            "data":{"type":"duty_expression","id":"88-duty_expression"}}
+        node["relationships"]["measure_components"]={
+            "data":[{"type":"measure_component","id":"88-01"}]}
+        doc["included"].append({
+            "type":"duty_expression","id":"88-duty_expression",
+            "attributes":{"base":"0.00 %","formatted_base":"0.00%"}
+        })
+        source=json.dumps(doc).encode()
+        x=extract(CODE,source)
+        self.assertEqual(x[0]["expression"],"")
+        self.assertEqual(x[0]["linked_duty_base"],"0.00 %")
+        self.assertEqual(x[0]["linked_measure_component_count"],1)
+        self.assertTrue(x[0]["conditions"])
+        report=build(CODE,DAY,["US"],str(self.db),
+                     public=True,fetcher=lambda c,d,o:source)
+        candidate=report["comparisons"][0]["third_country_measure_evidence"][0]
+        self.assertEqual(candidate["linked_duty_base"],"0.00 %")
+        self.assertIsNone(report["comparisons"][0]["applicable_rate"])
+        doc["included"].pop()
+        with self.assertRaisesRegex(ValueError,"missing linked duty_expression"):
+            extract(CODE,json.dumps(doc).encode())
+
     def test_missing_import_relationship_is_failure_not_empty_rate(self):
         doc=json.loads(payload(CODE,[]))
         del doc["data"]["relationships"]["import_measures"]
