@@ -26,16 +26,20 @@ successfully audited object/version receipt outside GitHub Actions.
 3. Accept a regular locally signed archive up to 5 GiB; larger source
    archives are deliberately blocked until a vetted conditional
    multipart upload implementation exists.
-4. Put to the content-addressed key
+4. **Before any S3 operation**, independently restore the local archive,
+   verify its operator Ed25519 signature and replay all saved source bytes.
+   Invalid or unsigned archives are rejected BEFORE expensive COMPLIANCE
+   objects can be created.
+5. Put to the content-addressed key
    `xi-managed-reviews/<first-two-sha-hex>/<whole-sha256>.zip`.
    Use `--if-none-match '*'` to reject existing objects (no overwrites),
    `--checksum-sha256`, `--server-side-encryption aws:kms`, an exact
    KMS ARN, `--object-lock-mode COMPLIANCE`, and an explicit retention
    date. The managed workflow currently requests **365 days**.
-5. Require non-null object VersionId returned by S3. Retrieve the exact
+6. Require non-null object VersionId returned by S3. Retrieve the exact
    version's `head-object` and verify storage bytes, KMS, object lock
    and retention deadline. An encrypted-only or unlocked object fails.
-6. Re-download the EXACT pinned VersionId, verify full local SHA-256,
+7. Re-download the EXACT pinned VersionId, verify full local SHA-256,
    then independently run `xi_archive.restore()` with a separately
    trusted operator Ed25519 public key, source-response replay and
    parent-checkpoint continuity. Only then output the vault receipt.
