@@ -26,6 +26,7 @@ on:
 permissions:
   contents: read
   actions: read
+  id-token: write
 
 concurrency:
   group: xi-managed-shadow-${{ github.ref }}
@@ -87,6 +88,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_xi_coverage_receipt.py' -v
           python -m unittest discover -s tests -p 'test_xi_checkpoint_chain.py' -v
           python -m unittest discover -s tests -p 'test_xi_archive.py' -v
+          python -m unittest discover -s tests -p 'test_xi_s3_vault.py' -v
       - name: Retrieve original frozen managed XI catalogue from an earlier run
         if: ${{ inputs.catalogue_run_id != '' }}
         uses: actions/download-artifact@v4
@@ -327,6 +329,50 @@ jobs:
           assert b["production_eligible"] is False
           print("Managed source archive operator-signed and replayed; no NI Other certification")
           PY
+      - name: Obtain temporary review-only AWS credentials through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.XI_S3_ARCHIVE_ROLE_ARN }}
+          aws-region: ${{ vars.XI_S3_REGION }}
+          role-session-name: xi-review-${{ github.run_id }}
+      - name: Upload compliance-locked XI source archive and independently restore pinned S3 version
+        shell: bash
+        env:
+          XI_BUCKET: ${{ vars.XI_S3_ARCHIVE_BUCKET }}
+          XI_ACCOUNT_ID: ${{ vars.XI_S3_BUCKET_OWNER_ID }}
+          XI_KMS_KEY_ARN: ${{ vars.XI_S3_KMS_KEY_ARN }}
+          XI_PUBLIC_PEM: ${{ vars.XI_ARCHIVE_ED25519_PUBLIC_KEY_PEM }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$XI_BUCKET" || -z "$XI_ACCOUNT_ID" ||
+                -z "$XI_KMS_KEY_ARN" || -z "$XI_PUBLIC_PEM" ]]; then
+            echo "::error::S3 review vault config and separately pinned public key are required"
+            exit 1
+          fi
+          aws --version
+          umask 077
+          PUBLIC="$RUNNER_TEMP/xi-s3-public-$.pem"
+          trap 'rm -f "$PUBLIC"' EXIT
+          printf '%s' "$XI_PUBLIC_PEM" > "$PUBLIC"
+          python -m src.target_duty.xi_s3_vault store \
+            --archive xi-managed-signed-checkpoint.zip \
+            --bucket "$XI_BUCKET" \
+            --owner "$XI_ACCOUNT_ID" \
+            --kms-key "$XI_KMS_KEY_ARN" \
+            --trusted-public-key "$PUBLIC" \
+            --prefix xi-managed-reviews \
+            --retention-days 90 \
+            --output xi-s3-version-restore-proof.json
+          python - <<'PY'
+          import json
+          d=json.load(open("xi-s3-version-restore-proof.json"))
+          assert d["sse_kms_verified"] and d["raw_source_replay_verified"]
+          assert d["operator_signature_verified"] and d["downloaded_version_sha256_verified"]
+          assert d["object_lock_mode"]=="COMPLIANCE"
+          assert d["production_eligible"] is False and d["ni_other_verified"] is False
+          print("Immutable S3 Object version and deep source replay verified;",
+                "version:",d["s3_version_id"])
+          PY
       - name: Archive immutable original catalogue for future runs (max 30-day Actions retention)
         if: always()
         uses: actions/upload-artifact@v4
@@ -355,6 +401,7 @@ jobs:
             xi-managed-signed-checkpoint.zip
             xi-signed-archive-report.json
             xi-archive-restore-report.json
+            xi-s3-version-restore-proof.json
             xi-merged-shadow.db
             xi-merged-shadow.json
           if-no-files-found: warn
