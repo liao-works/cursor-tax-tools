@@ -5,6 +5,8 @@ on:
     paths:
       - 'src/target_duty/xi_catalogue.py'
       - 'tests/test_xi_catalogue.py'
+      - 'src/target_duty/xi_measure_crawl.py'
+      - 'tests/test_xi_measure_crawl.py'
       - '.github/workflows/xi-chapter-canary.yml'
   workflow_dispatch:
 
@@ -28,6 +30,12 @@ jobs:
             --as-of 2026-10-14 \
             --public-canary --max-chapters 2 \
             --output xi-catalogue-canary.db
+      - name: Probe only five XI commodity measure responses (public review-only)
+        run: |
+          python -m src.target_duty.xi_measure_crawl \
+            --catalogue xi-catalogue-canary.db \
+            --as-of 2026-10-14 --limit 5 --min-interval 1.5 \
+            --public-canary --output xi-measures-canary.db
       - name: Preserve only limited XI public probe evidence
         uses: actions/upload-artifact@v4
         if: always()
@@ -36,5 +44,7 @@ jobs:
           path: |
             xi-catalogue-canary.db
             xi-catalogue-canary.json
+            xi-measures-canary.db
+            xi-measures-canary.db.metadata.json
           if-no-files-found: warn
           retention-days: 7
