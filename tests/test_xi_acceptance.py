@@ -107,6 +107,23 @@ class XIAcceptanceTests(unittest.TestCase):
         x=evaluate(str(self.catalogue),str(self.measures))
         self.assertFalse(x["independent_catalogue_scope_ok"])
 
+    def test_strict_cli_archives_gap_evidence_before_nonzero_exit(self):
+        import subprocess,sys
+        output=self.base/"strict-missing-evidence.json"
+        p=subprocess.run([
+            sys.executable,"-m","src.target_duty.xi_acceptance",
+            "--catalogue",str(self.catalogue),
+            "--measures",str(self.measures),
+            "--min-chapters","1","--strict","--output",str(output)
+        ],capture_output=True,text=True,timeout=30)
+        self.assertNotEqual(p.returncode,0)
+        self.assertIn("report retained",p.stderr)
+        self.assertTrue(output.is_file())
+        recorded=json.loads(output.read_text())
+        self.assertEqual(recorded["missing_codes"],1)
+        self.assertEqual(recorded["active_declarable_codes"],2)
+        self.assertFalse(recorded["production_eligible"])
+
     def test_ambiguous_origin_other_is_not_rate(self):
         missing=interpret_other_origin("OTHER")
         self.assertEqual(missing["status"],"origin_required")
