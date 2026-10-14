@@ -99,19 +99,19 @@ def plan(inventory: dict, *, as_of: date, local_dir: str | None = None) -> dict:
              for row in inventory["files"]}
     first = date(as_of.year, 1, 1)
     required = [("TARIFF-ANNUAL", first)]
-    cursor = add_month(first)
+    cursor = first
     while cursor < first_day(as_of):
         # Every completed month needs a roll-up; never assume daily files
         # survived expiry or accept silent discontinuities.
-        required.append(("TARIFF-MONTHLY", cursor - timedelta(days=1)))
+        required.append(("TARIFF-MONTHLY", cursor))
         cursor = add_month(cursor)
     cursor = first_day(as_of)
     while cursor <= as_of:
         required.append(("TARIFF-DAILY", cursor))
         cursor += timedelta(days=1)
 
-    # For completed months the period is the month covered, not publication
-    # day. For example February's roll-up is labelled 2026-02-01.
+    # The monthly period names the month covered, not the publication date.
+    # Example: the September roll-up has period 2026-09-01.
     normalized_required = [
         (kind, first_day(day) if kind == "TARIFF-MONTHLY" else day)
         for kind, day in required
