@@ -148,8 +148,12 @@ def fetch(path: str, token: str | None, *, public: bool = False,
 
 
 def build(chapter_list: dict, chapter_payloads: dict[str, dict], output: str,
-          *, as_of: date, public: bool = False) -> dict:
+          *, as_of: date, public: bool = False,
+          full_managed_listing: bool = False,
+          official_listed_total: int | None = None) -> dict:
     expected = chapters(chapter_list)
+    if full_managed_listing and (public or official_listed_total != len(expected)):
+        raise ValueError("Full managed XI inventory must match original official chapter list")
     if set(chapter_payloads) != set(expected):
         missing = sorted(set(expected)-set(chapter_payloads))
         extra = sorted(set(chapter_payloads)-set(expected))
@@ -181,6 +185,10 @@ def build(chapter_list: dict, chapter_payloads: dict[str, dict], output: str,
                     unknown += row["declarable"] is None
             db.execute("INSERT INTO metadata VALUES ('as_of',?)",
                        (as_of.isoformat(),))
+            db.execute("INSERT INTO metadata VALUES ('listing_scope',?)",
+                       ("managed_full" if full_managed_listing else "partial_or_fixture",))
+            db.execute("INSERT INTO metadata VALUES ('listed_chapters',?)",
+                       (str(official_listed_total or len(expected)),))
             db.execute("INSERT INTO metadata VALUES ('production_eligible','false')")
             db.commit()
             if db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
@@ -196,6 +204,8 @@ def build(chapter_list: dict, chapter_payloads: dict[str, dict], output: str,
         "unknown_declarability_entries": unknown,
         "other_semantics_verified": False, "measures_imported": 0,
         "atomic_version_proven": False,
+        "listing_scope": "managed_full" if full_managed_listing else "partial_or_fixture",
+        "official_listed_chapters": official_listed_total,
         "sqlite_sha256": hashlib.sha256(destination.read_bytes()).hexdigest(),
         "warning": "Independent XI code coverage is not XI Other rates; verify UKIMS/origin conditions.",
     }
@@ -215,14 +225,18 @@ def main():
     args = parser.parse_args()
     if args.max_chapters < 0 or args.max_chapters > 99:
         raise ValueError("Invalid canary cap")
+    if args.public_canary and not 1 <= args.max_chapters <= 5:
+        raise ValueError("Public XI API limited to at most five canary chapters")
     if args.fixtures:
         raw = json.loads(Path(args.fixtures).read_text(encoding="utf-8"))
         listing, payloads = raw["chapters"], raw["chapter_payloads"]
+        official_total = None
     else:
         token = None if args.public_canary else get_token(
             os.getenv("HMRC_CLIENT_ID",""), os.getenv("HMRC_CLIENT_SECRET",""))
         listing = json.loads(fetch("/chapters", token, public=args.public_canary))
         all_chapters = chapters(listing)
+        official_total = len(all_chapters)
         if args.max_chapters:
             selected = all_chapters[:args.max_chapters]
             listing = {"data": [{"id":c} for c in selected]}
@@ -233,7 +247,10 @@ def main():
             payloads[chapter] = json.loads(fetch(
                 f"/goods_nomenclatures/chapter/{chapter}",token,public=args.public_canary))
     result = build(listing,payloads,args.output,
-                   as_of=date.fromisoformat(args.as_of),public=args.public_canary)
+                   as_of=date.fromisoformat(args.as_of),public=args.public_canary,
+                   full_managed_listing=(not args.fixtures and not args.public_canary
+                                         and args.max_chapters == 0),
+                   official_listed_total=official_total)
     result["partial_canary"] = bool(args.max_chapters)
     # The output JSON must match the CLI's actual coverage flag.
     Path(args.output).with_suffix(".json").write_text(
