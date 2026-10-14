@@ -169,11 +169,21 @@ def build(full_db: str, catalogue_db: str, output: str, *, max_mb: int=256) -> d
                            WHERE region='GB' AND code=? AND measure_type='103'
                               AND geography IN ('1011','1080')
                            ORDER BY ordinal""",(code,)))
+                    # Preserve Channel Islands 1080 only for commodities
+                    # missing a current GB 103/1011 candidate. This keeps the
+                    # compact package genuinely target-focused while retaining
+                    # non-GB context needed to explain unresolved gaps.
+                    has_current_gb_target=any(
+                        row[3]=="1011" and row[4]=="active"
+                        for row in selected
+                    )
                     active_target=0
                     other_area=0
                     for row in selected:
                         (ordinal,sid,kind,geo,effective,expression,additional,
                          conditions,excluded,start,end,raw_json)=row
+                        if geo=="1080" and has_current_gb_target:
+                            continue
                         src=json.loads(raw_json)
                         if (src.get("commodity__code")!=code
                             or str(src.get("measure__sid"))!=sid
