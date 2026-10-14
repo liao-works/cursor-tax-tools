@@ -107,21 +107,40 @@ def request_one(code: str, when: date, origin: str | None, *,
 
 def extract(code: str, payload: bytes) -> list[dict]:
     parsed=parse(payload,code)
+    doc=json.loads(payload)
+    included={(x.get("type"),str(x.get("id"))):x
+              for x in doc.get("included",[]) if isinstance(x,dict)}
     measures=[]
     for raw in parsed:
         measure=json.loads(raw["raw_json"])
         relations=measure.get("relationships") or {}
-        def present(name: str) -> bool:
-            group=relations.get(name) or {}
-            value=group.get("data")
+        def links(name: str) -> list[dict]:
+            value=(relations.get(name) or {}).get("data")
             if isinstance(value,list):
-                return bool(value)
-            return isinstance(value,dict) and bool(value)
+                return value
+            if isinstance(value,dict):
+                return [value]
+            return []
+        def present(name: str) -> bool:
+            return bool(links(name))
+        duty_refs=links("duty_expression")
+        linked_duty_base=None
+        if duty_refs:
+            if len(duty_refs)!=1:
+                raise ValueError("XI measure has nonunique duty expression reference")
+            ref=duty_refs[0]
+            obj=included.get(("duty_expression",str(ref.get("id"))))
+            if obj is None:
+                raise ValueError("XI measure missing linked duty_expression object")
+            linked_duty_base=(obj.get("attributes") or {}).get("base")
+        measure_components=links("measure_components")
         measures.append({
             "measure_id":raw["measure_id"],
             "measure_type":raw["measure_type"],
             "geography":raw["geography_id"],
             "expression":raw["duty_expression"],
+            "linked_duty_base":linked_duty_base,
+            "linked_measure_component_count":len(measure_components),
             "additional_code":present("additional_code"),
             "conditions":present("measure_conditions"),
             "exclusions":present("excluded_countries"),
@@ -189,6 +208,8 @@ def build(code: str, when: date, origins: list[str], output: str, *,
             "third_country_measure_evidence": [{
                 "id":m["measure_id"],"type":m["measure_type"],
                 "geography":m["geography"],"expression":m["expression"],
+                "linked_duty_base":m["linked_duty_base"],
+                "linked_measure_component_count":m["linked_measure_component_count"],
                 "has_conditions":m["conditions"],
                 "has_additional_code":m["additional_code"],
                 "has_exclusions":m["exclusions"],
