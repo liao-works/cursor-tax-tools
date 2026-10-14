@@ -133,6 +133,7 @@ jobs:
         with:
           name: gb-third-country-shadow-${{ github.run_id }}
           path: |
+            legacy-tariffs.db
             target-duty.db
             target-duty.metadata.json
             target-duty-diff.json
