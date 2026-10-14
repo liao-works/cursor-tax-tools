@@ -158,6 +158,9 @@ def build(full_db: str, catalogue_db: str, output: str, *, max_mb: int=256) -> d
                         raise ValueError("Unexpected GB measure source request status")
                     if (src_status=="no_expanded_measure_rows_unverified")!=(total_rows==0):
                         raise ValueError("GB empty source request status inconsistent")
+                    # Materialize parent first: SQLite enforces child FOREIGN KEY.
+                    db.execute("INSERT INTO commodities VALUES (?,?,?,?,?)",
+                               (code,"being_derived",total_rows,0,0))
                     selected=list(inp.execute(
                         """SELECT ordinal,measure_sid,measure_type,geography,
                            effective_status,expression,additional_code,
@@ -199,8 +202,10 @@ def build(full_db: str, catalogue_db: str, output: str, *, max_mb: int=256) -> d
                         status="non_gb_1080_only_or_other_measures_unresolved"
                     else:
                         status="no_active_103_1011_unresolved"
-                    db.execute("INSERT INTO commodities VALUES (?,?,?,?,?)",
-                               (code,status,total_rows,active_target,other_area))
+                    db.execute(
+                        "UPDATE commodities SET status=?,active_target_candidates=?,"
+                        "other_area_context_rows=? WHERE code=?",
+                        (status,active_target,other_area,code))
                     summaries[status]+=1
                 if len(active_target_codes)!=raw["active_103_1011_codes"]:
                     raise ValueError("Active GB 103/1011 target count differs from pinned full source")
