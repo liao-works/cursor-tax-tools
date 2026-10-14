@@ -11,7 +11,7 @@ from src.target_duty.xi_catalogue import build as build_catalogue
 from src.target_duty.xi_measure_crawl import collect
 from src.target_duty.xi_merge import combine
 from src.target_duty.xi_checkpoint_chain import seal, verify
-from src.target_duty.xi_frozen_catalogue import digest_file
+from src.target_duty.xi_frozen_catalogue import digest_file,freeze
 
 DAY=date(2026,10,14)
 CODES=["0101210000","0101290000","0101300000"]
@@ -171,6 +171,50 @@ class ContinuityTests(unittest.TestCase):
         report.write_text(json.dumps(original))
         with self.assertRaisesRegex(ValueError,"merge report source hash"):
             self._continue()
+
+    def test_97_chapter_managed_fixture_root_and_child_source_only_chain(self):
+        root=self.cat.parent
+        cat=root/"managed-catalogue.db"
+        manifest=root/"managed-catalogue-frozen.json"
+        first=root/"managed-first-shard.db"
+        second=root/"managed-second-shard.db"
+        parent=root/"managed-previous.db"
+        latest=root/"managed-current.db"
+        parent_chain=root/"managed-root-chain.json"
+        latest_chain=root/"managed-current-chain.json"
+        chapters={f"{n:02d}":{"data":[item(f"{n:02d}01000000",n)]}
+                  for n in range(1,98)}
+        build_catalogue({"data":[{"id":str(n)} for n in range(1,98)]},
+                        chapters,str(cat),as_of=DAY,
+                        full_managed_listing=True,official_listed_total=97)
+        freeze(str(cat),str(manifest))
+        collect(str(cat),str(first),as_of=DAY,limit=1,
+                fetcher=lambda code,day:payload(code))
+        combine(str(cat),[str(first)],str(parent),as_of=DAY)
+        collect(str(cat),str(second),as_of=DAY,start_index=1,limit=1,
+                fetcher=lambda code,day:payload(code))
+        combine(str(cat),[str(parent),str(second)],str(latest),as_of=DAY)
+        root_receipt=seal(str(cat),str(parent),str(parent.with_suffix(".json")),
+                          manifest=str(manifest),output=str(parent_chain))
+        final=seal(str(cat),str(latest),str(latest.with_suffix(".json")),
+                   manifest=str(manifest),output=str(latest_chain),
+                   previous_db=str(parent),
+                   previous_report=str(parent.with_suffix(".json")),
+                   previous_chain=str(parent_chain))
+        self.assertEqual(root_receipt["source_scope"],"managed_full")
+        self.assertEqual(final["source_scope"],"managed_full")
+        self.assertEqual(final["total_official_codes"],97)
+        self.assertEqual(final["successful_codes"],2)
+        self.assertEqual(final["missing_codes"],95)
+        self.assertEqual(final["continuity"]["old_successes_immutable"],1)
+        self.assertFalse(final["production_eligible"])
+        self.assertFalse(final["chain_authenticated_or_signed"])
+        self.assertEqual(
+            verify(str(cat),str(latest),str(latest.with_suffix(".json")),
+                   str(latest_chain),manifest=str(manifest),
+                   previous_db=str(parent),
+                   previous_report=str(parent.with_suffix(".json")),
+                   previous_chain=str(parent_chain)),final)
 
     def test_partial_source_never_passes_managed_mode(self):
         with self.assertRaisesRegex(ValueError,"frozen source manifest"):
