@@ -69,6 +69,8 @@ class CompactGBTests(unittest.TestCase):
             w.writeheader()
             w.writerow(measure("0101210000","1001","1011",
                                "12% + 25 GBP / 100 kg",extra="A01"))
+            # 1080 must NOT be copied for a code already having a GB candidate.
+            w.writerow(measure("0101210000","1004","1080","0%"))
             w.writerow(measure("0207412010","1002","1080","0%"))
             w.writerow(measure("0207412010","1003","1011",
                                "7%",start="2027-01-01"))
@@ -107,6 +109,9 @@ class CompactGBTests(unittest.TestCase):
             self.assertEqual(d.execute(
                 "SELECT role FROM evidence WHERE geography='1080'"
             ).fetchone()[0],"non_gb_103_1080_context")
+            self.assertEqual(d.execute(
+                "SELECT COUNT(*) FROM evidence WHERE code='0101210000' AND geography='1080'"
+            ).fetchone()[0],0)
             self.assertEqual(d.execute(
                 "SELECT active_target_candidates FROM commodities "
                 "WHERE code='0207412010'"
