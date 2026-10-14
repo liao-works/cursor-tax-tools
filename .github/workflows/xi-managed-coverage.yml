@@ -83,6 +83,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_xi_merge.py' -v
           python -m unittest discover -s tests -p 'test_xi_acceptance.py' -v
           python -m unittest discover -s tests -p 'test_xi_run_plan.py' -v
+          python -m unittest discover -s tests -p 'test_xi_coverage_receipt.py' -v
       - name: Retrieve original frozen managed XI catalogue from an earlier run
         if: ${{ inputs.catalogue_run_id != '' }}
         uses: actions/download-artifact@v4
@@ -195,6 +196,28 @@ jobs:
             --catalogue xi-full-catalogue-shadow.db \
             --measures xi-merged-shadow.db \
             --output xi-managed-coverage-gate.json
+      - name: Reconcile every XI chapter and publish source-only coverage receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.xi_coverage_receipt \
+            --catalogue xi-full-catalogue-shadow.db \
+            --manifest xi-frozen-manifest.json \
+            --checkpoint xi-merged-shadow.db \
+            --output xi-chapter-coverage-receipt.json
+          python - <<'PY'
+          import json
+          r=json.load(open("xi-chapter-coverage-receipt.json"))
+          if (r["production_eligible"] or r["ni_other_verified"]
+                  or r["atomic_official_snapshot_verified"]):
+              raise SystemExit("Illegal NI source coverage certification")
+          if r["managed_full_source_coverage_pass"]:
+              assert r["missing_responses"]==0 and r["failed_responses"]==0
+              assert r["complete_chapters"]==r["chapters_collected"]
+          print("Source verified:",r["successful_responses"],
+                "chapters:",r["complete_chapters"],"/",r["chapters_collected"],
+                "pending codes:",r["missing_responses"]+r["failed_responses"])
+          PY
       - name: Archive immutable original catalogue for future runs (max 30-day Actions retention)
         if: always()
         uses: actions/upload-artifact@v4
@@ -216,9 +239,9 @@ jobs:
             xi-current-shard.db.metadata.json
             xi-shard-plan.json
             xi-managed-coverage-gate.json
+            xi-chapter-coverage-receipt.json
             xi-merged-shadow.db
             xi-merged-shadow.json
-            xi-managed-coverage-gate.json
           if-no-files-found: warn
           retention-days: 30
       - name: Report incomplete or failed source after retaining the evidence
