@@ -64,6 +64,14 @@ def parse(payload: bytes, code: str) -> list[dict]:
         doc=json.loads(payload)
     except (ValueError,UnicodeError) as err:
         raise ValueError("HMRC XI response is not valid JSON") from err
+    if not isinstance(doc,dict):
+        raise ValueError("XI commodity response must be an object")
+    links=doc.get("links")
+    if links is not None:
+        if not isinstance(links,dict):
+            raise ValueError("XI commodity document links must be an object")
+        if links.get("next"):
+            raise ValueError("XI commodity paginated response is incomplete")
     data=doc.get("data")
     if not isinstance(data,dict):
         raise ValueError("XI commodity response lacks data object")
@@ -77,6 +85,13 @@ def parse(payload: bytes, code: str) -> list[dict]:
     import_measures=relationships["import_measures"]
     if not isinstance(import_measures,dict) or not isinstance(import_measures.get("data"),list):
         raise ValueError("XI import_measures relationship must be a complete list")
+    rel_meta=import_measures.get("meta")
+    if isinstance(rel_meta,dict):
+        advertised=rel_meta.get("total_count")
+        if advertised is not None and (
+                not isinstance(advertised,int) or isinstance(advertised,bool)
+                or advertised!=len(import_measures["data"])):
+            raise ValueError("XI import_measures advertised count differs from links")
     included={(node.get("type"),str(node.get("id"))):node
               for node in doc.get("included",[]) if isinstance(node,dict)}
     relations=refs(data,"import_measures")
