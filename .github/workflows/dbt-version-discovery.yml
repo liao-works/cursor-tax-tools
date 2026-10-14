@@ -55,11 +55,11 @@ jobs:
           import json
           from pathlib import Path
           d=json.loads(Path("dbt-version-discovery.json").read_text())
-          if d["state"]!="schema_preflight_required":
+          if d["state"]!="ready_for_full_data_replay":
               raise SystemExit(
-                  "Official newest tariff metadata/tables not compatible; "
+                  "Official newest tariff metadata/tables/CSVW columns not compatible; "
                   "current data promotion is BLOCKED (see artifact)"
               )
-          print("Metadata table inventory OK; full source column/data replay "
+          print("Official newest metadata table+column inventory OK; full data replay "
                 "required before freshness or production certification.")
           PY
