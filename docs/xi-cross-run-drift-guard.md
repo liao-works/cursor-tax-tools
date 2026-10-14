@@ -45,6 +45,15 @@ canonical semantic SHA-256, plus an explicit outcome:
 - `source_fetch_or_parse_error`: an expected anchor could not be retrieved
   and parsed completely.
 
+Use `--evidence-db xi-source-drift-raw-evidence.db` to also atomically
+store compressed **old and new official response bytes**, associated
+code/status and both raw SHA-256 fingerprints. The output SQLite is
+a diagnostic review artifact; its checksum is recorded in the JSON report.
+On an HTTP/parsing error the old body is retained, and the new body is
+retained if retrieved successfully within the hard 8 MiB bound.
+The evidence store must never overwrite the original source catalogue,
+checkpoint or frozen managed manifest.
+
 Any changed or failed anchor makes `resume_source_stability_gate_pass=false`.
 The managed CLI's `--require-stable` emits the full JSON review receipt
 and then exits nonzero, blocking new source collection. It never overwrites
@@ -57,7 +66,8 @@ Example:
       --manifest xi-frozen-manifest.json \
       --checkpoint previous/xi-merged-shadow.db \
       --as-of 2026-10-14 --count 3 \
-      --require-stable --output xi-source-drift-review.json
+      --require-stable --evidence-db xi-source-drift-raw-evidence.db \
+      --output xi-source-drift-review.json
 
 An operator can inspect unexpected source differences and launch a
 NEW managed full-catalogue snapshot; do not silently merge changed
