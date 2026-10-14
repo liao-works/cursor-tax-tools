@@ -31,6 +31,15 @@ jobs:
           from pathlib import Path
           from src.target_duty.dbt_version_discovery import BASE,_get,inspect_csvw
           doc=_get(BASE+"/versions/v4.0.1626/metadata?format=csvw")
+          for table in doc.get("tables",[])[:16]:
+              schema=table.get("tableSchema") or {}
+              print("PINNED_CSVW_TABLE_STRUCTURE",{
+                  "keys":sorted(table),
+                  "id":table.get("id"),
+                  "url":str(table.get("url"))[:150],
+                  "schema_keys":sorted(schema) if isinstance(schema,dict) else [],
+                  "column_count":len(schema.get("columns",[])) if isinstance(schema,dict) and isinstance(schema.get("columns",[]),list) else None
+              })
           review=inspect_csvw(doc)
           review["version"]="v4.0.1626"
           review["production_eligible"]=False
