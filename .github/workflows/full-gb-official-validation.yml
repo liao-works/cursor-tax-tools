@@ -1,4 +1,4 @@
-name: Full GB official measures validation (evidence only)
+name: Pinned GB source and compact review validation (evidence only)
 
 on:
   pull_request:
@@ -26,16 +26,19 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_gb_full_measures.py' -v
       - name: Offline compact GB targeted candidate contract tests
         run: python -m unittest discover -s tests -p 'test_gb_compact_review.py' -v
-      - name: Download independent catalogue and pin immutable source version
+      # Reproducible shadow acceptance, NOT a current/latest freshness probe.
+      # The latest alias has returned HTTP 404 and must fail closed in the
+      # independent freshness flow, not silently substitute old snapshots.
+      - name: Download independently pinned official catalogue v4.0.1626
         run: |
           set -euo pipefail
           python -m src.target_duty.catalog build \
-            --version latest --output gb-commodity-catalogue.db
+            --version v4.0.1626 --output gb-commodity-catalogue.db
           python - <<'PY'
           import json, pathlib
           meta = json.loads(pathlib.Path("gb-commodity-catalogue.metadata.json").read_text())
           version = meta["resolved_version"]
-          if not version or not version.startswith("v4."):
+          if version != "v4.0.1626":
               raise ValueError("Official DBT pin unresolved")
           pathlib.Path("official-version.txt").write_text(version)
           print("Pinned full GB source:",version)
