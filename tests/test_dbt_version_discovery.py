@@ -70,6 +70,28 @@ class DBTDiscoveryTests(unittest.TestCase):
         self.assertIsNone(result["newest_official_version"])
         self.assertIn("404",result["error"])
 
+    def test_registered_newest_but_unpublished_tables_blocks_latest_without_fallback(self):
+        def incomplete(req,timeout):
+            if req.full_url.endswith("/versions?format=json"):
+                return FakeHTTP(req.full_url,{"versions":[
+                    {"id":"v4.0.1626"},{"id":"v4.0.1627"}]})
+            if req.full_url.endswith("/versions/v4.0.1627/tables?format=json"):
+                return FakeHTTP(req.full_url,{"tables":[]})
+            if req.full_url.endswith("/versions/v4.0.1626/tables?format=json"):
+                return FakeHTTP(req.full_url,{"tables":[
+                    {"id":"commodities-report"},
+                    {"id":"measures-on-declarable-commodities"}]})
+            raise AssertionError(req.full_url)
+        result=discover(previous_pin="v4.0.1626",opener=incomplete)
+        self.assertEqual(result["newest_official_version"],"v4.0.1627")
+        self.assertEqual(result["state"],"newest_version_registered_without_tables")
+        self.assertTrue(result["newest_version_no_tables"])
+        self.assertEqual(result["table_inventory_diagnostic"]["tables_length"],0)
+        self.assertIn("commodities-report",result["older_pinned_tables_for_diagnostics"])
+        self.assertFalse(result["required_tables_present"])
+        self.assertFalse(result["freshness_proven"])
+        self.assertFalse(result["publish_eligible"])
+
     def test_broken_table_inventory_does_not_mark_version_usable(self):
         def broken(req,timeout):
             if req.full_url.endswith("/versions?format=json"):
