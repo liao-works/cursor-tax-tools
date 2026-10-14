@@ -86,7 +86,7 @@ def audit(catalogue: str, checkpoint: str, *,
     else:
         if not manifest:
             raise ValueError("Managed XI drift audit requires frozen source manifest")
-        verify(catalogue,manifest,required_day=as_of.isoformat())
+        verify(catalogue,manifest,day=as_of.isoformat())
     # This also verifies checkpoint region, as_of, catalogue SHA, all raw
     # bytes and every stored measure. No fetch if the checkpoint is corrupt.
     replay=evaluate(catalogue,checkpoint,
