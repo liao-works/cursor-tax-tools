@@ -188,6 +188,14 @@ def collect(catalogue: str, output: str, *, as_of: date, limit: int=20,
                 or verified["active_declarable_codes"]!=len(codes)):
             raise ValueError("Previous XI checkpoint replay disagrees with source catalogue")
     target=Path(output)
+    # An existing output is a checkpoint too, even without the optional
+    # --skip-successes-from argument. Verify every prior success before
+    # treating its status as completed on a local re-run.
+    if target.is_file():
+        from .xi_acceptance import evaluate
+        local_replay=evaluate(catalogue,str(target),min_chapters=1)
+        if local_replay["active_declarable_codes"]!=len(codes):
+            raise ValueError("Local XI checkpoint source catalogue replay mismatched")
     target.parent.mkdir(parents=True,exist_ok=True)
     db=sqlite3.connect(target)
     try:
