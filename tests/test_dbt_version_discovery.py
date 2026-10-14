@@ -5,8 +5,10 @@ import unittest
 import urllib.error
 
 from src.target_duty.dbt_version_discovery import (
-    BASE,discover,parse_tables,parse_versions,version_key
+    BASE,discover,inspect_csvw,parse_tables,parse_versions,version_key
 )
+from src.target_duty.catalog import FIELDS as COMMODITY_FIELDS
+from src.target_duty.gap_measures import REQUIRED as MEASURE_FIELDS
 
 
 class FakeHTTP:
@@ -33,7 +35,14 @@ def inventory(*, newest="v4.0.1628", tables=None):
                 {"id":"v4.0.1626"},{"id":newest},{"id":"v4.0.999"}]})
         if req.full_url.endswith("/versions/"+newest+"/tables?format=json"):
             return FakeHTTP(req.full_url,{"tables":[{"id":x} for x in
-                (tables or ["commodities-report","measures-on-declarable-commodities"])]})
+                (tables if tables is not None else ["commodities-report","measures-on-declarable-commodities"])]})
+        if req.full_url.endswith("/versions/"+newest+"/metadata?format=csvw"):
+            return FakeHTTP(req.full_url,{"tables":[
+                {"id":"commodities-report","tableSchema":{"columns":[
+                    {"name":s} for s in COMMODITY_FIELDS]}},
+                {"id":"measures-on-declarable-commodities","tableSchema":{"columns":[
+                    {"name":s} for s in sorted(MEASURE_FIELDS)]}},
+            ]})
         raise AssertionError("Unexpected metadata request "+req.full_url)
     return fake
 
@@ -42,7 +51,8 @@ class DBTDiscoveryTests(unittest.TestCase):
     def test_semantic_versions_and_table_preflight_not_rate_certification(self):
         result=discover(previous_pin="v4.0.1626",opener=inventory())
         self.assertEqual(result["newest_official_version"],"v4.0.1628")
-        self.assertEqual(result["state"],"schema_preflight_required")
+        self.assertEqual(result["state"],"ready_for_full_data_replay")
+        self.assertTrue(result["schema_compatibility_proven"])
         self.assertTrue(result["newer_than_replayed"])
         self.assertTrue(result["required_tables_present"])
         self.assertFalse(result["schema_compatibility_proven"])
@@ -57,6 +67,22 @@ class DBTDiscoveryTests(unittest.TestCase):
         self.assertEqual(result["state"],"unsupported_newest_tables")
         self.assertEqual(result["missing_required_tables"],["commodities-report"])
         self.assertFalse(result["publish_eligible"])
+
+    def test_official_csvw_missing_measure_expression_blocks_refresh(self):
+        columns=[{"name":s} for s in sorted(MEASURE_FIELDS-{"measure__duty_expression"})]
+        doc={"tables":[
+            {"id":"commodities-report","tableSchema":{"columns":[
+                {"name":n} for n in COMMODITY_FIELDS]}},
+            {"id":"measures-on-declarable-commodities","tableSchema":{"columns":columns}},
+        ]}
+        out=inspect_csvw(doc)
+        self.assertFalse(out["source_column_schema_compatible"])
+        self.assertEqual(out["required_columns_missing"]
+                         ["measures-on-declarable-commodities"],
+                         ["measure__duty_expression"])
+        with self.assertRaisesRegex(ValueError,"Duplicated"):
+            inspect_csvw({"tables":[{"id":"commodities-report",
+                                     "tableSchema":{"columns":[{"name":"a"},{"name":"a"}]}}]})
 
     def test_version_inventory_failure_is_explicit(self):
         calls=[]
