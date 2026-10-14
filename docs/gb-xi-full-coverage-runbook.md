@@ -149,3 +149,45 @@ all source responses must be checkpointed, replayed and independently
 accepted. Raw data collection may fail on quota, source drift or
 response parsing; source completeness cannot be assumed from job start.
 No workflow may mark NI Other payable duty or publish `latest-data`.
+
+## Public XI whole-source fallback — actual live run, not managed-certified
+
+The authorized managed launch run 38563372005 proved that repository Actions
+secrets HMRC_CLIENT_ID / HMRC_CLIENT_SECRET are not configured. No managed
+XI commodity requests were issued.
+
+A **separate** no-OAuth public API raw-source acquisition now runs from the
+Draft source branch, with an original PUBLIC_FULL_UNTRUSTED catalogue, four
+bounded commodity partitions, exact JSON:API response archives, error
+checkpoints, independent SHA replay and union-wide zero-gap audit. This can
+collect original publicly exposed official XI responses without claiming the
+same provenance or completeness guarantees as managed OAuth.
+
+- Actual launch: https://github.com/liao-works/cursor-tax-tools/actions/runs/38567997207
+- Implementations: src/target_duty/xi_public_full_capture.py and
+  .github/workflows/xi-public-full-measures.yml
+- Independent public-only fixture regression is included in the GB/XI
+  foundation workflow. Public API quota and availability may prevent
+  completion. Absence of an API response is **never** interpreted as 0% duty.
+- Each shard and final merged checkpoint is retained as **GitHub Actions
+  artifacts for 30 days only**. No production DB or rate table is published.
+
+### Resume WITHOUT re-downloading successfully captured responses
+
+If an earlier PUBLIC full run collected any response shards and then stopped,
+edit only `ops/xi-public-full-launch.txt` on the Draft branch to add a line:
+
+    resume_from_run_id=38567997207
+
+Replace this example ID with the **actual previous public full run ID**.
+This triggers a new workflow with the exact original frozen public catalogue,
+and copies each available original worker checkpoint before continuing.
+Each reused checkpoint is independently replay-validated against the frozen
+catalogue byte SHA before any source response is skipped. Never mix managed
+catalogues or different `as_of` dates into this restart path.
+
+Even if `xi-public-full-acceptance.json` ultimately reports all 16,728
+source responses replayed with zero gaps, the output explicitly remains
+`managed_full_source_coverage_proven=false`, `ni_other_verified=false`,
+`production_eligible=false`; further country-of-origin/condition-specific
+review is mandatory to produce trusted desktop NI Other duties.
