@@ -129,10 +129,15 @@ jobs:
         run: |
           set -euo pipefail
           DAY="$(python -c 'import json;print(json.load(open("xi-frozen-manifest.json"))["as_of"])')"
+          RESUME_ARGS=()
+          if [[ -n "$PRIOR_CHECKPOINT_RUN_ID" ]]; then
+            RESUME_ARGS=(--skip-successes-from previous/xi-merged-shadow.db)
+          fi
           python -m src.target_duty.xi_measure_crawl \
             --catalogue xi-full-catalogue-shadow.db \
             --as-of "$DAY" \
             --start-index "$START_INDEX" --limit "$SHARD_LIMIT" \
+            "${RESUME_ARGS[@]}" \
             --min-interval 2.0 \
             --output xi-current-shard.db
       - name: Merge and replay verify original + current checkpoint
