@@ -26,6 +26,8 @@ on:
       - 'tests/test_xi_parallel_capture.py'
       - 'src/target_duty/xi_public_full_capture.py'
       - 'tests/test_xi_public_full_capture.py'
+      - 'src/target_duty/xi_public_gap_ledger.py'
+      - 'tests/test_xi_public_gap_ledger.py'
       - '.github/workflows/xi-public-full-measures.yml'
       - '.github/workflows/xi-full-managed-one-shot.yml'
       - 'src/target_duty/gb_xi_coverage_matrix.py'
@@ -93,6 +95,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_xi_run_plan.py' -v
       - name: Four-way XI full managed source partition and strict offline merge tests
         run: python -m unittest discover -s tests -p 'test_xi_parallel_capture.py' -v
+      - name: XI full public source gap ledger, incomplete shards, duplicate and source tamper tests
+        run: python -m unittest discover -s tests -p 'test_xi_public_gap_ledger.py' -v
       - name: Strict official public 97-chapter raw XI source replay tests
         run: python -m unittest discover -s tests -p 'test_xi_public_full_capture.py' -v
       - name: Durable full managed XI source capture and recovery tests
