@@ -1,0 +1,79 @@
+name: Authenticated XI full catalogue and bounded measures (manual SHADOW)
+
+on:
+  workflow_dispatch:
+    inputs:
+      sample_limit:
+        description: 'Maximum XI code API calls per run (NO production)'
+        required: true
+        default: '40'
+        type: choice
+        options: ['10', '40', '100', '500']
+
+permissions:
+  contents: read
+
+jobs:
+  managed-xi-collector:
+    runs-on: ubuntu-latest
+    timeout-minutes: 105
+    env:
+      HMRC_CLIENT_ID: ${{ secrets.HMRC_CLIENT_ID }}
+      HMRC_CLIENT_SECRET: ${{ secrets.HMRC_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Require managed Trade Tariff credentials (no public bulk workaround)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$HMRC_CLIENT_ID" || -z "$HMRC_CLIENT_SECRET" ]]; then
+            echo "::error::Managed HMRC_CLIENT_ID / HMRC_CLIENT_SECRET secrets are required"
+            exit 1
+          fi
+      - name: Test XI official schema / resume / evidence gates
+        run: |
+          python -m unittest discover -s tests -p 'test_xi_catalogue.py' -v
+          python -m unittest discover -s tests -p 'test_xi_measure_crawl.py' -v
+          python -m unittest discover -s tests -p 'test_xi_acceptance.py' -v
+      - name: Enumerate ALL independently official XI declarable commodities
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.xi_catalogue \
+            --as-of "$(date -u +%F)" \
+            --min-chapter-interval 1.2 \
+            --output xi-full-catalogue-shadow.db
+      - name: Collect a BOUNDED sample of XI import measures from managed HMRC
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.xi_measure_crawl \
+            --catalogue xi-full-catalogue-shadow.db \
+            --as-of "$(python -c 'import json; print(json.load(open("xi-full-catalogue-shadow.json"))["as_of"])')" \
+            --limit "${{ inputs.sample_limit }}" \
+            --min-interval 2.0 \
+            --output xi-managed-measures-shadow.db
+      - name: Replay and assess official XI raw-response evidence (NOT NI Other)
+        shell: bash
+        run: |
+          python -m src.target_duty.xi_acceptance \
+            --catalogue xi-full-catalogue-shadow.db \
+            --measures xi-managed-measures-shadow.db \
+            --min-chapters 90 \
+            --output xi-managed-coverage-gate.json
+      - name: Archive read-only XI raw evidence (7-day retention)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xi-managed-shadow-evidence-${{ github.run_id }}
+          path: |
+            xi-full-catalogue-shadow.db
+            xi-full-catalogue-shadow.json
+            xi-managed-measures-shadow.db
+            xi-managed-measures-shadow.db.metadata.json
+            xi-managed-coverage-gate.json
+          if-no-files-found: warn
+          retention-days: 7
