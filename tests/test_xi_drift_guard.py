@@ -85,6 +85,34 @@ class XICrossBatchDriftTests(unittest.TestCase):
         self.assertEqual(result["changed_anchor_codes"],[CODES[1]])
         self.assertEqual(result["anchors"][1]["status"],"source_drift_detected")
 
+    def test_raw_source_drift_evidence_is_atomically_preserved(self):
+        import hashlib
+        import zlib
+        evidence=self.catalog.parent/"anchors-evidence.db"
+        result=audit(str(self.catalog),str(self.previous),as_of=DAY,
+                     public_canary=True,count=2,evidence_output=str(evidence),
+                     fetcher=lambda code,day:body(
+                         code,rate="12% + 10 EUR / 100 kg" if code==CODES[2] else "5%"))
+        self.assertFalse(result["resume_source_stability_gate_pass"])
+        self.assertEqual(result["changed_anchor_codes"],[CODES[2]])
+        self.assertTrue(evidence.is_file())
+        self.assertEqual(result["raw_anchor_evidence_sqlite_sha256"],
+                         hashlib.sha256(evidence.read_bytes()).hexdigest())
+        with sqlite3.connect(evidence) as db:
+            self.assertEqual(db.execute("PRAGMA integrity_check").fetchone()[0],"ok")
+            rows=db.execute(
+                "SELECT code,outcome,old_compressed_body,new_compressed_body "
+                "FROM anchors ORDER BY code").fetchall()
+            self.assertEqual(len(rows),2)
+            self.assertEqual(zlib.decompress(rows[0][2]),body(CODES[0]))
+            self.assertEqual(zlib.decompress(rows[1][2]),
+                             body(CODES[2],rate="12% + 10 EUR / 100 kg"))
+            self.assertEqual(rows[1][1],"source_drift_detected")
+        with self.assertRaisesRegex(ValueError,"must not overwrite"):
+            audit(str(self.catalog),str(self.previous),as_of=DAY,
+                  public_canary=True,count=1,evidence_output=str(self.previous),
+                  fetcher=lambda code,day:body(code))
+
     def test_changed_linked_condition_also_causes_drift(self):
         result=audit(str(self.catalog),str(self.previous),as_of=DAY,
                      public_canary=True,count=2,
