@@ -122,7 +122,8 @@ def initialize(db: sqlite3.Connection, as_of: date, catalogue_sha: str):
 
 
 def collect(catalogue: str, output: str, *, as_of: date, limit: int=20,
-            fetcher: Callable[[str,date],bytes], max_bytes: int=8_000_000,
+            fetcher: Callable[[str,date],bytes], start_index: int | None = None,
+            max_bytes: int=8_000_000,
             sleep_seconds: float=0.0) -> dict:
     """Bounded incremental collection; checkpoint every code, safe re-runs.
 
@@ -132,6 +133,8 @@ def collect(catalogue: str, output: str, *, as_of: date, limit: int=20,
     if not 1 <= limit <= 1000 or not 0 <= sleep_seconds <= 120:
         raise ValueError("Invalid XI batch bounds")
     codes=candidates(catalogue)
+    if start_index is not None and not 0 <= start_index < len(codes):
+        raise ValueError("XI explicit shard start index outside official catalogue")
     catalogue_sha=hashlib.sha256(Path(catalogue).read_bytes()).hexdigest()
     target=Path(output)
     target.parent.mkdir(parents=True,exist_ok=True)
@@ -140,7 +143,11 @@ def collect(catalogue: str, output: str, *, as_of: date, limit: int=20,
         initialize(db,as_of,catalogue_sha)
         completed={code for (code,) in db.execute(
             "SELECT code FROM requests WHERE status='ok'")}
-        selected=[code for code in codes if code not in completed][:limit]
+        if start_index is None:
+            selected=[code for code in codes if code not in completed][:limit]
+        else:
+            selected=[code for code in codes[start_index:start_index+limit]
+                      if code not in completed]
         for index, code in enumerate(selected):
             now=datetime.now(timezone.utc).isoformat()
             body=None
@@ -183,6 +190,7 @@ def collect(catalogue: str, output: str, *, as_of: date, limit: int=20,
         "as_of":as_of.isoformat(),
         "independent_xi_catalogue_codes":len(codes),
         "attempted_this_run":len(selected),
+        "explicit_start_index":start_index,
         "successful_codes":ok, "failed_codes":errors,
         "remaining_codes":len(codes)-ok,
         "measure_rows":measure_rows,
@@ -248,11 +256,14 @@ def main():
     p.add_argument("--as-of",required=True)
     p.add_argument("--output",default="xi-raw-measures-shadow.db")
     p.add_argument("--limit",type=int,default=20)
+    p.add_argument("--start-index",type=int,default=None,
+                   help="Optional index for independent, explicitly bounded shard")
     p.add_argument("--min-interval",type=float,default=2.0)
     p.add_argument("--public-canary",action="store_true")
     a=p.parse_args()
     report=collect(
         a.catalogue,a.output,as_of=date.fromisoformat(a.as_of),limit=a.limit,
+        start_index=a.start_index,
         fetcher=managed_fetcher(os.getenv("HMRC_CLIENT_ID",""),
                                 os.getenv("HMRC_CLIENT_SECRET",""),
                                 public=a.public_canary),
