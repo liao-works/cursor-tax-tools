@@ -19,7 +19,27 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Resolve optional prior raw-source run
+        id: prior
+        run: |
+          python - <<'PY'
+          import os,re
+          from pathlib import Path
+          value=Path("ops/xi-public-full-launch.txt").read_text()
+          match=re.search(r"(?m)^resume_from_run_id=([0-9]{10,16})$",value)
+          with open(os.environ["GITHUB_OUTPUT"],"a") as f:
+              f.write("run_id="+(match.group(1) if match else "")+"\n")
+          PY
+      - name: Restore byte-identical original official public catalogue
+        if: steps.prior.outputs.run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: xi-public-full-catalogue-${{ steps.prior.outputs.run_id }}
+          run-id: ${{ steps.prior.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: .
       - name: Fetch all official XI PUBLIC chapters and freeze exact bytes
+        if: steps.prior.outputs.run_id == ''
         run: |
           set -euo pipefail
           python -m src.target_duty.xi_catalogue --as-of "$(date -u +%F)" --public-full-audit --min-chapter-interval 2.0 --output xi-public-full-catalogue.db
@@ -50,6 +70,31 @@ jobs:
         with:
           name: xi-public-full-catalogue-${{ github.run_id }}
           path: .
+      - name: Resolve checkpoint reuse from prior run, if any
+        id: prior
+        run: |
+          python - <<'PY'
+          import os,re
+          from pathlib import Path
+          value=Path("ops/xi-public-full-launch.txt").read_text()
+          match=re.search(r"(?m)^resume_from_run_id=([0-9]{10,16})$",value)
+          with open(os.environ["GITHUB_OUTPUT"],"a") as f:
+              f.write("run_id="+(match.group(1) if match else "")+"\n")
+          PY
+      - name: Retrieve previously captured same-index public raw responses
+        if: steps.prior.outputs.run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: xi-public-full-shard-${{ matrix.worker }}-${{ steps.prior.outputs.run_id }}
+          run-id: ${{ steps.prior.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: previous/
+      - name: Resume previous verified shard checkpoint, when present
+        run: |
+          if [[ -f "previous/xi-public-shard-${{ matrix.worker }}.db" ]]; then
+            cp "previous/xi-public-shard-${{ matrix.worker }}.db" "xi-public-shard-${{ matrix.worker }}.db"
+          fi
       - name: Collect raw XI commodity measure responses
         id: crawl
         continue-on-error: true
