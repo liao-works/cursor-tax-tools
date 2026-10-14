@@ -23,6 +23,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
+from .catalog import FIELDS as COMMODITY_FIELDS
+from .gap_measures import REQUIRED as REQUIRED_MEASURE_FIELDS
+
 BASE = "https://data.api.trade.gov.uk/v1/datasets/uk-tariff-2021-01-01"
 VERSION = re.compile(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\Z")
 REQUIRED_TABLES = frozenset(("commodities-report", "measures-on-declarable-commodities"))
@@ -98,6 +101,50 @@ def parse_tables(payload: dict) -> list[str]:
     return sorted(found)
 
 
+def inspect_csvw(payload: dict) -> dict:
+    """Review DBT's independently documented tableSchema.columns mapping.
+
+    The endpoint returns the official CSVW metadata, not a CSV header and
+    not a guarantee of complete rows. Column schema mismatches block ingest.
+    """
+    tables=payload.get("tables")
+    if not isinstance(tables,list) or not tables or len(tables)>1000:
+        raise ValueError("Official DBT CSVW tables metadata missing")
+    inventory={}
+    for t in tables:
+        if not isinstance(t,dict):
+            raise ValueError("Malformed DBT CSVW table record")
+        tid=t.get("id")
+        schema=t.get("tableSchema") or {}
+        cols=schema.get("columns")
+        if not isinstance(tid,str) or not isinstance(cols,list):
+            raise ValueError("DBT CSVW table schema lacks table or columns")
+        if tid in inventory:
+            raise ValueError("Repeated DBT CSVW table id")
+        names=[]
+        for obj in cols:
+            if not isinstance(obj,dict) or not isinstance(obj.get("name"),str):
+                raise ValueError("Malformed DBT CSVW column definition")
+            names.append(obj["name"])
+        if len(names)!=len(set(names)):
+            raise ValueError("Duplicated DBT CSVW column definitions")
+        inventory[tid]=set(names)
+    expected={
+        "commodities-report":set(COMMODITY_FIELDS),
+        "measures-on-declarable-commodities":set(REQUIRED_MEASURE_FIELDS),
+    }
+    missing={name:sorted(fields-inventory.get(name,set()))
+             for name,fields in expected.items()}
+    return {
+        "official_tables_with_metadata":len(inventory),
+        "required_columns_missing":missing,
+        "source_column_schema_compatible":all(not value for value in missing.values()),
+        "required_table_column_counts":{
+            key:len(inventory.get(key,set())) for key in expected
+        },
+    }
+
+
 def discover(*, previous_pin: str | None = None,
              opener: Callable | None = None) -> dict:
     if previous_pin is not None:
@@ -147,7 +194,19 @@ def discover(*, previous_pin: str | None = None,
         missing=sorted(REQUIRED_TABLES-set(tables))
         result["missing_required_tables"]=missing
         result["required_tables_present"]=not missing
-        result["state"]="schema_preflight_required" if not missing else "unsupported_newest_tables"
+        if missing:
+            result["state"]="unsupported_newest_tables"
+        else:
+            schema_url=BASE+"/versions/"+newest+"/metadata?format=csvw"
+            result["csvw_metadata_url"]=schema_url
+            schema=inspect_csvw(_get(schema_url,opener=opener))
+            result.update(schema)
+            result["schema_compatibility_proven"]=schema["source_column_schema_compatible"]
+            result["state"]=(
+                "ready_for_full_data_replay"
+                if schema["source_column_schema_compatible"]
+                else "unsupported_newest_columns"
+            )
     except (ValueError,urllib.error.HTTPError,urllib.error.URLError,TimeoutError,OSError) as err:
         result["error"]=f"{type(err).__name__}: {str(err)[:400]}"
         if result["version_discovered"]:
@@ -184,8 +243,8 @@ def main() -> None:
     Path(args.output).write_text(
         json.dumps(result,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
     print(json.dumps(result,ensure_ascii=False,indent=2))
-    if args.require_available and result["state"]!="schema_preflight_required":
-        raise SystemExit("Official DBT newest dataset metadata/tables unavailable or incompatible")
+    if args.require_available and result["state"]!="ready_for_full_data_replay":
+        raise SystemExit("Newest DBT tables or CSVW columns incompatible; refuse new-version replay")
 
 
 if __name__=="__main__":
