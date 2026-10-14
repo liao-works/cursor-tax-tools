@@ -55,7 +55,7 @@ class DBTDiscoveryTests(unittest.TestCase):
         self.assertTrue(result["schema_compatibility_proven"])
         self.assertTrue(result["newer_than_replayed"])
         self.assertTrue(result["required_tables_present"])
-        self.assertFalse(result["schema_compatibility_proven"])
+        self.assertTrue(result["schema_compatibility_proven"])
         self.assertFalse(result["full_data_replayed_for_newest"])
         self.assertFalse(result["freshness_proven"])
         self.assertFalse(result["publish_eligible"])
