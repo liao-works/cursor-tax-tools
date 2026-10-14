@@ -63,6 +63,7 @@ class CatalogTest(unittest.TestCase):
         ], min_active=2)
         self.assertEqual(report["counts"]["all_catalogue_rows"], 4)
         self.assertEqual(report["counts"]["active_suffix80_candidates"], 2)
+        self.assertEqual(report["counts"]["active_declarable_leaf_codes"], 2)
         self.assertEqual(report["counts"]["inactive_or_non_suffix80_rows"], 2)
         self.assertFalse(report["production_eligible"])
         conn = sqlite3.connect(self.db)
@@ -78,6 +79,26 @@ class CatalogTest(unittest.TestCase):
             conn.close()
         self.assertEqual(json.loads(self.db.with_suffix(".metadata.json").read_text())
                          ["source_csv_sha256"], report["source_csv_sha256"])
+
+    def test_structural_suffix80_node_is_not_declarable(self):
+        report = self.build_fixture([
+            item("0101000000", "80", sid="parent"),
+            item("0101210000", "10", sid="inner", parent="parent"),
+            item("0101210000", "80", sid="child", parent="inner"),
+            item("0101290000", "80", sid="other", parent="parent"),
+        ])
+        self.assertEqual(report["counts"]["active_suffix80_candidates"], 3)
+        self.assertEqual(report["counts"]["active_declarable_leaf_codes"], 2)
+        conn = sqlite3.connect(self.db)
+        try:
+            self.assertEqual(conn.execute(
+                """SELECT COUNT(*) FROM commodities c
+                   WHERE c.active=1 AND c.suffix80=1
+                     AND NOT EXISTS (SELECT 1 FROM commodities d
+                       WHERE d.parent_sid=c.sid AND d.active=1)"""
+            ).fetchone()[0], 2)
+        finally:
+            conn.close()
 
     def test_start_and_end_dates_are_inclusive(self):
         self.assertTrue(effective(date(2026, 10, 14), date(2026, 10, 14), DAY))
@@ -120,10 +141,10 @@ class CatalogTest(unittest.TestCase):
         tariff_db(focused, ["0101210000", "0301110000"])
         path = self.directory / "coverage.json"
         report = compare(str(self.db), str(old), str(focused), str(path))
-        self.assertEqual(report["active_suffix80_catalogue"], 2)
-        self.assertEqual(report["active_suffix80_missing_focused"], 1)
-        self.assertEqual(report["focused_not_active_suffix80"], 1)
-        self.assertEqual(report["legacy_not_active_suffix80"], 2)
+        self.assertEqual(report["active_official_leaf_catalogue"], 2)
+        self.assertEqual(report["active_leaf_missing_focused"], 1)
+        self.assertEqual(report["focused_not_active_leaf"], 1)
+        self.assertEqual(report["legacy_not_active_leaf"], 2)
         self.assertEqual(report["legacy_not_focused"], 1)
         self.assertFalse(report["production_eligible"])
         with path.with_suffix(".csv").open(newline="", encoding="utf-8") as stream:
@@ -131,7 +152,7 @@ class CatalogTest(unittest.TestCase):
 
     def test_url_is_unfiltered_and_restricts_version(self):
         url = source_url("latest")
-        self.assertIn("/tables/commodities/data", url)
+        self.assertIn("/tables/commodities-report/data", url)
         self.assertNotIn("measure__type__id", url)
         self.assertTrue(url.endswith("?format=csv"))
         self.assertNotIn("query-simple", url)
