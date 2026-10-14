@@ -90,7 +90,7 @@ def _measure_insert(db: sqlite3.Connection, region: str, code: str,
     if not isinstance(raw, dict):
         raise ValueError("Each source measure must have raw object evidence")
     db.execute("""INSERT INTO measures
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
       (region, code, ordinal, sid, kind, geography, expression, additional,
        conditions, excluded, start, end, status,
        json.dumps(raw, sort_keys=True, ensure_ascii=False, separators=(",", ":"))))
