@@ -33,6 +33,8 @@ class GBSourceLedgerTests(unittest.TestCase):
         self.assertEqual(result["candidate_codes"],2)
         self.assertEqual(result["unresolved_codes"],2)
         self.assertEqual(result["complex_or_ambiguous_candidate_codes"],1)
+        self.assertEqual(result["simple_percentage_source_candidate_codes"],1)
+        self.assertEqual(sum(result["candidate_reason_counts"].values()),4)
         self.assertFalse(result["all_rates_payable_verified"])
         self.assertFalse(result["production_eligible"])
         self.assertFalse(result["ni_other_verified"])
@@ -74,9 +76,12 @@ class GBSourceLedgerTests(unittest.TestCase):
             lookup(str(self.src),"0101")
 
     def test_parse_empty_json_qualifiers_and_compound_expressions(self):
-        for x in (None,"","[]","[ ]","{}","{ }","null","None","#NA"):
+        for x in (None,"","[]","[ ]","{}","{ }","null","None","#NA",
+                  '["#NA"]','["#NA","#NA"]','{"condition":"#NA"}',
+                  ["#NA",None],{"condition":"#NA"}):
             self.assertFalse(_has_qualifier(x),repr(x))
-        for x in ('[{"condition":"certificate"}]',"broken", '[invalid',"ABCD", "0"):
+        for x in ('[{"condition":"certificate"}]',"broken", '[invalid',
+                  '["#NA","certificate:C046"]',"ABCD", "0"):
             self.assertTrue(_has_qualifier(x),repr(x))
         self.assertTrue(_simple_percentage("0%"))
         self.assertTrue(_simple_percentage("8.50 %"))
