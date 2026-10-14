@@ -105,6 +105,7 @@ jobs:
             --as-of 2026-10-14 \
             --public-canary --count 2 --min-interval 1.5 \
             --require-stable \
+            --evidence-db xi-drift-canary-evidence.db \
             --output xi-drift-canary.json
           python - <<'PY'
           import json
@@ -130,6 +131,7 @@ jobs:
             xi-next-shard-canary.json
             xi-chapter-receipt-canary.json
             xi-drift-canary.json
+            xi-drift-canary-evidence.db
             xi-origin-comparison-canary.json
             xi-origin-comparison-canary.db
           if-no-files-found: warn
