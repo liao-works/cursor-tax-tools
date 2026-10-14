@@ -72,6 +72,24 @@ class XIReviewGateTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             evaluate(p)
 
+    def test_105_overlap_cannot_be_relabelled_as_unambiguous_103(self):
+        p = self.payload()
+        p["entries"][0]["candidate_measures"].append({
+            **p["entries"][0]["candidate_measures"][0],
+            "measure_type": "105", "duty_expression_details": [{"base": "6%"}]
+        })
+        with self.assertRaisesRegex(ValueError, "not reproduced"):
+            evaluate(p)
+
+    def test_expired_105_does_not_block_historical_103_candidate(self):
+        p = self.payload()
+        p["entries"][0]["candidate_measures"].append({
+            **p["entries"][0]["candidate_measures"][0],
+            "measure_type": "105", "effective_end_date": "2025-12-31",
+            "duty_expression_details": [{"base": "6%"}]
+        })
+        self.assertTrue(evaluate(p)["evidence_complete"])
+
     def test_missing_coverage_is_never_complete(self):
         p = self.payload()
         p["entries"] = p["entries"][:3]
