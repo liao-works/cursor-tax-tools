@@ -201,13 +201,12 @@ def managed_fetcher(client_id: str, secret: str, *, public: bool=False):
     be converted into an empty import measure list.
     """
     token=None if public else get_token(client_id,secret)
-    token_refreshed=False
-
     def fetch_one(code: str, as_of: date) -> bytes:
         import urllib.error
         import urllib.parse
         import urllib.request
-        nonlocal token, token_refreshed
+        nonlocal token
+        refreshed_this_request=False
         if not CODE.fullmatch(code):
             raise ValueError("Invalid XI code")
         endpoint=("https://www.trade-tariff.service.gov.uk/xi/api/commodities/" if public
@@ -227,9 +226,9 @@ def managed_fetcher(client_id: str, secret: str, *, public: bool=False):
                     return response.read(8_000_001)
             except urllib.error.HTTPError as exc:
                 status=exc.code
-                if status==401 and not public and not token_refreshed:
+                if status==401 and not public and not refreshed_this_request:
                     token=get_token(client_id,secret)
-                    token_refreshed=True
+                    refreshed_this_request=True
                     continue
                 if status not in (429,500,502,503,504) or attempt==4:
                     raise RuntimeError(f"HMRC XI HTTP {status}") from None
