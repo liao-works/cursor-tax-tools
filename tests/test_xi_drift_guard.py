@@ -129,7 +129,7 @@ class XICrossBatchDriftTests(unittest.TestCase):
                   fetcher=lambda code,day:body(code))
 
     def test_wrong_date_rejects_even_for_public_canary(self):
-        with self.assertRaisesRegex(ValueError,"region/as_of mismatch"):
+        with self.assertRaisesRegex(ValueError,"source as_of differs"):
             audit(str(self.catalog),str(self.previous),
                   as_of=date(2026,10,13),public_canary=True,
                   fetcher=lambda code,day:body(code))
