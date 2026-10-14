@@ -102,6 +102,22 @@ def records(chapter: str, payload: dict, as_of: date) -> list[dict]:
         flag = attrs.get("declarable")
         if flag is not None and not isinstance(flag, bool):
             raise ValueError("XI declarability must be bool or null")
+        # Never silently discard a nomenclature as inactive when the
+        # official record has invalid/missing dates. Such a record might
+        # be an active declarable code and would make full-source
+        # completeness falsely pass.
+        raw_start, raw_end = attrs.get("validity_start_date"), attrs.get("validity_end_date")
+        if not isinstance(raw_start,str) or not raw_start:
+            raise ValueError(f"XI nomenclature missing validity start: {code}")
+        try:
+            valid_from=date.fromisoformat(raw_start[:10])
+            valid_to=date.fromisoformat(raw_end[:10]) if raw_end else None
+        except (TypeError,ValueError) as exc:
+            raise ValueError(f"Malformed XI nomenclature validity date: {code}") from exc
+        if raw_end is not None and not isinstance(raw_end,str):
+            raise ValueError(f"Malformed XI nomenclature validity end: {code}")
+        if valid_to is not None and valid_to < valid_from:
+            raise ValueError(f"XI nomenclature validity interval reversed: {code}")
         output.append({
             "chapter": chapter, "source_id": rid, "code": code,
             "suffix": attrs.get("producline_suffix"),
