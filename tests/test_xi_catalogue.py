@@ -153,6 +153,40 @@ class XICatalogueTest(unittest.TestCase):
                   full_managed_listing=True,official_listed_total=97)
         self.assertFalse(self.output.exists())
 
+    def test_public_full_audit_cli_never_routes_to_managed_mode(self):
+        from unittest.mock import patch
+        from src.target_duty.xi_catalogue import main
+        import sys
+        listing_doc={"data":[{"id":str(n)} for n in range(1,98)]}
+        chapter_payload={
+            f"{n:02d}":{"data":[item(f"{n:02d}",f"{n:02d}01000000",str(n))]}
+            for n in range(1,98)
+        }
+        paths=[]
+        def fake_fetch(path,token,*,public=False,retries=2):
+            paths.append((path,token,public))
+            if not public or token is not None:
+                raise AssertionError("Public XI full audit attempted managed access")
+            if path=="/chapters":
+                return json.dumps(listing_doc).encode()
+            chapter=path.rsplit("/",1)[-1]
+            return json.dumps(chapter_payload[chapter]).encode()
+        args=["xi_catalogue.py","--public-full-audit","--min-chapter-interval","0.5",
+              "--as-of","2026-10-14","--output",str(self.output)]
+        with patch.object(sys,"argv",args), \
+             patch("src.target_duty.xi_catalogue.fetch",side_effect=fake_fetch), \
+             patch("src.target_duty.xi_catalogue.time.sleep"):
+            main()
+        self.assertEqual(len(paths),98)
+        self.assertEqual(paths[0],("/chapters",None,True))
+        with sqlite3.connect(self.output) as db:
+            self.assertEqual(dict(db.execute(
+                "SELECT key,value FROM metadata"))["listing_scope"],"public_full_untrusted")
+        result=json.loads(self.output.with_suffix(".json").read_text())
+        self.assertEqual(result["chapters_complete"],97)
+        self.assertFalse(result["production_eligible"])
+        self.assertFalse(result["atomic_version_proven"])
+
     def test_reject_missing_chapter_list(self):
         with self.assertRaisesRegex(ValueError,"missing or empty"):
             chapters({"data":[]})
