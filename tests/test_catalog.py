@@ -146,6 +146,10 @@ class CatalogTest(unittest.TestCase):
         self.assertEqual(report["focused_not_active_leaf"], 1)
         self.assertEqual(report["legacy_not_active_leaf"], 2)
         self.assertEqual(report["legacy_not_focused"], 1)
+        self.assertEqual(report["legacy_active_leaf_missing_focused"], 0)
+        self.assertEqual(report["active_leaf_missing_both_dbs"], 1)
+        self.assertEqual(report["legacy_absent_from_official_catalogue"], 1)
+        self.assertEqual(report["legacy_official_but_not_current_leaf"], 1)
         self.assertFalse(report["production_eligible"])
         with path.with_suffix(".csv").open(newline="", encoding="utf-8") as stream:
             self.assertEqual(len(list(csv.DictReader(stream))), 3)
