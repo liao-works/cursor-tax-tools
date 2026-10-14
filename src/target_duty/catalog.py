@@ -20,7 +20,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 BASE = ("https://data.api.trade.gov.uk/v1/datasets/"
-        "uk-tariff-2021-01-01/versions/{version}/tables/commodities/data")
+        "uk-tariff-2021-01-01/versions/{version}/tables/commodities-report/data")
 FIELDS = (
     "commodity__sid", "commodity__code", "commodity__suffix",
     "commodity__description", "commodity__validity_start",
@@ -44,6 +44,7 @@ CREATE TABLE commodities (
     PRIMARY KEY (sid, suffix)
 );
 CREATE INDEX idx_catalog_code ON commodities(code);
+CREATE INDEX idx_catalog_parent_active ON commodities(parent_sid, active);
 CREATE INDEX idx_catalog_active ON commodities(active, suffix80, code);
 CREATE TABLE provenance (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
@@ -52,9 +53,10 @@ CREATE TABLE provenance (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 def source_url(version: str) -> str:
     if not re.fullmatch(r"(?:latest|v[0-9]+(?:\.[0-9]+)*)", version):
         raise ValueError("Unsafe DBT version")
-    # The documented unfiltered export is the authoritative source for
-    # ALL commodity rows. Query-simple on an unfiltered catalogue currently
-    # returns HTTP 500 for some live DBT versions (2026-10-14).
+    # Use the official commodities-report projection. On current DBT v4,
+    # the raw commodities table has sid/item_id but not the resolved
+    # commodity__code / parent / description columns. Avoid query-simple
+    # for this full catalogue export.
     return BASE.format(version=version) + "?format=csv"
 
 
@@ -159,7 +161,14 @@ def build(csv_path: str, output: str, *, as_of: date, source_version: str,
                     except sqlite3.IntegrityError as exc:
                         raise ValueError(f"Duplicate commodity SID/suffix at row {rows}") from exc
 
-            active_codes = conn.execute(
+            # Per UK Government API catalogue: only leaf nodes are declarable.
+            # A suffix-80 node with any *currently active* child is structural.
+            leaf_sql = """SELECT COUNT(DISTINCT c.code) FROM commodities c
+                WHERE c.active=1 AND c.suffix80=1
+                AND NOT EXISTS (SELECT 1 FROM commodities child
+                    WHERE child.parent_sid=c.sid AND child.active=1)"""
+            active_codes = conn.execute(leaf_sql).fetchone()[0]
+            suffix80_codes = conn.execute(
                 "SELECT COUNT(DISTINCT code) FROM commodities WHERE active=1 AND suffix80=1"
             ).fetchone()[0]
             if active_codes < min_active:
@@ -168,7 +177,8 @@ def build(csv_path: str, output: str, *, as_of: date, source_version: str,
                 "all_catalogue_rows": rows,
                 "all_distinct_codes": conn.execute(
                     "SELECT COUNT(DISTINCT code) FROM commodities").fetchone()[0],
-                "active_suffix80_candidates": active_codes,
+                "active_suffix80_candidates": suffix80_codes,
+                "active_declarable_leaf_codes": active_codes,
                 "inactive_or_non_suffix80_rows": conn.execute(
                     "SELECT COUNT(*) FROM commodities WHERE active=0 OR suffix80=0"
                 ).fetchone()[0],
@@ -184,7 +194,7 @@ def build(csv_path: str, output: str, *, as_of: date, source_version: str,
                 "as_of": as_of.isoformat(),
                 "generated_at": generated,
                 "counts": counts,
-                "notes": "Suffix 80 is necessary but NOT sufficient for declarability; all source rows retained, further validation required.",
+                "notes": "Declarable codes are active suffix-80 leaves (no active children); all hierarchy and history retained. Source cross-check still required.",
             }
             for key, value in (
                 ("as_of", manifest["as_of"]), ("source_csv_sha256", sha.hexdigest()),
@@ -216,9 +226,12 @@ def compare(catalog_db: str, legacy_db: str, focused_db: str, output: str) -> di
     conn = sqlite3.connect(Path(catalog_db).resolve().as_uri() + "?mode=ro", uri=True)
     try:
         catalog = {code for (code,) in conn.execute(
-            "SELECT DISTINCT code FROM commodities WHERE active=1 AND suffix80=1")}
-        historical = {code for (code,) in conn.execute(
-            "SELECT DISTINCT code FROM commodities WHERE active=0 OR suffix80=0")}
+            """SELECT DISTINCT c.code FROM commodities c
+               WHERE c.active=1 AND c.suffix80=1
+               AND NOT EXISTS (SELECT 1 FROM commodities child
+                 WHERE child.parent_sid=c.sid AND child.active=1)""")}
+        non_leaf_or_historical = {code for (code,) in conn.execute(
+            "SELECT DISTINCT code FROM commodities")} - catalog
         as_of = conn.execute(
             "SELECT value FROM provenance WHERE key='as_of'").fetchone()[0]
     finally:
@@ -233,32 +246,32 @@ def compare(catalog_db: str, legacy_db: str, focused_db: str, output: str) -> di
     import csv as csv_module
     with out.with_suffix(".csv").open("w", newline="", encoding="utf-8") as stream:
         writer = csv_module.writer(stream)
-        writer.writerow(["code", "active_suffix80_candidate", "historical_or_non_declarable",
+        writer.writerow(["code", "active_leaf_declarable", "structural_or_historical",
                          "legacy_present", "focused_gb_present", "audit_status"])
         for code in sorted(union):
             current, old_present, focused_present = code in catalog, code in old, code in focused
-            status = ("catalogue_suffix80_not_in_focused" if current and not focused_present
-                      else "focused_not_in_active_suffix80" if focused_present and not current
-                      else "legacy_only_not_active_suffix80" if old_present and not current and not focused_present
+            status = ("catalogue_leaf_not_in_focused" if current and not focused_present
+                      else "focused_not_in_active_leaf" if focused_present and not current
+                      else "legacy_only_not_active_leaf" if old_present and not current and not focused_present
                       else "present")
             if status != "present":
-                writer.writerow([code, int(current), int(code in historical),
+                writer.writerow([code, int(current), int(code in non_leaf_or_historical),
                                  int(old_present), int(focused_present), status])
     result = {
         "kind": "gb-catalogue-scope-reconciliation",
         "production_eligible": False,
         "as_of": as_of,
-        "active_suffix80_catalogue": len(catalog),
+        "active_official_leaf_catalogue": len(catalog),
         "legacy_codes": len(old),
         "focused_gb_codes": len(focused),
-        "active_suffix80_missing_focused": len(catalog - focused),
-        "focused_not_active_suffix80": len(focused - catalog),
-        "legacy_not_active_suffix80": len(old - catalog),
+        "active_leaf_missing_focused": len(catalog - focused),
+        "focused_not_active_leaf": len(focused - catalog),
+        "legacy_not_active_leaf": len(old - catalog),
         "legacy_not_focused": len(old - focused),
         "csv": out.with_suffix(".csv").name,
-        "note": ("The GB suffix-80 candidate catalogue, historical legacy and GB 103/1011 measures "
-                 "have different scopes. Mismatches are review evidence, not deletions. "
-                 "Suffix 80 is NOT proof of declaration eligibility. No NI accuracy or production eligibility is implied."),
+        "note": ("Official active suffix-80 leaf catalogue, legacy history and GB "
+                 "103/1011 duties have different scopes; discrepancies are not deletions. "
+                 "Cross-source confirmation and NI are not yet production-verified."),
     }
     out.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return result
