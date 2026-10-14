@@ -86,6 +86,22 @@ class XICatalogueTest(unittest.TestCase):
         doc={"data":[item("01","0101210000","11",None,suffix="80")]}
         self.assertIsNone(records("01",doc,TODAY)[0]["declarable"])
 
+    def test_reject_invalid_dates_in_official_chapter_instead_of_dropping_codes(self):
+        for start,end,part in (
+            (None,None,"missing validity start"),
+            ("invalid",None,"Malformed"),
+            ("2026-10-15","2026-10-14","reversed"),
+            ("2020-01-01","incorrect","Malformed"),
+            ("2020-01-01",0,"Malformed"),
+        ):
+            with self.subTest(start=start,end=end):
+                record=item("01","0101210000","42")
+                record["attributes"]["validity_start_date"]=start
+                record["attributes"]["validity_end_date"]=end
+                with self.assertRaisesRegex(ValueError,part):
+                    records("01",{"data":[record]},TODAY)
+        self.assertFalse(self.output.exists())
+
     def test_reject_missing_chapter_list(self):
         with self.assertRaisesRegex(ValueError,"missing or empty"):
             chapters({"data":[]})
