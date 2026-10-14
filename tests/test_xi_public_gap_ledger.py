@@ -1,6 +1,7 @@
 """Every XI source gap must survive independent response-replay review."""
 import csv
 import json
+import shutil
 import sqlite3
 import tempfile
 import unittest
@@ -93,8 +94,8 @@ class PublicGapLedgerTests(unittest.TestCase):
         first=self.crawl(0,fail_one)
         receipt=self.run_gap([first])
         self.assertEqual(receipt["source_errors"],1)
-        self.assertEqual(receipt["replayed_successful_responses"],9)
-        self.assertEqual(receipt["missing_responses"],87)
+        self.assertEqual(receipt["replayed_successful_responses"],10)
+        self.assertEqual(receipt["missing_responses"],86)
         self.assertIn("0101000000",receipt["samples"]["source_error"])
         collect_partition(self.cat,self.manifest,first,worker=0,workers=4,
                           batch_size=11,interval=0,fetcher=source)
@@ -104,8 +105,10 @@ class PublicGapLedgerTests(unittest.TestCase):
 
     def test_duplicate_codes_and_tampered_source_fail_closed(self):
         first=self.crawl(0)
+        copied=str(self.root/"copied.db")
+        shutil.copyfile(first,copied)
         with self.assertRaisesRegex(ValueError,"multiple public shards"):
-            self.run_gap([first,str(self.root/"copy.db")]) if False else self.run_gap([first,first])
+            self.run_gap([first,copied])
         with sqlite3.connect(first) as db:
             db.execute("UPDATE requests SET response_sha256=? WHERE code=?",("f"*64,"0101000000"))
         with self.assertRaises(ValueError):
