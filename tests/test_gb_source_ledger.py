@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from src.target_duty.gb_source_ledger import build,lookup
+from src.target_duty.gb_source_ledger import build,lookup,_has_qualifier,_simple_percentage
 from test_gb_review_diff import make_snapshot,row,ACTIVE,MISSING,CONTEXT
 
 
@@ -72,6 +72,17 @@ class GBSourceLedgerTests(unittest.TestCase):
         self.assertIsNone(not_leaf["payable_rate"])
         with self.assertRaisesRegex(ValueError,"exactly ten digits"):
             lookup(str(self.src),"0101")
+
+    def test_parse_empty_json_qualifiers_and_compound_expressions(self):
+        for x in (None,"","[]","[ ]","{}","{ }","null","None","#NA"):
+            self.assertFalse(_has_qualifier(x),repr(x))
+        for x in ('[{"condition":"certificate"}]',"broken", '[invalid',"ABCD", "0"):
+            self.assertTrue(_has_qualifier(x),repr(x))
+        self.assertTrue(_simple_percentage("0%"))
+        self.assertTrue(_simple_percentage("8.50 %"))
+        self.assertFalse(_simple_percentage("5% + 10 GBP/100 kg"))
+        self.assertFalse(_simple_percentage("12.4 GBP / 100 kg"))
+        self.assertFalse(_simple_percentage(None))
 
     def test_corrupted_manifest_rejected_without_outputs(self):
         manifest=self.src.with_suffix(".json")
