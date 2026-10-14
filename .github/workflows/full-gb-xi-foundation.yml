@@ -25,6 +25,8 @@ on:
       - 'tests/test_xi_coverage_receipt.py'
       - 'src/target_duty/xi_checkpoint_chain.py'
       - 'tests/test_xi_checkpoint_chain.py'
+      - 'src/target_duty/xi_archive.py'
+      - 'tests/test_xi_archive.py'
       - 'src/target_duty/xi_origin_compare.py'
       - 'tests/test_xi_origin_compare.py'
       - 'src/target_duty/xi_merge.py'
@@ -75,5 +77,7 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_xi_drift_guard.py' -v
       - name: XI prior-to-current source checkpoint continuity and tamper tests
         run: python -m unittest discover -s tests -p 'test_xi_checkpoint_chain.py' -v
+      - name: Signed XI archive pack/restore and malicious ZIP rejection tests
+        run: python -m unittest discover -s tests -p 'test_xi_archive.py' -v
       - name: Existing region evidence contract regression
         run: python -m unittest discover -s tests -p 'test_region_measures.py' -v
