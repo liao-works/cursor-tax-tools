@@ -27,6 +27,8 @@ on:
       - 'tests/test_xi_checkpoint_chain.py'
       - 'src/target_duty/xi_archive.py'
       - 'tests/test_xi_archive.py'
+      - 'src/target_duty/xi_s3_vault.py'
+      - 'tests/test_xi_s3_vault.py'
       - 'src/target_duty/xi_origin_compare.py'
       - 'tests/test_xi_origin_compare.py'
       - 'src/target_duty/xi_merge.py'
@@ -79,5 +81,7 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_xi_checkpoint_chain.py' -v
       - name: Signed XI archive pack/restore and malicious ZIP rejection tests
         run: python -m unittest discover -s tests -p 'test_xi_archive.py' -v
+      - name: XI S3 Object Lock upload/download recovery failure injection
+        run: python -m unittest discover -s tests -p 'test_xi_s3_vault.py' -v
       - name: Existing region evidence contract regression
         run: python -m unittest discover -s tests -p 'test_region_measures.py' -v
