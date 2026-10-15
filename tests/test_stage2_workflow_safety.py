@@ -1,4 +1,4 @@
-"""P0/P1 staging: scheduled daily shadow; FULL collections manually proven first."""
+"""P0/P1 staging: daily signal checks, scheduled weekly full source, no publisher."""
 import unittest
 from pathlib import Path
 import re
@@ -16,13 +16,16 @@ class StagedReadOnlySourceTests(unittest.TestCase):
         self.assertNotIn("softprops/action-gh-release",w)
         self.assertNotIn("contents: write",w)
 
-    def test_weekly_full_sources_are_manual_only_until_first_success(self):
-        for name in ("weekly-gb-full-source.yml","xi-public-full-measures.yml"):
+    def test_weekly_full_sources_are_scheduled_read_only(self):
+        for name, cron in (
+            ("weekly-gb-full-source.yml", "0 1 * * 0"),
+            ("xi-public-full-measures.yml", "0 2 * * 0"),
+        ):
             with self.subTest(name=name):
                 w=(WORKFLOWS/name).read_text()
                 self.assertIn("workflow_dispatch:",w)
-                self.assertNotRegex(w,r"(?m)^\s+schedule:\s*$")
-                self.assertNotRegex(w,r"(?m)^\s+-\s*cron:")
+                self.assertIn("schedule:",w)
+                self.assertIn("cron: '"+cron+"'",w)
                 self.assertIn("contents: read",w)
                 self.assertNotIn("contents: write",w)
                 self.assertNotIn("--allow-partial",w)
