@@ -20,6 +20,8 @@ on:
       - 'src/target_duty/final_release_gate.py'
       - 'src/target_duty/legacy_publish_guard.py'
       - 'src/target_duty/production_freshness_watch.py'
+      - '.github/workflows/weekly-gb-full-source.yml'
+      - 'tests/test_weekly_full_refresh.py'
       - 'tests/test_production_freshness_watch.py'
       - '.github/workflows/production-tariff-freshness-watch.yml'
       - 'tests/test_legacy_publish_guard.py'
@@ -142,6 +144,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_xi_archive.py' -v
       - name: XI S3 Object Lock upload/download recovery failure injection
         run: python -m unittest discover -s tests -p 'test_xi_s3_vault.py' -v
+      - name: Weekly full GB and XI fresh-from-source coverage, snapshot and publishing safety tests
+        run: python -m unittest discover -s tests -p 'test_weekly_full_refresh.py' -v
       - name: Production data versioned binary / paired metadata freshness regression
         run: python -m unittest discover -s tests -p 'test_production_freshness_watch.py' -v
       - name: Legacy latest-data auto-publisher isolation and timeout failure regression
