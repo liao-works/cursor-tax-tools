@@ -36,11 +36,9 @@ on:
         required: false
         default: 'false'
 
-  schedule:
-    - cron: '0 4 1 * *'  # 每月1日凌晨4点
 
 permissions:
-  contents: write
+  contents: read
   actions: read
   pull-requests: read
 
@@ -244,7 +242,6 @@ jobs:
         python src/actions/merge_databases.py \
           --input-dir artifacts \
           --output tariffs.db \
-          --allow-partial \
           --validate
 
         # 保存合并结果
@@ -308,131 +305,20 @@ jobs:
         retention-days: 7
 
   # 阶段4: 智能发布
+  # The legacy partial-coverage publisher is intentionally replaced by a
+  # read-only review job; no release tag may be mutated from these workflows.
   publish:
-    needs: [prepare, merge_and_validate]
+    needs: [prepare, scrape, merge_and_validate]
+    if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
+    permissions:
+      contents: read
     steps:
-    - name: 检出代码
-      uses: actions/checkout@v4
+      - name: Legacy data release disabled pending full-source signoff
+        run: |
+          echo "::notice::Legacy monthly latest-data publisher disabled"
+          echo "Only isolated candidate artifacts may be reviewed; no database release"
 
-    - name: 设置Python环境
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-
-    - name: 安装依赖
-      run: pip install -r requirements.txt
-
-    - name: 下载合并结果
-      uses: actions/download-artifact@v4
-      with:
-        name: merged-database
-        path: .
-
-    - name: 获取文件信息
-      id: file_info
-      run: |
-        if [ -f "tariffs.db" ]; then
-          FILE_SIZE=$(ls -lh tariffs.db | awk '{print $5}')
-          echo "file_size=$FILE_SIZE" >> $GITHUB_OUTPUT
-          echo "has_database=true" >> $GITHUB_OUTPUT
-        else
-          echo "has_database=false" >> $GITHUB_OUTPUT
-        fi
-
-    - name: 生成元数据
-      id: metadata
-      if: steps.file_info.outputs.has_database == 'true'
-      env:
-        VERSION: data-${{ needs.prepare.outputs.run_id }}
-        GITHUB_REPOSITORY: ${{ github.repository }}
-      run: |
-        # 下载任务分配文件以计算覆盖率
-        curl -f -o task_assignment.json \
-          "https://github.com/$GITHUB_REPOSITORY/releases/download/latest-data/task_assignment.json" || \
-          echo '{}' > task_assignment.json
-
-        python src/actions/generate_metadata.py \
-          tariffs.db \
-          "$VERSION" \
-          merge_results.json \
-          metadata.json \
-          --task-file task_assignment.json
-
-    - name: 创建更新报告
-      run: |
-        cat > UPDATE_REPORT.md << 'EOF'
-        # 关税数据更新报告
-
-        **更新时间**: $(date -u +'%Y-%m-%d %H:%M UTC')
-        **版本**: data-${{ needs.prepare.outputs.run_id }}
-        **质量分数**: ${{ needs.merge_and_validate.outputs.quality_score }}/100
-
-        ## 更新统计
-        - **记录数量**: ${{ needs.merge_and_validate.outputs.record_count }}
-        - **文件大小**: ${{ steps.file_info.outputs.file_size }}
-        - **并行分片**: 6个
-
-        ## 数据库状态
-        - **健康检查**: ✅ 通过
-        - **质量分数**: ${{ needs.merge_and_validate.outputs.quality_score }}/100
-
-        ## 客户端更新指南
-        客户端应按以下步骤更新：
-        1. 下载 `metadata.json` 检查版本和哈希
-        2. 比较本地版本，仅在需要时下载完整数据库
-        3. 验证数据库文件哈希值
-        4. 备份旧数据库后进行替换
-
-        ---
-        > 由 GitHub Actions 自动生成 | 数据版本: data-${{ needs.prepare.outputs.run_id }}
-        EOF
-
-    - name: 发布数据更新
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: data-${{ needs.prepare.outputs.run_id }}
-        name: "关税数据 v${{ needs.prepare.outputs.run_id }} - $(date +'%Y-%m-%d %H:%M UTC')"
-        body_path: UPDATE_REPORT.md
-        files: |
-          tariffs.db
-          metadata.json
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: 更新latest-data标签
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: latest-data
-        name: "Latest Tariff Data"
-        body: |
-          ## 最新关税数据
-
-          **版本**: data-${{ needs.prepare.outputs.run_id }}
-          **更新时间**: $(date -u +'%Y-%m-%d %H:%M UTC')
-          **记录数量**: ${{ needs.merge_and_validate.outputs.record_count }}
-          **文件大小**: ${{ steps.file_info.outputs.file_size }}
-          **质量分数**: ${{ needs.merge_and_validate.outputs.quality_score }}/100
-
-          ## 下载地址
-          - **元数据**: [metadata.json](https://github.com/${{ github.repository }}/releases/download/latest-data/metadata.json)
-          - **数据库**: [tariffs.db](https://github.com/${{ github.repository }}/releases/download/latest-data/tariffs.db)
-
-          ---
-          > 客户端应先检查元数据再下载数据库
-        files: |
-          tariffs.db
-          metadata.json
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # 结果总结
   summarize:
     needs: [prepare, scrape, merge_and_validate, publish]
     if: always()
