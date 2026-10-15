@@ -295,7 +295,8 @@ jobs:
           fi
         else
           echo "health_check_passed=false" >> $GITHUB_OUTPUT
-          echo "ERROR: 数据库健康检查失败"
+          echo "::error::数据库健康检查失败；候选数据库不得被判定为成功"
+          exit 1
         fi
 
     - name: 上传合并结果
@@ -319,10 +320,17 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Legacy data release disabled pending full-source signoff
+      - name: Fail closed on failed source or unhealthy merge
+        env:
+          PREP_RESULT: ${{ needs.prepare.result }}
+          SCRAPE_RESULT: ${{ needs.scrape.result }}
+          MERGE_RESULT: ${{ needs.merge_and_validate.result }}
         run: |
-          echo "::notice::Legacy monthly latest-data publisher disabled"
-          echo "Only isolated candidate artifacts may be reviewed; no database release"
+          if [[ "$PREP_RESULT" != "success" || "$SCRAPE_RESULT" != "success" || "$MERGE_RESULT" != "success" ]]; then
+            echo "::error::Legacy collection/merge incomplete; no release or valid dataset"
+            exit 1
+          fi
+          echo "::notice::Source diagnostic finished; publication DISABLED pending independent approval"
 
   summarize:
     needs: [prepare, scrape, merge_and_validate, publish]
