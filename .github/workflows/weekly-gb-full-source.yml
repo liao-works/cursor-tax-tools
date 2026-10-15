@@ -1,7 +1,8 @@
 name: Weekly GB full official source refresh and pinned replay (SHADOW ONLY)
 on:
-  # Sunday 01:00 UTC / 09:00 Singapore; runs from default branch after merge.
-  # Weekly automatic trigger held until first successful complete-source acceptance.
+  # Every Sunday 01:00 UTC / 09:00 Singapore; source-only, never publish.
+  schedule:
+    - cron: '0 1 * * 0'
   workflow_dispatch:
 permissions:
   contents: read
