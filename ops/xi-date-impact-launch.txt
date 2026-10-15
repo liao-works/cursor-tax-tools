@@ -1,0 +1,2 @@
+2026-10-15: Materialize source-only exact NI affected commodity code list from SHA-pinned 17,395 full original 103/105 condition measures, as-of 2026-10-15.
+No implicit zero rates or production release.
