@@ -155,7 +155,8 @@ def scenario(measure_detail: dict, *, origin: str | None,
         raise ValueError("Explicit two-letter origin needed; OTHER is not an ISO origin")
     if movement is not None and movement not in ALLOWED_MOVEMENTS:
         raise ValueError("Movement context is required and must be recognized")
-    if at_risk not in (True,False,None) or ukims_authorised not in (True,False,None):
+    if (at_risk is not None and type(at_risk) is not bool) or (
+            ukims_authorised is not None and type(ukims_authorised) is not bool):
         raise ValueError("Invalid trader risk or UKIMS status")
     exclusions=json.loads(measure_detail["excluded_geographies_json"])
     excluded_ids={str(r["id"]) for r in exclusions}
@@ -169,6 +170,10 @@ def scenario(measure_detail: dict, *, origin: str | None,
         missing.append("at_risk_status_required")
     if ukims_authorised is None:
         missing.append("ukims_authorisation_unknown")
+    elif not ukims_authorised and at_risk is False:
+        missing.append("not_at_risk_requires_independent_eligibility_proof")
+    elif ukims_authorised and at_risk is False:
+        missing.append("ukims_authorisation_not_proof_of_goods_eligibility")
     if measure_detail["additional_code_state"]=="not_exposed":
         missing.append("additional_code_visibility_unknown")
     if json.loads(measure_detail["condition_evidence_json"]):
@@ -179,7 +184,13 @@ def scenario(measure_detail: dict, *, origin: str | None,
         missing.append("unresolved_official_nested_references")
     # Even a non-at-risk movement may need a UK rate, relief, or declaration.
     missing.append("duty_route_and_preference_legally_unverified")
+    candidate_route = (
+        "applicable_eu_tariff_evidence_review" if at_risk is True
+        else "applicable_uk_tariff_evidence_review" if at_risk is False
+        else "uk_eu_tariff_route_unresolved"
+    )
     return {
+        "applicable_tariff_route_for_review":candidate_route,
         "code":measure_detail["code"],
         "measure_id":measure_detail["measure_id"],
         "origin":origin,
