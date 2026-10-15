@@ -72,8 +72,14 @@ def _source(path: str, *, region: str) -> dict:
                 codes[code]=hashlib.sha256(json.dumps(
                      rows,ensure_ascii=False,separators=(",",":")).encode()).hexdigest()
                 seen+=len(rows)
-            if seen!=n or len(codes)!=proof.get("official_active_leaves"):
-                raise ValueError("GB source catalogue cardinality mismatch")
+            # DBT expanded source may include historical/non-leaf codes too.
+            # Its request universe is rows-present PLUS specifically missing
+            # official leaves; never equate that universe with active leaves.
+            expected = (proof.get("source_commodity_codes",0)
+                        +proof.get("active_leaves_without_any_export_rows",0))
+            if (seen!=n or len(codes)!=expected
+                    or len(codes)<proof.get("official_active_leaves",0)):
+                raise ValueError("GB expanded-source/official-leaf cardinality mismatch")
             pin=proof["version"]
         elif region=="XI":
             accepted_path=dbpath.with_name("xi-public-full-acceptance.json")
