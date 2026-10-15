@@ -4,6 +4,10 @@ on:
     branches: [feat/target-third-country-duty-v1]
     paths: [ops/xi-public-full-launch.txt]
   workflow_dispatch:
+  # Sunday 02:00 UTC / 10:00 Singapore: refresh all XI public source.
+  # Scheduled workflows run only from the repository default branch.
+  schedule:
+    - cron: '0 2 * * 0'
 permissions:
   contents: read
   actions: read
@@ -26,7 +30,10 @@ jobs:
           import os,re
           from pathlib import Path
           value=Path("ops/xi-public-full-launch.txt").read_text()
-          match=re.search(r"(?m)^resume_from_run_id=([0-9]{10,16})$",value)
+          # Scheduled runs MUST obtain a fresh catalogue and all measures.
+          # Same-run checkpoint recovery requires manual dispatch.
+          match=(re.search(r"(?m)^resume_from_run_id=([0-9]{10,16})$",value)
+                 if os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch" else None)
           with open(os.environ["GITHUB_OUTPUT"],"a") as f:
               f.write("run_id="+(match.group(1) if match else "")+"\n")
           PY
@@ -77,7 +84,10 @@ jobs:
           import os,re
           from pathlib import Path
           value=Path("ops/xi-public-full-launch.txt").read_text()
-          match=re.search(r"(?m)^resume_from_run_id=([0-9]{10,16})$",value)
+          # Scheduled runs MUST obtain a fresh catalogue and all measures.
+          # Same-run checkpoint recovery requires manual dispatch.
+          match=(re.search(r"(?m)^resume_from_run_id=([0-9]{10,16})$",value)
+                 if os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch" else None)
           with open(os.environ["GITHUB_OUTPUT"],"a") as f:
               f.write("run_id="+(match.group(1) if match else "")+"\n")
           PY
