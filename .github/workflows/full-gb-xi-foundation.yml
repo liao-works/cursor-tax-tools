@@ -21,6 +21,8 @@ on:
       - 'src/target_duty/legacy_publish_guard.py'
       - 'src/target_duty/production_freshness_watch.py'
       - 'src/target_duty/daily_official_change_watch.py'
+      - 'src/target_duty/full_source_delta_scope.py'
+      - 'tests/test_full_source_delta_scope.py'
       - 'src/target_duty/xi_daily_baseline.py'
       - 'tests/test_xi_daily_baseline.py'
       - 'tests/test_daily_official_change_watch.py'
@@ -152,6 +154,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_xi_s3_vault.py' -v
       - name: Weekly full-source canary source provenance, missing response and date baseline tests
         run: python -m unittest discover -s tests -p 'test_xi_daily_baseline.py' -v
+      - name: Full GB all-measure and XI raw-response exact affected-code delta regression
+        run: python -m unittest discover -s tests -p 'test_full_source_delta_scope.py' -v
       - name: Official daily version / XI expiry and canary signal regression
         run: python -m unittest discover -s tests -p 'test_daily_official_change_watch.py' -v
       - name: Weekly full GB and XI fresh-from-source coverage, snapshot and publishing safety tests
