@@ -1,0 +1,72 @@
+name: XI source-only applicability 16,728-code review (NEVER RELEASE)
+on:
+  push:
+    branches: [feat/target-third-country-duty-v1]
+    paths: [ops/xi-applicability-launch.txt]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Reject fake NI duty and tampered candidate source evidence
+        run: |
+          python -m unittest discover -s tests -p 'test_xi_applicability_review.py' -v
+      - name: Download fully replayed 2026-10-14 official PUBLIC XI source candidate evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: xi-duty-expression-review-38664629818
+          run-id: 38664629818
+          github-token: ${{ github.token }}
+          path: evidence
+      - name: Cross-check source SHA/parity and emit ALL-CODE origin/UKIMS/conditions review
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.xi_applicability_review \
+            --candidate-csv evidence/xi-third-country-expression-candidates.csv \
+            --candidate-report evidence/xi-third-country-expression-summary.json \
+            --coverage-csv evidence/xi-source-replay-gaps.csv \
+            --coverage-report evidence/xi-source-replay-gaps.json \
+            --reviewed-on 2026-10-15 \
+            --output-csv xi-applicability-all-codes-review.csv \
+            --output-report xi-applicability-review-summary.json
+          python - <<'PY'
+          import csv,json
+          data=json.load(open("xi-applicability-review-summary.json"))
+          assert data["official_source_codes"]==16728
+          assert data["independently_pinned_original_responses"]==16728
+          assert data["source_import_measure_rows"]==1082800
+          assert data["third_country_candidate_measures"]==17395
+          assert data["codes_with_candidates"]==16630
+          assert data["codes_without_candidates"]==98
+          assert data["certified_payable_rates"]==0
+          assert not data["production_eligible"]
+          assert not data["ni_other_verified"]
+          assert data["additional_code_details_not_projected"]
+          assert data["origin_and_trader_at_risk_status_not_supplied"]
+          with open("xi-applicability-all-codes-review.csv",newline="") as f:
+              rows=list(csv.DictReader(f))
+          assert len(rows)==16728
+          assert len({r["code"] for r in rows})==16728
+          assert all(r["ni_other_payable_rate"]=="" for r in rows)
+          assert all(r["production_eligible"]=="false" for r in rows)
+          print("SCOPE: 16,728 original XI code responses, source-only no payable rates")
+          print("COUNTRY-ORIGIN / UKIMS / conditions remain review required")
+          PY
+      - name: Archive exact source-derived review queue (30-day retention, NEVER RELEASE)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xi-applicability-review-${{ github.run_id }}
+          path: |
+            xi-applicability-all-codes-review.csv
+            xi-applicability-review-summary.json
+          if-no-files-found: warn
+          retention-days: 30
