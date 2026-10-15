@@ -51,6 +51,15 @@ class DailyOfficialChangeTests(unittest.TestCase):
         self.assertIn("GB_OFFICIAL_VERSION_CHANGED_FULL_REPLAY_REQUIRED",r["review_reasons"])
         self.assertFalse(r["release_permitted"])
 
+    def test_gb_new_version_registered_without_tables_still_detects_change_and_blocks(self):
+        r=run(date(2026,10,15),gb={"state":"newest_version_registered_without_tables",
+                "newest_official_version":"v4.0.1628"})
+        self.assertTrue(r["gb_version_changed"])
+        self.assertFalse(r["gb_official_schema_ready"])
+        self.assertIn("GB_OFFICIAL_VERSION_CHANGED_FULL_REPLAY_REQUIRED",r["review_reasons"])
+        self.assertIn("OFFICIAL_SOURCE_FETCH_OR_SCHEMA_FAILURE",r["review_reasons"])
+        self.assertFalse(r["release_permitted"])
+
     def test_sample_response_byte_change_is_a_signal_not_certified_delta(self):
         changed=dict(CODES)
         changed["0101210000"]="a"*64
