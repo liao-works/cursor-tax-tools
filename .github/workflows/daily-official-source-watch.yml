@@ -9,6 +9,7 @@ on:
     paths: [ops/daily-official-source-launch.txt]
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: official-daily-source-watch-${{ github.ref }}
   cancel-in-progress: false
@@ -23,15 +24,66 @@ jobs:
           python-version: '3.11'
       - name: Official version, failed XI response, actual candidate expiry and no-release tests
         run: python -m unittest discover -s tests -p 'test_daily_official_change_watch.py' -v
+      - name: Discover latest successful WEEKLY GB and XI acceptance receipts
+        id: source_receipts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          BRANCH="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.default_branch')"
+          find_receipt() {
+            local workflow="$1" prefix="$2" output="$3" run id
+            for run in $(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?branch=$BRANCH&status=success&per_page=12" --jq '.workflow_runs[].id'); do
+              id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" \
+                --jq ".artifacts[] | select(.name == \"$prefix-$run\" and .expired == false) | .id" | head -1)"
+              if [[ -n "$id" ]]; then
+                echo "$output=$run" >> "$GITHUB_OUTPUT"
+                echo "::notice::Found SHA-accepted $workflow full source receipt run=$run"
+                return 0
+              fi
+            done
+            echo "::warning::No completed $workflow full-source receipt; using pinned 2026-10-14 reviewed fallback and source-age gate"
+            echo "$output=" >> "$GITHUB_OUTPUT"
+          }
+          find_receipt weekly-gb-full-source.yml gb-daily-watch-pin gb_run
+          find_receipt xi-public-full-measures.yml xi-daily-watch-baseline xi_run
+      - name: Download latest accepted GB weekly PIN WITHOUT giant source archive
+        if: steps.source_receipts.outputs.gb_run != ''
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ steps.source_receipts.outputs.gb_run }}
+          name: gb-daily-watch-pin-${{ steps.source_receipts.outputs.gb_run }}
+          github-token: ${{ github.token }}
+          path: evidence/gb
+      - name: Download latest accepted XI weekly DIGEST WITHOUT giant raw shards
+        if: steps.source_receipts.outputs.xi_run != ''
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ steps.source_receipts.outputs.xi_run }}
+          name: xi-daily-watch-baseline-${{ steps.source_receipts.outputs.xi_run }}
+          github-token: ${{ github.token }}
+          path: evidence/ni
       - name: Fetch official GB latest version and 6 independently pinned public XI raw responses
         id: daily
         continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
+          BASELINE=ops/xi-daily-canary-baseline-20261014.json
+          GB_PIN=v4.0.1627
+          GB_DATE=2026-10-14
+          if [[ -f evidence/ni/xi-daily-watch-baseline.json ]]; then
+            BASELINE=evidence/ni/xi-daily-watch-baseline.json
+          fi
+          if [[ -f evidence/gb/gb-weekly-pin.txt && -f evidence/gb/gb-weekly-as-of.txt ]]; then
+            GB_PIN="$(cat evidence/gb/gb-weekly-pin.txt)"
+            GB_DATE="$(cat evidence/gb/gb-weekly-as-of.txt)"
+          fi
           python -m src.target_duty.daily_official_change_watch \
-            --baseline ops/xi-daily-canary-baseline-20261014.json \
-            --gb-baseline-version v4.0.1627 \
+            --baseline "$BASELINE" \
+            --gb-baseline-version "$GB_PIN" \
+            --gb-baseline-date "$GB_DATE" \
             --as-of "$(date -u +%F)" \
             --output daily-official-source-signals.json
       - name: Preserve SHA fingerprints and review triggers even on source error
