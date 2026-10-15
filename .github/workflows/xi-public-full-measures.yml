@@ -198,6 +198,25 @@ jobs:
         continue-on-error: true
         run: |
           python -m src.target_duty.xi_public_full_capture accept --catalogue xi-public-full-catalogue.db --manifest xi-public-frozen-manifest.json --merged xi-public-full-merged.db --output xi-public-full-acceptance.json
+      - name: Derive compact NEW-date canary + expiry baseline only after full acceptance
+        id: daily_baseline
+        if: steps.acceptance.outcome == 'success'
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.xi_daily_baseline \
+            --merged xi-public-full-merged.db \
+            --manifest xi-public-frozen-manifest.json \
+            --acceptance xi-public-full-acceptance.json \
+            --run-id "${{ github.run_id }}" \
+            --output xi-daily-watch-baseline.json
+      - name: Preserve small daily baseline independently of giant raw shards
+        if: steps.daily_baseline.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: xi-daily-watch-baseline-${{ github.run_id }}
+          path: xi-daily-watch-baseline.json
+          retention-days: 30
+          if-no-files-found: error
       - name: Preserve final source evidence, never publish
         if: always()
         uses: actions/upload-artifact@v4
@@ -216,9 +235,10 @@ jobs:
           COLLECT: ${{ needs.collect.result }}
           MERGE: ${{ steps.merge.outcome }}
           ACCEPT: ${{ steps.acceptance.outcome }}
+          BASELINE: ${{ steps.daily_baseline.outcome }}
         run: |
           set -euo pipefail
-          if [[ "$COLLECT" != success || "$MERGE" != success || "$ACCEPT" != success ]]; then
+          if [[ "$COLLECT" != success || "$MERGE" != success || "$ACCEPT" != success || "$BASELINE" != success ]]; then
             echo "::error::Public XI source incomplete or invalid; no publish"
             exit 1
           fi
