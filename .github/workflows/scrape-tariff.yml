@@ -28,11 +28,9 @@ on:
         required: false
         default: '120'
 
-  schedule:
-    - cron: '0 4 1 * *'  # 每月1日凌晨4点
 
 permissions:
-  contents: write
+  contents: read
   actions: read
   pull-requests: read
 
@@ -292,54 +290,12 @@ jobs:
         > INFO: 由 GitHub Actions 自动生成 | 数据版本: data-${{ github.run_number }}
         EOF
 
-    - name: 发布数据更新
-      if: steps.publish_check.outputs.should_publish == 'true'
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: data-${{ github.run_number }}
-        name: "INFO: 关税数据 v${{ github.run_number }} - $(date +'%Y-%m-%d %H:%M UTC')"
-        body_path: UPDATE_REPORT.md
-        files: |
-          tariffs.db
-          metadata.json
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: 更新latest-data标签
-      if: steps.publish_check.outputs.should_publish == 'true'
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: latest-data
-        name: "INFO: Latest Tariff Data"
-        body: |
-          ## INFO: 最新关税数据
-
-          **版本**: data-${{ github.run_number }}
-          **更新时间**: $(date -u +'%Y-%m-%d %H:%M UTC')
-          **记录数量**: ${{ steps.health_check.outputs.record_count }}
-          **文件大小**: ${{ steps.file_info.outputs.file_size }}
-          **质量分数**: ${{ steps.health_check.outputs.quality_score }}/100
-
-          ## INFO: 下载地址
-          - **元数据**: [metadata.json](https://github.com/${{ github.repository }}/releases/download/latest-data/metadata.json)
-          - **数据库**: [tariffs.db](https://github.com/${{ github.repository }}/releases/download/latest-data/tariffs.db)
-
-          ## INFO: 质量指标
-          - **数据完整性**: ${{ steps.health_check.outputs.quality_score }}/100
-          - **错误率**: ${{ steps.health_check.outputs.error_count }}/${{ steps.health_check.outputs.record_count }}
-          - **总变更**: ${{ steps.metadata.outputs.total_changes }}
-
-          ---
-          > INFO: 客户端应先检查元数据再下载数据库
-        files: |
-          tariffs.db
-          metadata.json
-        draft: false
-        prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    # Production release actions were removed pending a signed, full-source
+    # approval gate. This legacy scraper now emits review artifacts only.
+    - name: 发布保护：只保留审核产物
+      run: |
+        echo "::notice::Unsafe legacy latest-data release disabled; no production write"
+        echo "Use independently verified official full-source pipeline and an explicitly approved publisher."
 
     - name: 结果总结
       run: |
