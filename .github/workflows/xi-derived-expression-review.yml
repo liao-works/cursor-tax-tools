@@ -1,0 +1,100 @@
+name: NI source-linked duty expression projection (REVIEW only)
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/target-third-country-duty-v1]
+    paths: [ops/xi-derived-expression-launch.txt]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: xi-source-expression-review-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  project:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify realistic nested source expression fixtures
+        run: python -m unittest discover -s tests -p 'test_xi_duty_projection.py' -v
+      - name: Restore original 97-chapter frozen public source catalogue
+        uses: actions/download-artifact@v4
+        with:
+          name: xi-public-full-catalogue-38567997207
+          run-id: 38567997207
+          github-token: ${{ github.token }}
+          path: evidence
+      - name: Restore four SHA-frozen raw commodity source shards
+        uses: actions/download-artifact@v4
+        with:
+          pattern: xi-public-full-shard-*-38567997207
+          run-id: 38567997207
+          github-token: ${{ github.token }}
+          path: evidence/shards
+      - name: Independently replay original raw source responses and export complete gap map
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import glob
+          from src.target_duty.xi_public_full_capture import verify_public
+          from src.target_duty.xi_public_gap_ledger import gaps
+          base="evidence/xi-public-full-catalogue.db"
+          manifest="evidence/xi-public-frozen-manifest.json"
+          original=verify_public(base,manifest)
+          assert original["as_of"]=="2026-10-14"
+          assert original["active_declarable_codes"]==16728
+          paths=sorted(glob.glob("evidence/shards/xi-public-full-shard-*-38567997207/xi-public-shard-*.db"))
+          if len(paths)!=4:
+              raise SystemExit(f"Missing original source shards: {len(paths)} of 4")
+          report=gaps(base,manifest,paths,
+                      output_report="xi-source-replay-gaps.json",
+                      output_csv="xi-source-replay-gaps.csv")
+          assert report["public_source_complete"]
+          assert report["replayed_successful_responses"]==16728
+          assert report["missing_responses"]==report["source_errors"]==0
+          print("Full NI original commodity responses independently replayed")
+          PY
+      - name: Recover original source duty expression linked nodes (no API re-fetch)
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,glob,json
+          from collections import Counter
+          from src.target_duty.xi_duty_projection import export
+          paths=sorted(glob.glob("evidence/shards/xi-public-full-shard-*-38567997207/xi-public-shard-*.db"))
+          report=export("evidence/xi-public-full-catalogue.db",
+                        "evidence/xi-public-frozen-manifest.json",
+                        paths,output_csv="xi-third-country-expression-candidates.csv",
+                        output_report="xi-third-country-expression-summary.json")
+          assert report["raw_source_complete"]
+          assert report["responses_verified"]==16728
+          assert report["candidate_measures"]==17395
+          assert report["candidate_codes"]==16630
+          assert not report["ni_other_verified"]
+          assert not report["production_eligible"]
+          stats=Counter()
+          with open("xi-third-country-expression-candidates.csv",newline="") as f:
+              for row in csv.DictReader(f):
+                  stats["candidates"]+=1
+                  stats["with_expression" if row["candidate_expression"] else "without_expression"]+=1
+                  assert row["ni_other_payable_rate"]==""
+                  assert row["production_eligible"]=="false"
+          assert stats["candidates"]==report["candidate_measures"]
+          print("Official-source derived unverified candidates:",dict(stats))
+          PY
+      - name: Archive derived evidence and original-source gap verification only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xi-duty-expression-review-${{ github.run_id }}
+          path: |
+            xi-third-country-expression-candidates.csv
+            xi-third-country-expression-summary.json
+            xi-source-replay-gaps.csv
+            xi-source-replay-gaps.json
+          if-no-files-found: warn
+          retention-days: 30
