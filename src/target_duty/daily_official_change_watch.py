@@ -31,9 +31,11 @@ def check_baseline(baseline: dict, on: date) -> None:
         raise ValueError("XI baseline must be explicitly source-only")
     if baseline.get("original_codes_verified",0)<10000:
         raise ValueError("No independently accepted full XI inventory")
-    for k in ("catalogue_sha256","original_candidate_detail_csv_sha256"):
-        if not HEX.fullmatch(str(baseline.get(k))):
-            raise ValueError("Missing pinned XI provenance: "+k)
+    if not HEX.fullmatch(str(baseline.get("catalogue_sha256"))):
+        raise ValueError("Missing pinned XI catalogue SHA")
+    if not any(HEX.fullmatch(str(baseline.get(k))) for k in
+               ("original_candidate_detail_csv_sha256","source_merged_db_sha256")):
+        raise ValueError("Missing independently accepted XI original-source digest")
     codes=baseline.get("canary_response_sha256")
     if not isinstance(codes,dict) or len(codes)<6 or len(codes)>30:
         raise ValueError("Six to thirty pinned source canaries required")
