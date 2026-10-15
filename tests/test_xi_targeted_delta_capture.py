@@ -79,11 +79,28 @@ class XITargetedCaptureTests(unittest.TestCase):
         self.assertEqual(r["failed_responses"],0)
         self.assertTrue(r["source_success_complete"])
         self.assertFalse(r["NI_Other_payable_certified"])
+        self.assertEqual(r["measures_present_on_inclusive_end_day"],0)
         with sqlite3.connect(self.db) as db:
             for code,fingerprint,blob in db.execute(
                     "SELECT code,response_sha256,compressed_raw_json FROM source_responses"):
                 self.assertEqual(sha_bytes(zlib.decompress(blob)),fingerprint)
                 self.assertEqual(json.loads(zlib.decompress(blob))["data"]["id"],code)
+
+    def test_same_source_measure_on_last_valid_day_is_not_early_expiration(self):
+        # Original old ID m1 matches public sample; the date itself remains valid.
+        with self.queue.open("r",newline="") as f:
+            rows=list(csv.DictReader(f))
+        for row in rows:
+            row["measure_id"]="m1"
+        with self.queue.open("w",newline="") as f:
+            writer=csv.DictWriter(f,fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+        self.proof["impact_queue_csv_sha256"]=sha(str(self.queue))
+        self.write()
+        out=self.collect(lambda code,day: payload(code))
+        self.assertEqual(out["measures_present_on_inclusive_end_day"],2)
+        self.assertEqual(out["measures_still_present_after_end_needing_review"],0)
 
     def test_one_http_failure_must_not_write_apparent_complete_database(self):
         def fetcher(code,day):
