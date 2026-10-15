@@ -89,3 +89,23 @@ They do not perform a release even for hypothetical all-green test input.
 
 Source PR: https://github.com/liao-works/cursor-tax-tools/pull/6
 Desktop updater: https://github.com/liao-works/liao-tools/blob/master/src-tauri/src/commands/tax/downloader.rs
+
+### Independent reproducibility and current-day DBT check
+
+The owner-facing 2026-10-15 evidence archive locally executed 24 SHA-256,
+record count, source-scope, code/measure uniqueness and fail-closed assertions:
+24 passed, 0 failed. This certifies source evidence only, not payable rates.
+Current GitHub `latest-data` asset update is 2026-10-01T11:13:05Z,
+14 calendar days before review; GB latest version metadata discovery
+[38668803890](https://github.com/liao-works/cursor-tax-tools/actions/runs/38668803890)
+at 2026-10-15T02:01:45Z still showed v4.0.1627, matching the separately
+replayed 2026-10-14 source candidate version. It does not attest a
+current-day full row-by-row export replay.
+
+The [liao-tools Windows component CI #38661053797](https://github.com/liao-works/liao-tools/actions/runs/38661053797)
+passed normal `downloader`, `preview`, `signed`, `ni_review` Rust checks.
+That is NOT fault injection proving crash-consistent installation.
+
+The source project's [CI #38669713157](https://github.com/liao-works/cursor-tax-tools/actions/runs/38669713157)
+passed fail-closed final audit-gate injection tests; its policy cannot
+produce any production data/release even when all mock statuses are green.
