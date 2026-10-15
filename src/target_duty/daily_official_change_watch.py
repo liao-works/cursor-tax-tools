@@ -53,7 +53,7 @@ def check_baseline(baseline: dict, on: date) -> None:
 
 def classify(baseline: dict, *, official_gb: dict, gb_base_version: str,
              ni_response_sha: dict, on: date, source_errors: dict|None=None,
-             max_baseline_age_days: int=7) -> dict:
+             max_baseline_age_days: int=7, gb_baseline_as_of: date|None=None) -> dict:
     """Triages a proven limited-scope signal, never claims a full NI diff."""
     check_baseline(baseline,on)
     version_key(gb_base_version)
@@ -84,6 +84,10 @@ def classify(baseline: dict, *, official_gb: dict, gb_base_version: str,
                    if baseline["canary_response_sha256"][code]!=sha)
     dated=date.fromisoformat(baseline["source_as_of"])
     elapsed=(on-dated).days
+    gb_dated=gb_baseline_as_of or dated
+    if gb_dated>on:
+        raise ValueError("Cannot use a future GB baseline")
+    gb_elapsed=(on-gb_dated).days
     # Include all unreviewed expiries since frozen source, not just today's,
     # otherwise a missed daily run can silently skip a legal boundary.
     ending=[{"date":day,"candidate_measures":n} for day,n in
@@ -98,12 +102,16 @@ def classify(baseline: dict, *, official_gb: dict, gb_base_version: str,
         reasons.append("NI_KNOWN_103_105_EFFECTIVE_END_BOUNDARIES")
     if elapsed>max_baseline_age_days:
         reasons.append("NI_WHOLE_SOURCE_BASELINE_TOO_OLD")
+    if gb_elapsed>max_baseline_age_days:
+        reasons.append("GB_WHOLE_SOURCE_BASELINE_TOO_OLD")
     if errors:
         reasons.append("OFFICIAL_SOURCE_FETCH_OR_SCHEMA_FAILURE")
     return {
         "kind":"gb-ni-daily-official-change-signal-v1",
         "checked_as_of":on.isoformat(),
         "gb_baseline_pin":gb_base_version,
+        "gb_baseline_as_of":gb_dated.isoformat(),
+        "gb_baseline_age_days":gb_elapsed,
         "gb_official_newest_pin":new,
         "gb_official_schema_ready":ready,
         "gb_version_changed":version_changed,
@@ -127,7 +135,8 @@ def classify(baseline: dict, *, official_gb: dict, gb_base_version: str,
 
 
 def inspect(baseline: dict, *, on: date, gb_base_version: str,
-            fetcher=None, gb_metadata=None, sleep_seconds: float=0.4) -> dict:
+            fetcher=None, gb_metadata=None, sleep_seconds: float=0.4,
+            gb_baseline_as_of: date|None=None) -> dict:
     check_baseline(baseline,on)
     fetcher=fetcher or managed_fetcher("","",public=True)
     try:
@@ -152,19 +161,22 @@ def inspect(baseline: dict, *, on: date, gb_base_version: str,
         if sleep_seconds:
             time.sleep(sleep_seconds)
     return classify(baseline,official_gb=official,gb_base_version=gb_base_version,
-                    ni_response_sha=signatures,on=on,source_errors=errors)
+                    ni_response_sha=signatures,on=on,source_errors=errors,
+                    gb_baseline_as_of=gb_baseline_as_of)
 
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--baseline",default="ops/xi-daily-canary-baseline-20261014.json")
     p.add_argument("--gb-baseline-version",default="v4.0.1627")
+    p.add_argument("--gb-baseline-date",default="2026-10-14")
     p.add_argument("--as-of",default=date.today().isoformat())
     p.add_argument("--output",default="daily-official-change-review.json")
     a=p.parse_args()
     baseline=json.loads(Path(a.baseline).read_text(encoding="utf-8"))
     receipt=inspect(baseline,on=date.fromisoformat(a.as_of),
-                    gb_base_version=a.gb_baseline_version)
+                    gb_base_version=a.gb_baseline_version,
+                    gb_baseline_as_of=date.fromisoformat(a.gb_baseline_date))
     Path(a.output).write_text(json.dumps(receipt,ensure_ascii=False,indent=2)+"\n",
                               encoding="utf-8")
     print(json.dumps(receipt,ensure_ascii=False,indent=2))
