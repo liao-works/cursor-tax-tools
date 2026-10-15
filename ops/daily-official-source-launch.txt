@@ -1,0 +1,4 @@
+Run date: 2026-10-15
+Purpose: first live read-only daily GB newest-version + NI public raw SHA canary + 103/105 expiration watch.
+Fallback: independently pinned 2026-10-14 NI six-code source, automatic weekly refresh receipts selected when available.
+NEVER certify NI payable Other, never alter latest-data, never overwrite desktop tariffs.db.
