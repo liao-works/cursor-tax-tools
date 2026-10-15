@@ -1,0 +1,39 @@
+name: GB/NI source delta batch 3 evidence-only CI
+on:
+  push:
+    branches: [feat/gb-ni-source-delta-batch3-20261015]
+  pull_request:
+    paths:
+      - 'src/target_duty/full_source_delta_scope.py'
+      - 'src/target_duty/xi_date_impact_queue.py'
+      - 'src/target_duty/xi_targeted_delta_capture.py'
+      - 'src/target_duty/xi_duty_projection.py'
+      - 'tests/test_full_source_delta_scope.py'
+      - 'tests/test_xi_date_impact_queue.py'
+      - 'tests/test_xi_targeted_delta_capture.py'
+      - 'tests/test_xi_duty_projection.py'
+      - 'tests/test_stage3_workflow_safety.py'
+      - '.github/workflows/gb-ni-exact-full-source-diff.yml'
+      - '.github/workflows/xi-known-expiry-refetch.yml'
+      - '.github/workflows/gb-ni-source-delta-batch3-ci.yml'
+permissions:
+  contents: read
+jobs:
+  delta-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Manual-only diff/refetch workflow security contract
+        run: python -m unittest discover -s tests -p 'test_stage3_workflow_safety.py' -v
+      - name: Complete original GB and XI code impact and tamper failure tests
+        run: python -m unittest discover -s tests -p 'test_full_source_delta_scope.py' -v
+      - name: NI end-of-validity dates through exact original affected codes
+        run: python -m unittest discover -s tests -p 'test_xi_date_impact_queue.py' -v
+      - name: NI linked import measure expression safety tests
+        run: python -m unittest discover -s tests -p 'test_xi_duty_projection.py' -v
+      - name: NI targeted live original response or source error all-or-nothing
+        run: python -m unittest discover -s tests -p 'test_xi_targeted_delta_capture.py' -v
