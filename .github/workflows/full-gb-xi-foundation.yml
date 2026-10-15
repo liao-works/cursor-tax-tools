@@ -17,6 +17,8 @@ on:
       - 'src/target_duty/xi_duty_projection.py'
       - 'src/target_duty/xi_condition_evidence.py'
       - 'src/target_duty/xi_live_date_canary.py'
+      - 'src/target_duty/final_release_gate.py'
+      - 'tests/test_final_release_gate.py'
       - 'tests/test_xi_live_date_canary.py'
       - '.github/workflows/xi-live-date-canary.yml'
       - 'tests/test_xi_condition_evidence.py'
@@ -132,5 +134,7 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_xi_archive.py' -v
       - name: XI S3 Object Lock upload/download recovery failure injection
         run: python -m unittest discover -s tests -p 'test_xi_s3_vault.py' -v
+      - name: Four-dimension final data release readiness fail-closed injection tests
+        run: python -m unittest discover -s tests -p 'test_final_release_gate.py' -v
       - name: Existing region evidence contract regression
         run: python -m unittest discover -s tests -p 'test_region_measures.py' -v
