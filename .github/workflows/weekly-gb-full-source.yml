@@ -116,6 +116,16 @@ jobs:
                 "rows /",report["official_active_leaves"],"active leaves")
           print("Candidate source ONLY; not legally payable GB or NI rate")
           PY
+      - name: Publish compact GB weekly source baseline for read-only daily watch
+        uses: actions/upload-artifact@v4
+        with:
+          name: gb-daily-watch-pin-${{ github.run_id }}
+          path: |
+            gb-weekly-pin.txt
+            gb-weekly-as-of.txt
+            gb-weekly-measures.json
+          retention-days: 30
+          if-no-files-found: error
       - name: Archive complete source, pinned hashes and separate review database
         if: always()
         uses: actions/upload-artifact@v4
