@@ -25,6 +25,9 @@ on:
       - 'src/target_duty/gb_compact_impact_queue.py'
       - 'tests/test_gb_compact_impact_queue.py'
       - 'src/target_duty/xi_date_impact_queue.py'
+      - 'src/target_duty/xi_targeted_delta_capture.py'
+      - 'tests/test_xi_targeted_delta_capture.py'
+      - '.github/workflows/xi-targeted-delta-refetch.yml'
       - 'tests/test_xi_date_impact_queue.py'
       - '.github/workflows/xi-date-impact-queue.yml'
       - '.github/workflows/dbt-newest-replay-shadow.yml'
@@ -160,6 +163,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_xi_s3_vault.py' -v
       - name: Weekly full-source canary source provenance, missing response and date baseline tests
         run: python -m unittest discover -s tests -p 'test_xi_daily_baseline.py' -v
+      - name: NI verified source-only exact affected-code live refetch and one-503 failure injection
+        run: python -m unittest discover -s tests -p 'test_xi_targeted_delta_capture.py' -v
       - name: Actual NI source expiry-to-code queue and GB 103 measure-change scope tests
         run: |
           python -m unittest discover -s tests -p 'test_gb_compact_impact_queue.py' -v
