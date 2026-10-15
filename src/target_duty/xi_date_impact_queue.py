@@ -12,7 +12,7 @@ import hashlib
 import json
 import re
 from collections import Counter
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 CODE=re.compile(r"[0-9]{10}\Z")
@@ -70,6 +70,9 @@ def collect(csv_source: str, summary_source: str, output_csv: str, output_report
                     "code":code,"measure_id":mid,"candidate_type":row["measure_type"],
                     "geography_id":row["geography_id"],
                     "effective_end":finish.isoformat(),
+                    "first_calendar_day_after_end":(finish+timedelta(days=1)).isoformat(),
+                    "boundary_phase":"ending_today_active_through_end" if finish==through else
+                                     "after_source_end_date",
                     "review_reason":"KNOWN_103_105_SOURCE_END",
                     "current_source_refetched":"false",
                     "payable_rate":"","production_eligible":"false",
@@ -81,7 +84,8 @@ def collect(csv_source: str, summary_source: str, output_csv: str, output_report
     dest=Path(output_csv)
     dest.parent.mkdir(parents=True,exist_ok=True)
     fields=["code","measure_id","candidate_type","geography_id",
-            "effective_end","review_reason","current_source_refetched",
+            "effective_end","first_calendar_day_after_end","boundary_phase",
+            "review_reason","current_source_refetched",
             "payable_rate","production_eligible"]
     with dest.open("w",encoding="utf-8",newline="") as f:
         w=csv.DictWriter(f,fieldnames=fields)
@@ -98,6 +102,8 @@ def collect(csv_source: str, summary_source: str, output_csv: str, output_report
         "candidate_effective_end_measures":len(matches),
         "affected_distinct_codes":len({x["code"] for x in matches}),
         "ending_on_dates":dict(sorted(details.items())),
+        "source_effective_end_inclusive_calendar_day":True,
+        "warning":"Ending on review date is a transition alert, not proof the rate ended before that date.",
         "original_condition_source_csv_sha256":proof["output_csv_sha256"],
         "impact_queue_csv_sha256":sha(str(dest)),
         "delta_scope":"KNOWN expired 103/105 candidates ONLY",
