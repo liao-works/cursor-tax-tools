@@ -62,3 +62,35 @@ and not-at-risk alone does not establish the actual payable rate.
 - Cross-check multiple actual government tariff pages and legal acts.
 - Resolve GB complex duty and legacy-code migrations separately.
 - Keep Draft PR #6, do not overwrite latest-data or production tariffs.db.
+
+## Actual final evidence acceptance — confirmed from run 38668119886
+
+The full source-only Actions run succeeded. Separately downloaded and checked
+the candidate-details artifact: output 17,395 rows, 17,395 unique
+(code, measure_id) keys, 16,630 distinct codes and an exact CSV SHA-256 match.
+All 16,728 frozen raw source responses were replayed successfully.
+
+Source reality: 860 candidate measures have conditions, 860 have condition
+permutation groups, 305 have exclusion geography, and 0 source references
+were unresolved. Additional-code relation is NOT EXPOSED in 16,970 rows,
+and 425 rows contain an actual additional-code reference. This is a key
+source API visibility limitation, NOT evidence that 16,970 measures lack
+additional-code eligibility requirements.
+
+Official-source CSV digest:
+6efc3a13a3ab0f1d48d20ff267e13f8a6f02a9f5ca605429422e813225d398e4
+
+All rows retained blank payable NI Other duty, production_eligible=false.
+
+## Real latest-day source drift spotcheck
+
+The independent source drift canary fetches six selected official public XI
+commodity responses with as_of=2026-10-15, compares 103/105 candidate
+identities/expressions/conditions to the original frozen 2026-10-14 response.
+Run: https://github.com/liao-works/cursor-tax-tools/actions/runs/38668603005
+Changes to JSON alone are distinguished from actual candidate changes.
+Any HTTP or replay error is retained as an explicit failed canary. Even a
+successful six-code comparison cannot establish all 16,728 current cases.
+
+Regulatory reference for the EU/UK duty branching:
+https://www.gov.uk/guidance/how-to-make-sure-the-correct-duty-is-applied-to-goods-you-bring-into-northern-ireland-from-countries-outside-of-the-eu-and-uk
