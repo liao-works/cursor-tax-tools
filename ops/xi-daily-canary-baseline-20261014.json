@@ -1,0 +1,30 @@
+{
+  "kind": "xi-daily-source-canary-baseline-v1",
+  "source_run_id": 38567997207,
+  "source_as_of": "2026-10-14",
+  "catalogue_sha256": "f87f5c1e82b866fe8d47646257061ec2061cf7d291a23bcd065173f1ef67df1b",
+  "original_candidate_detail_csv_sha256": "6efc3a13a3ab0f1d48d20ff267e13f8a6f02a9f5ca605429422e813225d398e4",
+  "original_codes_verified": 16728,
+  "third_country_source_candidates": 17395,
+  "canary_response_sha256": {
+    "0101210000": "7b37c60f74a9d2b16d55d9ae24f64037e4d06374c5f281d967d48872c21e7b83",
+    "0101299000": "08c083da1a785f935077bbed9fb151d5d13888061681dcfd71a0aeb9e566cfb1",
+    "0207412010": "68f8b37b8a5660b6d7f0f6fd02890d6d6870985d1f3da2ce8dc1974222195e67",
+    "0713101000": "28ddba8251f13b2236b80a4552359c1d0e2d6c8d2ac34c56dda895d6cdd29410",
+    "0713109000": "e9e0ffa607e494a11131fad6df443a22a4bc9616e2db851d7f0bce3f7acff026",
+    "0805102210": "5d9ddb7bfb41df899e0d1c87e8d300c6c94d6e03e772661d75852cd7c32d5a66"
+  },
+  "known_103_105_end_dates": {
+    "2026-10-15": 8,
+    "2026-10-31": 47,
+    "2026-11-15": 1,
+    "2026-11-30": 5,
+    "2026-12-15": 1,
+    "2026-12-31": 80,
+    "2027-06-01": 8,
+    "2027-06-30": 124
+  },
+  "ni_other_verified": false,
+  "production_eligible": false,
+  "caveat": "Frozen source-only sampled fingerprints and known 103/105 ends; excludes other measures and future measures not active at source date."
+}
