@@ -12,6 +12,9 @@ on:
       - 'src/target_duty/dbt_version_discovery.py'
       - 'src/target_duty/catalog.py'
       - 'src/target_duty/build.py'
+  push:
+    branches: [feat/target-third-country-duty-v1]
+    paths: [ops/gb-incremental-review-launch.txt]
   workflow_dispatch:
     inputs:
       baseline_run_id:
@@ -190,6 +193,27 @@ jobs:
           print("Real GB prior/current full-source differences:",d["counts"])
           print("High-risk change review:",d["high_risk_change_present"])
           PY
+      - name: Export exact changed 103 GB source candidate codes for independent review
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.gb_compact_impact_queue \
+            --before baseline/gb-compact-103-review.db \
+            --after gb-newest-compact-review.db \
+            --csv gb-changed-103-source-codes.csv \
+            --report gb-changed-103-source-codes.json
+          python - <<'PY'
+          import csv,json
+          r=json.load(open("gb-changed-103-source-codes.json"))
+          with open("gb-changed-103-source-codes.csv",newline="") as f:
+              items=list(csv.DictReader(f))
+          assert len(items)==r["affected_commodity_codes"]
+          assert len({row["code"] for row in items})==len(items)
+          assert r["production_eligible"] is False
+          assert r["other_measures_proven_unchanged"] is False
+          assert all(not x["payable_rate"] for x in items)
+          print("Full exact GB 103 candidate REVIEW queue:",len(items))
+          PY
       - name: Archive full and compact source evidence proofs (review only)
         if: always()
         uses: actions/upload-artifact@v4
@@ -206,6 +230,8 @@ jobs:
             gb-newest-compact-review.json
             gb-newest-compact-review.db
             gb-newest-versus-baseline.json
+            gb-changed-103-source-codes.csv
+            gb-changed-103-source-codes.json
             gb-newest-all-codes.csv
             gb-newest-code-coverage.json
           if-no-files-found: warn
