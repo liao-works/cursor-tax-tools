@@ -4,3 +4,5 @@ Fallback: independently pinned 2026-10-14 NI six-code source, automatic weekly r
 NEVER certify NI payable Other, never alter latest-data, never overwrite desktop tariffs.db.
 
 Retry source scan after guarding GitHub 404 for weekly workflow not yet on default branch.
+
+Rerun classification after recorded new v4.0.1628 without published DBT tables on 2026-10-15.
