@@ -94,3 +94,19 @@ successful six-code comparison cannot establish all 16,728 current cases.
 
 Regulatory reference for the EU/UK duty branching:
 https://www.gov.uk/guidance/how-to-make-sure-the-correct-duty-is-applied-to-goods-you-bring-into-northern-ireland-from-countries-outside-of-the-eu-and-uk
+
+### Actual live 2026-10-15 date canary acceptance
+
+Run 38668603005 succeeded. Six original frozen public XI source codes
+(0101210000, 0101299000, 0207412010, 0713101000, 0713109000,
+0805102210) were queried against as_of=2026-10-15 with the public API.
+All six fetched without error. All six original response SHA-256 values
+matched the 2026-10-14 frozen responses and the 103/105 candidate measure
+set, effective dates, duty expressions and condition counts did not drift.
+Semantic candidate changes: 0 of 6; this DOES NOT establish currency
+for all 16,728 XI commodities.
+
+All 17,395 original NI condition/legislation evidence rows were independently
+downloaded and checked for a unique (code, measure_id) key and exact CSV
+SHA-256 parity (6efc3a13a3ab0f1d48d20ff267e13f8a6f02a9f5ca605429422e813225d398e4).
+Source claims remain non-atomic, public-only, and not payable duty certified.
