@@ -1,0 +1,113 @@
+name: XI full-conditions expiry to fresh exact-code public source (REVIEW ONLY)
+on:
+  workflow_dispatch:
+    inputs:
+      original_conditions_run_id:
+        description: Successful complete-original NI condition evidence run ID
+        required: true
+        type: string
+      as_of:
+        description: YYYY-MM-DD review date (blank = current UTC date)
+        required: false
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: xi-known-expiry-review-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  targeted-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Pin requested review date; reject future official source
+        id: date
+        env:
+          REQUESTED: ${{ inputs.as_of }}
+          ORIGINAL_RUN: ${{ inputs.original_conditions_run_id }}
+        run: |
+          set -euo pipefail
+          DAY="$REQUESTED"
+          if [[ -z "$DAY" ]]; then DAY="$(date -u +%F)"; fi
+          python - "$DAY" "$ORIGINAL_RUN" <<'PY'
+          from datetime import date,datetime,timezone
+          import re,sys
+          day=date.fromisoformat(sys.argv[1])
+          if day>datetime.now(timezone.utc).date():
+              raise SystemExit("Cannot assert a future official source date")
+          if not re.fullmatch(r"[0-9]{8,16}",sys.argv[2]):
+              raise SystemExit("Unknown original evidence run ID")
+          PY
+          echo "day=$DAY" >> "$GITHUB_OUTPUT"
+      - name: Restore COMPLETE SHA-accepted original NI condition evidence
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.original_conditions_run_id }}
+          name: xi-original-condition-evidence-${{ inputs.original_conditions_run_id }}
+          github-token: ${{ github.token }}
+          path: source
+      - name: Compute exact commodity code impact from ALL original candidate endings
+        id: impact
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.xi_date_impact_queue \
+            --source-csv source/xi-condition-details-candidates.csv \
+            --source-summary source/xi-condition-details-summary.json \
+            --through "${{ steps.date.outputs.day }}" \
+            --csv xi-changed-source-codes.csv \
+            --report xi-changed-source-report.json
+          python - <<'PY'
+          import json,os
+          x=json.load(open("xi-changed-source-report.json"))
+          assert x["production_eligible"] is False
+          with open(os.environ["GITHUB_OUTPUT"],"a") as f:
+              f.write("affected="+str(x["affected_distinct_codes"])+"\n")
+          PY
+      - name: Re-fetch official public XI raw sources only for affected code set
+        id: refetch
+        if: steps.impact.outputs.affected != '0'
+        continue-on-error: true
+        run: |
+          python -m src.target_duty.xi_targeted_delta_capture \
+            --queue-csv xi-changed-source-codes.csv \
+            --queue-report xi-changed-source-report.json \
+            --as-of "${{ steps.date.outputs.day }}" \
+            --output-db xi-changed-original-responses.db \
+            --output-report xi-targeted-source-review.json
+      - name: Archive review data and source errors, no release
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xi-known-expiry-source-review-${{ github.run_id }}
+          path: |
+            xi-changed-source-codes.csv
+            xi-changed-source-report.json
+            xi-changed-original-responses.db
+            xi-targeted-source-review.json
+          retention-days: 30
+          if-no-files-found: warn
+      - name: No data means no targeted work, any missing requested source blocks
+        env:
+          AFFECTED: ${{ steps.impact.outputs.affected }}
+          REFETCH: ${{ steps.refetch.outcome }}
+        run: |
+          set -euo pipefail
+          if [[ "$AFFECTED" == "0" ]]; then
+            echo "::notice::No known 103/105 source-end candidate changes in this date window"
+          else
+            [[ "$REFETCH" == success ]] || { echo "::error::Unverified XI source responses"; exit 1; }
+            python - <<'PY'
+          import json
+          r=json.load(open("xi-targeted-source-review.json"))
+          assert r["source_success_complete"] and r["failed_responses"]==0
+          assert r["selected_distinct_codes"]==r["verified_public_responses"]
+          assert r["NI_Other_payable_certified"] is False
+          assert r["production_eligible"] is False
+          assert r["changed_desktop_db"] is False
+          PY
+          fi
