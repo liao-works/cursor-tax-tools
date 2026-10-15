@@ -1,0 +1,3 @@
+2026-10-15 Stage-2 LIVE READ-ONLY source check.
+Verify actual newest official DBT table status and six authenticated-origin public NI raw canaries from frozen full-source baseline.
+Expected v4.0.1628 metadata schema may be incomplete; report FAIL without publishing or mutating data.

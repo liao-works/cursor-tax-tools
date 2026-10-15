@@ -1,0 +1,6 @@
+XI public API full raw evidence acquisition
+Start date: 2026-10-14
+Frozen official XI PUBLIC full inventory (97 chapters)
+4 independent bounded public API request partitions; no OAuth dependency
+Full original response SHA-256, independent replay and fail-closed acceptance
+Never managed, never NI Other payable duty, never latest-data or tariffs.db

@@ -1,0 +1,144 @@
+name: Weekly GB full official source refresh and pinned replay (SHADOW ONLY)
+on:
+  # Sunday 01:00 UTC / 09:00 Singapore; runs from default branch after merge.
+  # Weekly automatic trigger held until first successful complete-source acceptance.
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: weekly-gb-full-source-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  gb-complete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Official DBT metadata and expanded measures parser regression
+        run: |
+          python -m unittest discover -s tests -p 'test_gb_full_measures.py' -v
+          python -m unittest discover -s tests -p 'test_dbt_version_discovery.py' -v
+      - name: Discover current official DBT version and required CSVW schema
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.dbt_version_discovery \
+            --output gb-weekly-version-discovery.json --require-available
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          info=json.loads(Path("gb-weekly-version-discovery.json").read_text())
+          version=info.get("newest_official_version")
+          if (info.get("state")!="ready_for_full_data_replay"
+                  or not isinstance(version,str)
+                  or not re.fullmatch(r"v[0-9]+(?:\.[0-9]+)*",version)):
+              raise SystemExit("Official DBT latest version not safe for full replay")
+          Path("gb-weekly-pin.txt").write_text(version+"\n")
+          print("PINNED OFFICIAL GB SOURCE",version)
+          PY
+          date -u +%F > gb-weekly-as-of.txt
+      - name: Fetch ALL official GB declarable commodity rows at same pinned version
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.catalog build \
+            --version "$(cat gb-weekly-pin.txt)" \
+            --as-of "$(cat gb-weekly-as-of.txt)" \
+            --output gb-weekly-catalogue.db
+      - name: Download complete original GB DBT expanded-measures CSV
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from src.target_duty.gb_full_measures import download
+          version=Path("gb-weekly-pin.txt").read_text().strip()
+          report=download(version,"gb-weekly-original-measures.csv")
+          Path("gb-weekly-source-download.json").write_text(
+              json.dumps(report,sort_keys=True,indent=2)+"\n")
+          print(json.dumps(report,indent=2))
+          PY
+      - name: Independently replay EVERY original GB measure into isolated review database
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.gb_full_measures \
+            --version "$(cat gb-weekly-pin.txt)" \
+            --as-of "$(cat gb-weekly-as-of.txt)" \
+            --catalogue gb-weekly-catalogue.db \
+            --csv gb-weekly-original-measures.csv \
+            --min-rows 1000000 \
+            --output gb-weekly-measures.db
+      - name: Verify source SHA, all source rows, same pin/date and no payable certification
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib,json,sqlite3
+          from pathlib import Path
+          source=Path("gb-weekly-original-measures.csv")
+          report=json.loads(Path("gb-weekly-measures.json").read_text())
+          download=json.loads(Path("gb-weekly-source-download.json").read_text())
+          meta=json.loads(Path("gb-weekly-catalogue.metadata.json").read_text())
+          pin=Path("gb-weekly-pin.txt").read_text().strip()
+          day=Path("gb-weekly-as-of.txt").read_text().strip()
+          def sha(p):
+              h=hashlib.sha256()
+              with Path(p).open("rb") as f:
+                  for chunk in iter(lambda:f.read(1024*1024),b""):
+                      h.update(chunk)
+              return h.hexdigest()
+          assert report["version"]==meta["resolved_version"]==pin
+          assert report["as_of"]==meta["as_of"]==day
+          assert sha(source)==download["sha256"]==report["source_csv_sha256"]
+          # Historical fully verified GB export had 1,123,765 source rows.
+          # A >10% sudden drop is a source-regression alert requiring review,
+          # not proof that all rate semantics are correct.
+          assert report["source_rows"]>=1_000_000
+          assert report["official_active_leaves"]>=10_000
+          assert report["source_commodity_codes"] >= int(
+              report["official_active_leaves"]*0.90), "Missing most source commodity coverage"
+          assert report["complete_within_dbt_export_scope"]
+          assert report["all_import_duties_verified"] is False
+          assert report["ni_other_verified"] is False
+          assert report["production_eligible"] is False
+          assert sha("gb-weekly-measures.db")==report["database_sha256"]
+          with sqlite3.connect("file:gb-weekly-measures.db?mode=ro",uri=True) as db:
+              assert db.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
+              assert db.execute("SELECT COUNT(*) FROM measures").fetchone()[0]==report["source_rows"]
+              assert db.execute("SELECT SUM(row_count) FROM requests").fetchone()[0]==report["source_rows"]
+          print("GB weekly full source verified",report["source_rows"],
+                "rows /",report["official_active_leaves"],"active leaves")
+          print("Candidate source ONLY; not legally payable GB or NI rate")
+          PY
+      - name: Publish compact GB weekly source baseline for read-only daily watch
+        uses: actions/upload-artifact@v4
+        with:
+          name: gb-daily-watch-pin-${{ github.run_id }}
+          path: |
+            gb-weekly-pin.txt
+            gb-weekly-as-of.txt
+            gb-weekly-measures.json
+          retention-days: 30
+          if-no-files-found: error
+      - name: Archive complete source, pinned hashes and separate review database
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-gb-full-source-${{ github.run_id }}
+          path: |
+            gb-weekly-original-measures.csv
+            gb-weekly-catalogue.db
+            gb-weekly-catalogue.metadata.json
+            gb-weekly-measures.db
+            gb-weekly-measures.json
+            gb-weekly-version-discovery.json
+            gb-weekly-source-download.json
+            gb-weekly-pin.txt
+            gb-weekly-as-of.txt
+          retention-days: 30
+          if-no-files-found: warn
