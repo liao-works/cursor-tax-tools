@@ -1,5 +1,8 @@
 name: Production latest-data integrity and 48h freshness watch (READ ONLY)
 on:
+  push:
+    branches: [feat/target-third-country-duty-v1]
+    paths: [ops/production-freshness-watch-launch.txt]
   schedule:
     - cron: '0 0 * * *'
   workflow_dispatch:
