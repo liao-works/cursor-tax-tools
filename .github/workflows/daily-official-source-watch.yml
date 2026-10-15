@@ -34,9 +34,17 @@ jobs:
           BRANCH="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.default_branch')"
           find_receipt() {
             local workflow="$1" prefix="$2" output="$3" run id
-            for run in $(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?branch=$BRANCH&status=success&per_page=12" --jq '.workflow_runs[].id'); do
+            local runs
+            # A new workflow is not registered on default until merged.
+            # A 404 is missing weekly evidence, NOT a successful source scan.
+            if ! runs="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?branch=$BRANCH&status=success&per_page=12" --jq '.workflow_runs[].id' 2>/dev/null)"; then
+              echo "::warning::No registered default-branch $workflow yet"
+              echo "$output=" >> "$GITHUB_OUTPUT"
+              return 0
+            fi
+            for run in $runs; do
               id="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run/artifacts?per_page=100" \
-                --jq ".artifacts[] | select(.name == \"$prefix-$run\" and .expired == false) | .id" | head -1)"
+                --jq ".artifacts[] | select(.name == \"$prefix-$run\" and .expired == false) | .id" 2>/dev/null | head -1 || true)"
               if [[ -n "$id" ]]; then
                 echo "$output=$run" >> "$GITHUB_OUTPUT"
                 echo "::notice::Found SHA-accepted $workflow full source receipt run=$run"
