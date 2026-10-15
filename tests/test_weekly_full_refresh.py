@@ -46,6 +46,8 @@ def inspect(gb: str, xi: str) -> list[str]:
         errors.append("GB full expanded-measure count acceptance missing")
     if "report[\"production_eligible\"] is False" not in gb:
         errors.append("GB source-only no-payable-release safety missing")
+    if "gb-daily-watch-pin-" not in gb or "gb-weekly-as-of.txt" not in gb:
+        errors.append("GB weekly compact daily source pin artifact missing")
     if "xi_catalogue --as-of \"$(date -u +%F)\" --public-full-audit" not in xi:
         errors.append("XI scheduled catalogue must use current date")
     if xi.count('os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch"')!=2:
@@ -54,6 +56,10 @@ def inspect(gb: str, xi: str) -> list[str]:
         errors.append("XI full-source four-shard coverage missing")
     if "xi_public_gap_ledger" not in xi or "xi_merge" not in xi:
         errors.append("XI independent gap audit/merge missing")
+    if ("xi-daily-watch-baseline-" not in xi
+            or "src.target_duty.xi_daily_baseline" not in xi
+            or 'BASELINE: ${{ steps.daily_baseline.outcome }}' not in xi):
+        errors.append("XI weekly compact accepted baseline artifact and fail gate missing")
     if "public_full_raw_source_coverage" not in xi or 'a["missing"]' in xi and 'a["missing"] == 0' not in xi:
         errors.append("XI full raw response zero-gap acceptance missing")
     if 'not a["ni_other_verified"]' not in xi and 'not a["ni_other_verified"] and not a["production_eligible"]' not in xi:
