@@ -104,6 +104,8 @@ class OfficialRawDetailsTest(unittest.TestCase):
         self.assertTrue(ru["excluded_from_this_measures_geography"])
         self.assertEqual(ru["decision"],"excluded_measure_not_a_rate")
         self.assertIsNone(ru["payable_rate"])
+        self.assertEqual(ru["applicable_tariff_route_for_review"],
+                         "applicable_eu_tariff_evidence_review")
         by=scenario(row,origin="BY",movement="OTHER_TO_NI",
                     at_risk=True,ukims_authorised=None)
         self.assertFalse(by["excluded_from_this_measures_geography"])
@@ -129,6 +131,13 @@ class OfficialRawDetailsTest(unittest.TestCase):
         self.assertIn("duty_route_and_preference_legally_unverified",res["reason_codes"])
         self.assertEqual(res["decision"],"needs_legal_and_trader_context")
         self.assertIsNone(res["payable_rate"])
+        self.assertEqual(res["applicable_tariff_route_for_review"],
+                         "applicable_uk_tariff_evidence_review")
+        self.assertIn("ukims_authorisation_not_proof_of_goods_eligibility",
+                      res["reason_codes"])
+        with self.assertRaises(ValueError):
+            scenario(record,origin="FR",movement="GB_TO_NI",
+                     at_risk=1,ukims_authorised=True)
 
     def test_invalid_raw_measure_link_fails_and_non_targets_skipped(self):
         doc=json.loads(payload())
