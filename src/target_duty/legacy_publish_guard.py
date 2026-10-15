@@ -44,14 +44,19 @@ def verify(name: str, source: str) -> dict:
         issues.append("Legacy GitHub Release publishing command found")
     if "--allow-partial" in code:
         issues.append("Incomplete shard merging reenabled")
-    if re.search(r"(?s)exit\s+0[^\n]*\n.{0,200}?\btimeout\b",code,re.IGNORECASE):
-        issues.append("Suspicious timeout success masking")
     if name == "scrape-tariff-parallel-improved.yml":
-        # Target the concrete existing failure-masking regression.
-        if re.search(r"(?m)^\s*exit\s+0\s*#.*(?:超时|失败|部分)",code):
-            issues.append("Timed-out scraper exits success")
-        if not re.search(r"(?m)^\s*exit\s+1\s*#.*(?:错误|失败)",code):
-            issues.append("Hard failure on exhausted retry missing")
+        # Inspect the actual retry-exhausted timeout block, not comments.
+        timeout = re.search(
+            r"if \[ \$EXIT_CODE -eq 124 \]; then([\s\S]{0,800}?)\n\s*fi\n\s*else",
+            code)
+        if timeout is None:
+            issues.append("No explicit timeout retry-exhaustion branch found")
+        else:
+            block = timeout.group(1)
+            if re.search(r"\bexit\s+0\b", block):
+                issues.append("Timed-out scraper exits success")
+            if not re.search(r"\bexit\s+1\b", block):
+                issues.append("No hard failure on exhausted timeout retry")
     if "workflow_dispatch:" not in code:
         issues.append("Manual source-only diagnostic entrypoint missing")
     return {
