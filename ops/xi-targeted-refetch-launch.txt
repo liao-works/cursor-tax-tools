@@ -1,3 +1,5 @@
 2026-10-15
 Source exact queue: reviewed full 17,395-candidate audit, 8 affected goods codes, GitHub run 38695817246
 Fetch only impacted 8 XI codes from live official public API as_of 2026-10-15; SHA-preserve original responses; no payable rates; no production writes.
+
+Re-run after explicit inclusive measure end-date safety and 8/8 original SHA parity confirmation.
