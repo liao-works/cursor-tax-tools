@@ -1,0 +1,5 @@
+Official XI PUBLIC snapshot: 2026-10-14
+Projection run: 38664629818
+Review date: 2026-10-15
+Expected: 16728 original responses, 17395 candidate measures, 98 no candidates
+Mode: shadow evidence only; origin/UKIMS/conditions unverified; no payable NI Other duty
