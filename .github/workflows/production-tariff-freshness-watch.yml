@@ -1,0 +1,40 @@
+name: Production latest-data integrity and 48h freshness watch (READ ONLY)
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Fail-closed metadata pairing, versioned SHA and corrupted SQLite tests
+        run: python -m unittest discover -s tests -p 'test_production_freshness_watch.py' -v
+      - name: Inspect actual paired latest-data and immutable versioned release (NO WRITES)
+        id: check
+        continue-on-error: true
+        run: |
+          python -m src.target_duty.production_freshness_watch \
+            --max-age-hours 48 --output production-freshness-watch.json
+      - name: Preserve evidence even when old or corrupt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-freshness-evidence-${{ github.run_id }}
+          path: production-freshness-watch.json
+          retention-days: 30
+          if-no-files-found: warn
+      - name: Surface stale or incomplete release as FAILED workflow
+        env:
+          AUDIT_RESULT: ${{ steps.check.outcome }}
+        run: |
+          if [ "$AUDIT_RESULT" != "success" ]; then
+            echo "::error::Production latest-data is stale, damaged, torn or unreachable; NEVER publish automatically"
+            exit 1
+          fi
