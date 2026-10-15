@@ -76,11 +76,23 @@ def _source(path: str, *, region: str) -> dict:
                 raise ValueError("GB source catalogue cardinality mismatch")
             pin=proof["version"]
         elif region=="XI":
-            if (proof.get("kind")!="xi-public-full-source-acceptance-review-v1"
-                    or proof.get("public_full_raw_source_coverage") is not True
-                    or proof.get("ni_other_verified") is not False
-                    or proof.get("missing")!=0 or proof.get("failed")!=0):
-                raise ValueError("XI public full source acceptance missing")
+            accepted_path=dbpath.with_name("xi-public-full-acceptance.json")
+            accepted=json.loads(accepted_path.read_text(encoding="utf-8"))
+            if (proof.get("kind")!="xi-merged-source-checkpoint-v1"
+                    or proof.get("sqlite_sha256")!=digest
+                    or proof.get("source_complete") is not True
+                    or proof.get("remaining_codes")!=0
+                    or proof.get("failed_codes")!=0
+                    or proof.get("production_eligible") is not False
+                    or accepted.get("kind")!="xi-public-full-source-acceptance-review-v1"
+                    or accepted.get("public_full_raw_source_coverage") is not True
+                    or accepted.get("ni_other_verified") is not False
+                    or accepted.get("production_eligible") is not False
+                    or accepted.get("missing")!=0 or accepted.get("failed")!=0
+                    or accepted.get("as_of")!=proof.get("as_of")
+                    or accepted.get("expected")!=proof.get("catalogue_candidate_codes")
+                    or accepted.get("responses_replayed")!=proof.get("successful_codes")):
+                raise ValueError("XI merged source / independent public acceptance mismatch")
             config=dict(db.execute("SELECT key,value FROM config"))
             if config.get("region")!="XI" or config.get("as_of")!=proof.get("as_of"):
                 raise ValueError("XI raw source as-of or region mismatch")
@@ -91,8 +103,8 @@ def _source(path: str, *, region: str) -> dict:
                         status!="ok" or not SHA.fullmatch(str(sha))):
                     raise ValueError("Missing/invalid XI source response SHA")
                 codes[code]=sha
-            if (len(codes)!=proof.get("expected") or
-                    len(codes)!=proof.get("responses_replayed")):
+            if (len(codes)!=accepted.get("expected") or
+                    len(codes)!=accepted.get("responses_replayed")):
                 raise ValueError("XI raw response count != all active declarable codes")
             pin=config["catalogue_sha256"]
         else:
