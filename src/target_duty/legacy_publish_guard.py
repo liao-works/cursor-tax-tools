@@ -44,18 +44,17 @@ def verify(name: str, source: str) -> dict:
         issues.append("Legacy GitHub Release publishing command found")
     if "--allow-partial" in code:
         issues.append("Incomplete shard merging reenabled")
-    if not re.search(
-            r'health_check_passed=false[^\\n]*\\n[\\s\\S]{0,240}?\\bexit\\s+1\\b',
-            code):
+    failure_block = code.split("health_check_passed=false",1)
+    if len(failure_block)!=2 or "exit 1" not in failure_block[1][:240]:
         issues.append("Failed SQLite health check may be masked as success")
-    if name != "scrape-tariff.yml" and not (
-            "SCRAPE_RESULT" in code and "MERGE_RESULT" in code
-            and re.search(r'\\bexit\\s+1\\b', code.split("SCRAPE_RESULT",1)[1])):
-        issues.append("Incomplete scrape/merge result may be masked")
-    if name == "scrape-tariff.yml" and not re.search(
-            r'if \\[ "\\$FAILED" -ne 0 \\]; then[\\s\\S]{0,180}?exit\\s+1',
-            code):
-        issues.append("Individual source failures may be masked")
+    if name != "scrape-tariff.yml":
+        if ("SCRAPE_RESULT" not in code or "MERGE_RESULT" not in code
+                or "exit 1" not in code.split("SCRAPE_RESULT",1)[1][:750]):
+            issues.append("Incomplete scrape/merge result may be masked")
+    else:
+        failure_branch = code.split('if [ "$FAILED" -ne 0 ]; then',1)
+        if len(failure_branch)!=2 or "exit 1" not in failure_branch[1][:180]:
+            issues.append("Individual source failures may be masked")
     if name == "scrape-tariff-parallel-improved.yml":
         # Inspect the actual retry-exhausted timeout block, not comments.
         timeout = re.search(
