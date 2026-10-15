@@ -22,6 +22,12 @@ on:
       - 'src/target_duty/production_freshness_watch.py'
       - 'src/target_duty/daily_official_change_watch.py'
       - 'src/target_duty/full_source_delta_scope.py'
+      - 'src/target_duty/gb_compact_impact_queue.py'
+      - 'tests/test_gb_compact_impact_queue.py'
+      - 'src/target_duty/xi_date_impact_queue.py'
+      - 'tests/test_xi_date_impact_queue.py'
+      - '.github/workflows/xi-date-impact-queue.yml'
+      - '.github/workflows/dbt-newest-replay-shadow.yml'
       - 'tests/test_full_source_delta_scope.py'
       - 'src/target_duty/xi_daily_baseline.py'
       - 'tests/test_xi_daily_baseline.py'
@@ -154,6 +160,10 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_xi_s3_vault.py' -v
       - name: Weekly full-source canary source provenance, missing response and date baseline tests
         run: python -m unittest discover -s tests -p 'test_xi_daily_baseline.py' -v
+      - name: Actual NI source expiry-to-code queue and GB 103 measure-change scope tests
+        run: |
+          python -m unittest discover -s tests -p 'test_gb_compact_impact_queue.py' -v
+          python -m unittest discover -s tests -p 'test_xi_date_impact_queue.py' -v
       - name: Full GB all-measure and XI raw-response exact affected-code delta regression
         run: python -m unittest discover -s tests -p 'test_full_source_delta_scope.py' -v
       - name: Official daily version / XI expiry and canary signal regression
