@@ -72,6 +72,7 @@ jobs:
             --as-of "$(cat gb-weekly-as-of.txt)" \
             --catalogue gb-weekly-catalogue.db \
             --csv gb-weekly-original-measures.csv \
+            --min-rows 1000000 \
             --output gb-weekly-measures.db
       - name: Verify source SHA, all source rows, same pin/date and no payable certification
         shell: bash
@@ -95,8 +96,13 @@ jobs:
           assert report["version"]==meta["resolved_version"]==pin
           assert report["as_of"]==meta["as_of"]==day
           assert sha(source)==download["sha256"]==report["source_csv_sha256"]
-          assert report["source_rows"]>=100_000
+          # Historical fully verified GB export had 1,123,765 source rows.
+          # A >10% sudden drop is a source-regression alert requiring review,
+          # not proof that all rate semantics are correct.
+          assert report["source_rows"]>=1_000_000
           assert report["official_active_leaves"]>=10_000
+          assert report["source_commodity_codes"] >= int(
+              report["official_active_leaves"]*0.90), "Missing most source commodity coverage"
           assert report["complete_within_dbt_export_scope"]
           assert report["all_import_duties_verified"] is False
           assert report["ni_other_verified"] is False
