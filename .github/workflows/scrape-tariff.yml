@@ -117,6 +117,10 @@ jobs:
           echo "uk_updated=$UK_UPDATED" >> $GITHUB_OUTPUT
           echo "ni_updated=$NI_UPDATED" >> $GITHUB_OUTPUT
           echo "scraping_completed=true" >> $GITHUB_OUTPUT
+          if [ "$FAILED" -ne 0 ]; then
+            echo "::error::采集报告存在失败记录，拒绝标记整次更新成功"
+            exit 1
+          fi
 
           echo "INFO: 爬取结果:"
           echo "   SUCCESS: 成功: $SUCCESSFUL"
@@ -152,7 +156,8 @@ jobs:
           fi
         else
           echo "health_check_passed=false" >> $GITHUB_OUTPUT
-          echo "ERROR: 数据库健康检查失败"
+          echo "::error::数据库健康检查失败；候选数据库不得被判定为成功"
+          exit 1
         fi
 
     - name: 获取文件信息
