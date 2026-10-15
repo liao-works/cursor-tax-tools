@@ -71,14 +71,16 @@ def classify(baseline: dict, *, official_gb: dict, gb_base_version: str,
     ready=official_gb.get("state")=="ready_for_full_data_replay"
     new=official_gb.get("newest_official_version")
     version_changed=None
-    if ready and isinstance(new,str):
+    # A newly REGISTERED version is meaningful even before DBT publishes
+    # its tables/CSVW schema. Never hide the version advance as "unknown".
+    if isinstance(new,str):
         try:
             version_changed=version_key(new)>version_key(gb_base_version)
             if version_key(new)<version_key(gb_base_version):
                 errors["GB"]="Official GB newest pin is older than verified baseline"
         except ValueError:
             errors["GB"]="Official GB returned an invalid version"
-    else:
+    if not ready:
         errors["GB"]="Official DBT version/schema unavailable: "+str(official_gb.get("state"))
     changed=sorted(code for code,sha in ni_response_sha.items()
                    if baseline["canary_response_sha256"][code]!=sha)
