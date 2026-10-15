@@ -13,7 +13,7 @@ import sqlite3
 import tempfile
 import time
 import zlib
-from datetime import date,datetime,timezone
+from datetime import date,datetime,timezone,timedelta
 from pathlib import Path
 
 from .xi_duty_projection import project
@@ -71,6 +71,24 @@ def review(queue_csv: str, queue_report: str, output_db: str, output_report: str
             source_rows=parse(raw,code)
             candidates=project(raw,code,as_of)
             active={str(c["measure_id"]) for c in candidates}
+            boundary=[]
+            for old in rows:
+                if old["code"] != code:
+                    continue
+                end=date.fromisoformat(old["effective_end"])
+                present=old["measure_id"] in active
+                phase=("present_on_last_valid_day_expected"
+                       if present and as_of==end else
+                       "still_present_after_last_valid_day_review"
+                       if present and as_of>end else
+                       "not_in_current_candidate_set")
+                boundary.append({
+                    "measure_id":old["measure_id"],
+                    "last_valid_day":end.isoformat(),
+                    "first_day_after_end":(end+timedelta(days=1)).isoformat(),
+                    "present_in_current_source":present,
+                    "boundary_status":phase
+                })
             fingerprint=hashlib.sha256(raw).hexdigest()
             raw_rows.append((code,as_of.isoformat(),fingerprint,len(raw),
                             zlib.compress(raw,6)))
@@ -82,6 +100,7 @@ def review(queue_csv: str, queue_report: str, output_db: str, output_report: str
                 "expired_previous_measure_ids":affected,
                 "previous_ids_still_in_current_candidate_set":
                     sorted(set(affected)&active),
+                "source_end_boundary_checks":boundary,
                 "source_checked_at":datetime.now(timezone.utc).isoformat(),
                 "rate_payable":None,"production_eligible":False
             })
@@ -105,6 +124,11 @@ def review(queue_csv: str, queue_report: str, output_db: str, output_report: str
                 if db.execute("PRAGMA integrity_check").fetchone()[0]!="ok":
                     raise ValueError("Temp XI targeted-review DB integrity failure")
             stage.replace(output)
+    boundary_states=[
+        item["boundary_status"]
+        for outcome in outcomes
+        for item in outcome.get("source_end_boundary_checks",[])
+    ]
     summary={
         "kind":"xi-exact-code-date-delta-live-public-replay-v1",
         "as_of":as_of.isoformat(),
@@ -112,6 +136,10 @@ def review(queue_csv: str, queue_report: str, output_db: str, output_report: str
         "affected_source_queue_sha256":proof["impact_queue_csv_sha256"],
         "selected_distinct_codes":len(codes),
         "verified_public_responses":len(raw_rows),
+        "measures_present_on_inclusive_end_day":
+            boundary_states.count("present_on_last_valid_day_expected"),
+        "measures_still_present_after_end_needing_review":
+            boundary_states.count("still_present_after_last_valid_day_review"),
         "failed_responses":failed,
         "source_success_complete":failed==0 and len(raw_rows)==len(codes),
         "source_db_sha256":sha(str(output)) if not failed else None,
