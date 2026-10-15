@@ -18,6 +18,11 @@ on:
       - 'src/target_duty/xi_condition_evidence.py'
       - 'src/target_duty/xi_live_date_canary.py'
       - 'src/target_duty/final_release_gate.py'
+      - 'src/target_duty/legacy_publish_guard.py'
+      - 'tests/test_legacy_publish_guard.py'
+      - '.github/workflows/scrape-tariff.yml'
+      - '.github/workflows/scrape-tariff-parallel.yml'
+      - '.github/workflows/scrape-tariff-parallel-improved.yml'
       - 'tests/test_final_release_gate.py'
       - 'tests/test_xi_live_date_canary.py'
       - '.github/workflows/xi-live-date-canary.yml'
@@ -134,6 +139,10 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_xi_archive.py' -v
       - name: XI S3 Object Lock upload/download recovery failure injection
         run: python -m unittest discover -s tests -p 'test_xi_s3_vault.py' -v
+      - name: Legacy latest-data auto-publisher isolation and timeout failure regression
+        run: |
+          python -m unittest discover -s tests -p 'test_legacy_publish_guard.py' -v
+          python -m src.target_duty.legacy_publish_guard --directory .github/workflows
       - name: Four-dimension final data release readiness fail-closed injection tests
         run: python -m unittest discover -s tests -p 'test_final_release_gate.py' -v
       - name: Existing region evidence contract regression
