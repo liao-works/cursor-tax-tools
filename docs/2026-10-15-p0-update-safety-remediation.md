@@ -69,3 +69,20 @@ freshness threshold; that is a meaningful alert, not a CI publishing bug.
   notifications for stale release detection and establish freshness SLA.
 
 Data release intentionally BLOCKED. PR remains Draft.
+
+## Real 2026-10-15 production release check: FAILED FOR STALENESS AS DESIGNED
+
+Source-only read-only workflow [38671735400](https://github.com/liao-works/cursor-tax-tools/actions/runs/38671735400)
+actually retrieved `latest-data` JSON+DB and immutable `data-36851279616` DB.
+Independent download receipt reported:
+
+- `db_and_immutable_match=true`: latest-data and pinned binary bytes match.
+- SQLite `PRAGMA integrity_check=ok`, production records: **16,592**.
+- Actual DB SHA-256 `2fbddc432bc77654dd2f57a24c5e9d379c4e2fb653d0c7f648c726b0ddeed92e`.
+- Release asset age **327.38 hours** at 2026-10-15T02:36:06Z, exceeding 48-hour limit.
+- `fresh=false`, explicit GitHub workflow `failure`; 0 release writes.
+
+CI [38671815094](https://github.com/liao-works/cursor-tax-tools/actions/runs/38671815094)
+passed all legacy-publisher quarantine and release SHA/paired-asset
+integrity failure-injection tests on the updated source branch.
+**These are PR-branch changes only. The default branch still needs merge.**
