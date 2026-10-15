@@ -16,6 +16,9 @@ on:
       - 'src/target_duty/xi_measure_crawl.py'
       - 'src/target_duty/xi_duty_projection.py'
       - 'src/target_duty/xi_condition_evidence.py'
+      - 'src/target_duty/xi_live_date_canary.py'
+      - 'tests/test_xi_live_date_canary.py'
+      - '.github/workflows/xi-live-date-canary.yml'
       - 'tests/test_xi_condition_evidence.py'
       - '.github/workflows/xi-condition-source-review.yml'
       - 'src/target_duty/xi_applicability_review.py'
@@ -107,6 +110,8 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_xi_public_gap_ledger.py' -v
       - name: NI candidate country-origin and applicability triage regressions
         run: python -m unittest discover -s tests -p 'test_xi_applicability_review.py' -v
+      - name: XI public as-of daily candidate drift and incomplete source tests
+        run: python -m unittest discover -s tests -p 'test_xi_live_date_canary.py' -v
       - name: XI complete measure conditions certificates permutations and origin-risk safety tests
         run: python -m unittest discover -s tests -p 'test_xi_condition_evidence.py' -v
       - name: XI linked raw duty expression projection and fail-closed conditions tests
