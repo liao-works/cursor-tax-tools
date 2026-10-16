@@ -76,6 +76,15 @@ class WeeklyFullSourceSchedulerTests(unittest.TestCase):
     def test_weekly_source_schedules_and_full_replay_are_safe(self):
         self.assertEqual(inspect(self.gb,self.xi),[])
 
+    def test_one_operator_marker_triggers_both_read_only_full_sources(self):
+        for source in (self.gb, self.xi):
+            self.assertIn("push:", source)
+            self.assertIn("branches: [feat/parallel-scraper]", source)
+            self.assertIn("ops/manual-full-source-run.txt", source)
+            self.assertIn("contents: read", source)
+            self.assertNotIn("contents: write", source)
+            self.assertNotIn("softprops/action-gh-release", source)
+
     def test_gb_wrong_cron_or_unpinned_replay_detected(self):
         modified=self.gb.replace("0 1 * * 0","0 1 1 * *")
         self.assertTrue(any("schedule" in x for x in inspect(modified,self.xi)))
