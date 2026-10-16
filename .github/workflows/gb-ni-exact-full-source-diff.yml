@@ -192,9 +192,10 @@ jobs:
           if-no-files-found: warn
   publish-desktop-data:
     # Only after a completed, independently accepted, exact full-source diff.
-    # Never publish on operator-specified arbitrary run IDs or on PRs.
+    # Publish only on verified default-branch full-source events or an explicit
+    # default-branch operator source-diff marker (never PR or workflow_dispatch).
     needs: exact-code-diff
-    if: github.event_name == 'workflow_run' && needs.exact-code-diff.outputs.has_pair == 'true'
+    if: (github.event_name == 'workflow_run' || (github.event_name == 'push' && github.ref == 'refs/heads/feat/parallel-scraper')) && needs.exact-code-diff.outputs.has_pair == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 95
     permissions:
