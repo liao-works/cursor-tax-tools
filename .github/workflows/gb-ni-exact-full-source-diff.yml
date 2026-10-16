@@ -93,7 +93,7 @@ jobs:
           else:
               if os.environ["EVENT_NAME"]=="push":
                   content=Path("ops/manual-full-diff-run.txt").read_text()
-                  values=dict(re.findall(r"(?m)^(region|before_run_id|after_run_id)=(\\S+)$",content))
+                  values=dict(re.findall(r"(?m)^(region|before_run_id|after_run_id)=([A-Za-z0-9]+)$",content))
                   region=values.get("region")
                   before=positive(values.get("before_run_id"))
                   after=positive(values.get("after_run_id"))
