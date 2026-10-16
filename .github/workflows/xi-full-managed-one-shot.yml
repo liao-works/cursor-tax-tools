@@ -2,7 +2,7 @@ name: NI official full-source four-shard audit (SHADOW ONLY)
 on:
   workflow_dispatch:
   push:
-    branches: [feat/target-third-country-duty-v1]
+    branches: [feat/parallel-scraper]
     paths: [ops/xi-full-managed-launch.txt]
 permissions:
   contents: read

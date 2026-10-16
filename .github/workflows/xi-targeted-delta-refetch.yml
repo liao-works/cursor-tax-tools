@@ -1,7 +1,7 @@
 name: XI exact source-only affected-code live refetch (NEVER RELEASE)
 on:
   push:
-    branches: [feat/target-third-country-duty-v1]
+    branches: [feat/parallel-scraper]
     paths: [ops/xi-targeted-refetch-launch.txt]
   workflow_dispatch:
 permissions:

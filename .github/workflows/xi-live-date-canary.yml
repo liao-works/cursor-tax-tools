@@ -1,7 +1,7 @@
 name: XI selected real public source 10-15 date drift canary (SHADOW)
 on:
   push:
-    branches: [feat/target-third-country-duty-v1]
+    branches: [feat/parallel-scraper]
     paths: [ops/xi-live-date-canary-launch.txt]
   workflow_dispatch:
 permissions:
