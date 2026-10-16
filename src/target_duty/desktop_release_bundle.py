@@ -22,6 +22,7 @@ from .catalog import NA
 from .xi_measure_crawl import candidates
 from .xi_public_full_capture import verify_public
 from .xi_acceptance import decompress_checked
+from .china_trade_remedies import gb_remedies, xi_remedies, summary as remedy_summary
 
 PERCENT=re.compile(r"^\s*(?:\d+(?:\.\d+)?|\.\d+)\s*%\s*$")
 CODE=re.compile(r"[0-9]{10}\Z")
@@ -29,7 +30,8 @@ SQL="""CREATE TABLE tariffs (
  code TEXT PRIMARY KEY,description TEXT,rate TEXT,url TEXT,
  north_ireland_rate TEXT,north_ireland_url TEXT,other_rate TEXT,
  anti_dumping_rate TEXT,countervailing_rate TEXT,
- last_updated DATETIME
+ ni_anti_dumping_rate TEXT,ni_countervailing_rate TEXT,
+ trade_remedy_details TEXT,last_updated DATETIME
 );
 CREATE INDEX idx_tariffs_description ON tariffs(description);
 """
@@ -187,6 +189,8 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                     raise ValueError("Invalid official declarable code")
                 gb_rate=""
                 ni_rate=""
+                gb_trade=[]
+                ni_trade=[]
                 if code in gb_codes:
                     source=list(gb_conn.execute("""SELECT expression,additional_code,conditions,excluded_areas
                        FROM measures WHERE region='GB' AND code=?
@@ -197,6 +201,12 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                     counts["gb_unconditional_candidates"]+=sum(
                         _blank(r[1]) and _blank(r[2]) and _blank(r[3]) for r in source)
                     counts["gb_percent"]+=bool(gb_rate)
+                    remedies=list(gb_conn.execute("""SELECT measure_type,geography,expression,
+                         additional_code,conditions,excluded_areas,effective_start,effective_end,raw_json
+                         FROM measures WHERE region='GB' AND code=?
+                         AND measure_type IN ('551','552','553','554')
+                         AND effective_status='active' ORDER BY ordinal""",(code,)))
+                    gb_trade=gb_remedies(remedies,gb["as_of"])
                 if code in xi_codes:
                     source=list(xi_conn.execute("""SELECT measure_type,geography_id,
                         duty_expression,effective_start,effective_end,raw_json
@@ -212,13 +222,28 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                         raise ValueError("XI raw response fingerprint mismatch for "+code)
                     ni_rate=xi_rate(source,xi["as_of"],raw)
                     counts["xi_percent"]+=bool(ni_rate)
-                dest.execute("INSERT INTO tariffs VALUES (?,?,?,?,?,?,?,?,?,?)",(
+                    trade_rows=list(xi_conn.execute("""SELECT measure_type,geography_id,
+                        duty_expression,effective_start,effective_end,raw_json
+                        FROM measures WHERE code=? AND measure_type IN ('551','552','553','554')
+                        ORDER BY ordinal""",(code,)))
+                    ni_trade=xi_remedies(trade_rows,xi["as_of"],raw)
+                gb_antidumping=remedy_summary(gb_trade,"anti_dumping")
+                gb_countervailing=remedy_summary(gb_trade,"countervailing")
+                ni_antidumping=remedy_summary(ni_trade,"anti_dumping")
+                ni_countervailing=remedy_summary(ni_trade,"countervailing")
+                counts["gb_anti_dumping_codes"]+=bool(gb_antidumping)
+                counts["gb_countervailing_codes"]+=bool(gb_countervailing)
+                counts["xi_anti_dumping_codes"]+=bool(ni_antidumping)
+                counts["xi_countervailing_codes"]+=bool(ni_countervailing)
+                details=json.dumps(gb_trade+ni_trade,ensure_ascii=False,separators=(",",":"))
+                dest.execute("INSERT INTO tariffs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",(
                     code,gb_descr.get(code) or xi_descr.get(code) or "",
                     gb_rate,
                     "https://www.trade-tariff.service.gov.uk/uk/commodities/"+code if code in gb_codes else "",
                     ni_rate,
                     "https://www.trade-tariff.service.gov.uk/xi/commodities/"+code if code in xi_codes else "",
-                    "", "", "", None))
+                    "", gb_antidumping, gb_countervailing,
+                    ni_antidumping, ni_countervailing, details, None))
             dest.commit()
             if dest.execute("PRAGMA integrity_check").fetchone()[0]!="ok":
                 raise ValueError("Desktop SQLite integrity failed")
@@ -237,13 +262,17 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
         "record_count":len(gb_codes|xi_codes),
         "changes_summary":{"total_updates":counts["gb_percent"]+counts["xi_percent"],
                            "gb_available_simple_percent":counts["gb_percent"],
-                           "xi_available_simple_percent":counts["xi_percent"]},
+                           "xi_available_simple_percent":counts["xi_percent"],
+                           "gb_anti_dumping_codes":counts["gb_anti_dumping_codes"],
+                           "gb_countervailing_codes":counts["gb_countervailing_codes"],
+                           "xi_anti_dumping_codes":counts["xi_anti_dumping_codes"],
+                           "xi_countervailing_codes":counts["xi_countervailing_codes"]},
         "source_versions":{"GB":gb["version_or_catalogue"],
                            "GB_as_of":gb["as_of"].isoformat(),
                            "XI_as_of":xi["as_of"].isoformat(),
                            "XI_catalogue_sha256":xi["version_or_catalogue"]},
         "coverage":{"GB":len(gb_codes),"XI":len(xi_codes)},
-        "rate_scope":"Unconditional type 103/1011 MFN third-country percentage (normally China and other third countries); type 105 authorised-use, country-specific, conditional and compound rates not substituted",
+        "rate_scope":"China-origin ordinary 103/1011 MFN; GB/XI China or non-excluded Erga Omnes 551/552 anti-dumping and 553/554 countervailing; producer/code/conditions retained in trade_remedy_details, no assumed universal exporter rate",
         "download_urls":{
             "primary":"https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/tariffs.db",
             "metadata":"https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/metadata.json"},
