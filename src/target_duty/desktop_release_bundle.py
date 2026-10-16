@@ -181,6 +181,10 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
     }
     if len(gb_codes)<10_000 or len(xi_codes)<10_000:
         raise ValueError("Suspiciously incomplete official commodity catalogue")
+    # Do not overwrite a mostly populated desktop DB with mostly blank rates
+    # if the official expression layout changes unexpectedly.
+    if counts["gb_percent"]<10_000 or counts["xi_percent"]<10_000:
+        raise ValueError("Insufficient unambiguous GB/XI percentage coverage for desktop release")
     meta.write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
     return report
 
