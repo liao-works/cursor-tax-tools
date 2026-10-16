@@ -37,7 +37,12 @@ jobs:
         } else {
           $version = (Get-Content ops/desktop-release-request.txt -Raw).Trim()
         }
-        if ($version -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+
+        if ($version -notmatch '^v[0-9]+[.][0-9]+[.][0-9]+$') {
+          throw "Refusing invalid desktop release version: $version"
+        }
+        "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+        Write-Output "Building Windows desktop release $version"
+    - name: Fix file encodings
       shell: pwsh
       run: |
         # 读取并重新保存文件为UTF-8
