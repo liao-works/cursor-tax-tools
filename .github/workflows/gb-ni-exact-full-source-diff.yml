@@ -35,6 +35,10 @@ concurrency:
 jobs:
   exact-code-diff:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    outputs:
+      has_pair: ${{ steps.pair.outputs.has_pair }}
+      region: ${{ steps.pair.outputs.region }}
+      after: ${{ steps.pair.outputs.after }}
     runs-on: ubuntu-latest
     timeout-minutes: 100
     steps:
@@ -186,3 +190,157 @@ jobs:
             exact-diff-report.json
           retention-days: 30
           if-no-files-found: warn
+  publish-desktop-data:
+    # Only after a completed, independently accepted, exact full-source diff.
+    # Never publish on operator-specified arbitrary run IDs or on PRs.
+    needs: exact-code-diff
+    if: github.event_name == 'workflow_run' && needs.exact-code-diff.outputs.has_pair == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 95
+    permissions:
+      contents: write
+      actions: read
+    concurrency:
+      group: desktop-published-data
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/parallel-scraper
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Choose latest completed GB and XI full snapshots with authentic same-repo artifacts
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AFTER: ${{ needs.exact-code-diff.outputs.after }}
+          REGION: ${{ needs.exact-code-diff.outputs.region }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,os,subprocess
+          from datetime import datetime,timezone
+          def api(path):
+              return json.loads(subprocess.check_output(["gh","api",path],text=True))
+          repo=os.environ["GITHUB_REPOSITORY"]
+          after=int(os.environ["AFTER"])
+          region=os.environ["REGION"]
+          found={}
+          configs={
+              "GB":("weekly-gb-full-source.yml","weekly-gb-full-source"),
+              "XI":("xi-public-full-measures.yml","xi-public-full-acceptance"),
+          }
+          for part,(workflow,prefix) in configs.items():
+              runs=api(f"repos/{repo}/actions/workflows/{workflow}/runs?branch=feat/parallel-scraper&status=success&per_page=40")["workflow_runs"]
+              for run in runs:
+                  if part==region and run["id"]!=after:
+                      continue
+                  if run["head_branch"]!="feat/parallel-scraper" or run["head_repository"]["full_name"]!=repo:
+                      continue
+                  artifacts=api(f"repos/{repo}/actions/runs/{run['id']}/artifacts?per_page=100")["artifacts"]
+                  if any(a["name"]==f"{prefix}-{run['id']}" and not a["expired"] for a in artifacts):
+                      found[part]=run["id"]
+                      break
+          if set(found)!={"GB","XI"}:
+              print("::warning::Both independently accepted source snapshots not yet available")
+              with open(os.environ["GITHUB_OUTPUT"],"a") as dest:
+                  print("ready=false",file=dest)
+          else:
+              with open(os.environ["GITHUB_OUTPUT"],"a") as dest:
+                  print("ready=true",file=dest)
+                  print(f"gb_run={found['GB']}",file=dest)
+                  print(f"xi_run={found['XI']}",file=dest)
+              print("Source-only full snapshot IDs:",found)
+          PY
+      - name: Download complete accepted GB source and commodity catalogue
+        if: steps.source.outputs.ready == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ steps.source.outputs.gb_run }}
+          name: weekly-gb-full-source-${{ steps.source.outputs.gb_run }}
+          github-token: ${{ github.token }}
+          path: gb
+      - name: Download complete accepted XI original responses
+        if: steps.source.outputs.ready == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ steps.source.outputs.xi_run }}
+          name: xi-public-full-acceptance-${{ steps.source.outputs.xi_run }}
+          github-token: ${{ github.token }}
+          path: xi
+      - name: Download XI frozen official catalogue and manifest for independently checked source SHA
+        if: steps.source.outputs.ready == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ steps.source.outputs.xi_run }}
+          name: xi-public-full-catalogue-${{ steps.source.outputs.xi_run }}
+          github-token: ${{ github.token }}
+          path: xi
+      - name: Build complete desktop release with source SHA/coverage and SQLite integrity checks
+        if: steps.source.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p desktop
+          python -m src.target_duty.desktop_release_bundle \
+            --gb-db gb/gb-weekly-measures.db \
+            --gb-catalogue gb/gb-weekly-catalogue.db \
+            --xi-db xi/xi-public-full-merged.db \
+            --xi-catalogue xi/xi-public-full-catalogue.db \
+            --xi-manifest xi/xi-public-frozen-manifest.json \
+            --output-db desktop/tariffs.db \
+            --output-metadata desktop/metadata.json
+          python - <<'PY'
+          import hashlib,json,sqlite3
+          from pathlib import Path
+          m=json.loads(Path("desktop/metadata.json").read_text())
+          data=Path("desktop/tariffs.db").read_bytes()
+          assert hashlib.sha256(data).hexdigest()==m["file_hash"].split(":")[1]
+          with sqlite3.connect("desktop/tariffs.db") as db:
+              assert db.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
+              assert db.execute("SELECT COUNT(*) FROM tariffs").fetchone()[0]==m["record_count"]
+          assert m["coverage"]["GB"]>=10000 and m["coverage"]["XI"]>=10000
+          PY
+      - name: Keep desktop metadata and binary evidence even if release API fails
+        if: steps.source.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: accepted-desktop-data-candidate-${{ github.run_id }}
+          path: |
+            desktop/tariffs.db
+            desktop/metadata.json
+          retention-days: 30
+      - name: Publish versioned immutable data and latest-data only if actual bytes changed
+        if: steps.source.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="$(python -c 'import json;print(json.load(open("desktop/metadata.json"))["version"])')"
+          HASH="$(python -c 'import json;print(json.load(open("desktop/metadata.json"))["file_hash"])')"
+          echo "Built source-reviewed $VERSION with $HASH"
+          # Do not notify installed desktops for an unchanged SQLite content hash.
+          if gh release view latest-data --json tagName >/dev/null 2>&1; then
+            gh release download latest-data -p metadata.json -D previous
+            PREVIOUS="$(python -c 'import json;print(json.load(open("previous/metadata.json")).get("file_hash",""))')"
+            if [[ "$PREVIOUS" == "$HASH" ]]; then
+              echo "::notice::Published database content unchanged, suppressing duplicate desktop notification"
+              exit 0
+            fi
+          fi
+          # Version tag acts as permanent auditable rollback/verification copy.
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "::error::Immutable data tag already exists for a changed publish"
+            exit 1
+          fi
+          gh release create "$VERSION" desktop/tariffs.db desktop/metadata.json \
+            --target "${GITHUB_SHA}" --title "Tariff data $VERSION" \
+            --notes "Full verified GB and XI official-source snapshot. Only unambiguous active percentage rates included."
+          if gh release view latest-data >/dev/null 2>&1; then
+            gh release upload latest-data desktop/tariffs.db desktop/metadata.json --clobber
+          else
+            gh release create latest-data desktop/tariffs.db desktop/metadata.json \
+              --target "${GITHUB_SHA}" --title "Latest desktop tariff data" \
+              --notes "Current GB/XI full-source desktop database"
+          fi
+          echo "::notice::New released data $VERSION; desktop clients will detect new SHA-256 within 24h"

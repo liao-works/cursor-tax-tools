@@ -94,6 +94,10 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_production_freshness_watch.py' -v
       - name: Four-dimension final data release readiness fail-closed injection tests
         run: python -m unittest discover -s tests -p 'test_final_release_gate.py' -v
+      - name: Deterministic GB/XI release builder and unambiguous duty selection
+        run: |
+          python -m py_compile src/target_duty/desktop_release_bundle.py
+          python -m unittest discover -s tests -p 'test_desktop_release_bundle.py' -v
       - name: Desktop daily data update notifications and syntax
         run: |
           python -m py_compile tariff_gui.py src/clients/data_update_notifier.py src/clients/smart_update_client.py

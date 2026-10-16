@@ -15,7 +15,9 @@ class Stage3WorkflowSafetyTests(unittest.TestCase):
             self.assertIn(needle,w)
         self.assertNotIn("schedule:",w)
         self.assertNotIn("softprops/action-gh-release",w)
-        self.assertNotIn("contents: write",w)
+        self.assertNotIn("contents: write",w.split("  publish-desktop-data:")[0])
+        self.assertIn("needs: exact-code-diff",w)
+        self.assertIn("github.event_name == 'workflow_run'",w)
         self.assertNotIn("--allow-partial",w)
 
     def test_exact_ni_expirations_from_full_conditions_only(self):
