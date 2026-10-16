@@ -45,51 +45,47 @@ def resource_path(relative_path: str) -> str:
 import json
 
 
-CONFIG_FILE = "gui_config.json"
+# Persistent settings live in the user profile, never in a read-only install
+# directory. Existing portable installations are migrated on first save.
+_USER_SETTINGS_DIR = (
+    os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "TariffTools")
+    if sys.platform == "win32"
+    else os.path.join(os.path.expanduser("~"), ".tarifftools")
+)
+CONFIG_FILE = os.path.join(_USER_SETTINGS_DIR, "gui_config.json")
+LEGACY_CONFIG_FILE = "gui_config.json"
 
 
 def load_config() -> dict:
-    """加载GUI配置文件
-    
-    Returns:
-        dict: 配置字典，如果文件不存在则返回默认配置
-    """
-    default_config = {
-        "db_path": "tariffs.db",
-        "metadata_url": DEFAULT_METADATA_URL
-    }
-    
-    try:
-        if os.path.exists(CONFIG_FILE):
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
+    """Read persisted desktop settings; migrate only the retired metadata URL."""
+    defaults = {"db_path": "tariffs.db", "metadata_url": DEFAULT_METADATA_URL}
+    for path in (CONFIG_FILE, LEGACY_CONFIG_FILE):
+        try:
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as stream:
+                    saved = json.load(stream)
+                if not isinstance(saved, dict):
+                    raise ValueError("GUI 配置内容必须是对象")
+                config = dict(defaults)
+                config.update(saved)
                 config["metadata_url"] = configured_metadata_url(config.get("metadata_url"))
-                logger.info(f"✅ 已加载配置文件: {CONFIG_FILE}")
                 return config
-        else:
-            logger.info(f"ℹ️ 配置文件不存在，使用默认配置")
-            return default_config
-    except Exception as e:
-        logger.error(f"❌ 加载配置文件失败: {e}")
-        return default_config
+        except (OSError, ValueError, TypeError) as exc:
+            logger.warning("配置文件 %s 读取失败：%s", path, exc)
+    return defaults
 
 
 def save_config(config: dict) -> bool:
-    """保存GUI配置文件
-    
-    Args:
-        config: 配置字典
-        
-    Returns:
-        bool: 保存是否成功
-    """
+    """Atomically preserve last-notified release across application restarts."""
     try:
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
-        logger.info(f"✅ 配置已保存到: {CONFIG_FILE}")
+        os.makedirs(_USER_SETTINGS_DIR, exist_ok=True)
+        tmp_path = CONFIG_FILE + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as stream:
+            json.dump(config, stream, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, CONFIG_FILE)
         return True
-    except Exception as e:
-        logger.error(f"❌ 保存配置文件失败: {e}")
+    except (OSError, TypeError, ValueError) as exc:
+        logger.warning("保存桌面配置失败：%s", exc)
         return False
 
 
