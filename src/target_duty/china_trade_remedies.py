@@ -147,9 +147,10 @@ def summary(measures: list[dict], kind: str) -> str:
     if len({r["expression"] for r in general}) == 1 and general:
         if not any(r["additional_code"] for r in applicable):
             return general[0]["expression"]
-    residual = [r for r in normal if r["additional_code"] and
-                any(token in r["additional_description"].lower() for token in RESIDUAL) and
-                r["expression"]]
+    residual = [r for r in normal if r["additional_code"] and r["expression"]
+                and (any(token in r["additional_description"].lower() for token in RESIDUAL)
+                     or (r["additional_description"].strip().lower() in ("other", "others")
+                         and r["additional_code"].upper().endswith("999")))]
     if len(residual) == 1:
         r = residual[0]
         return f'{r["expression"]}（其他企业，{r["additional_code"]}）'
