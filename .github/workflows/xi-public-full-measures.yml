@@ -104,11 +104,38 @@ jobs:
           run-id: ${{ steps.prior.outputs.run_id }}
           github-token: ${{ github.token }}
           path: previous/
-      - name: Resume previous verified shard checkpoint, when present
+      - name: Resume compatible partial shard checkpoint only (same frozen catalogue and partition layout)
+        env:
+          PARTITION: ${{ matrix.worker }}
         run: |
-          if [[ -f "previous/xi-public-shard-${{ matrix.worker }}.db" ]]; then
-            cp "previous/xi-public-shard-${{ matrix.worker }}.db" "xi-public-shard-${{ matrix.worker }}.db"
-          fi
+          python - <<'PY'
+          import json,os,shutil,sqlite3
+          from pathlib import Path
+          from src.target_duty.xi_measure_crawl import candidates
+          from src.target_duty.xi_parallel_capture import bounds
+          from src.target_duty.xi_public_full_capture import verify_public
+          worker=int(os.environ["PARTITION"])
+          path=Path(f"previous/xi-public-shard-{worker}.db")
+          if path.is_file():
+              frozen=verify_public("xi-public-full-catalogue.db","xi-public-frozen-manifest.json")
+              codes=candidates("xi-public-full-catalogue.db")
+              start,length=bounds(len(codes),8,worker)
+              assigned=set(codes[start:start+length])
+              with sqlite3.connect(path.resolve().as_uri()+"?mode=ro",uri=True) as db:
+                  if db.execute("PRAGMA integrity_check").fetchone()[0]!="ok":
+                      raise SystemExit("Prior XI original response checkpoint corrupted")
+                  config=dict(db.execute("SELECT key,value FROM config"))
+                  previous={code for (code,) in db.execute("SELECT code FROM requests")}
+              correct=(config.get("region")=="XI"
+                       and config.get("as_of")==frozen["as_of"]
+                       and config.get("catalogue_sha256")==frozen["catalogue_sha256"]
+                       and previous.issubset(assigned))
+              if correct:
+                  shutil.copy2(path,f"xi-public-shard-{worker}.db")
+                  print(f"Resuming verified identical-source {worker=} {len(previous)=}")
+              else:
+                  print("::warning::Prior XI shard layout or snapshot differs; collecting this partition from scratch")
+          PY
       - name: Collect raw XI commodity measure responses
         id: crawl
         continue-on-error: true
