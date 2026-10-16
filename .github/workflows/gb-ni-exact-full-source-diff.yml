@@ -1,5 +1,12 @@
 name: Full GB/NI official source exact code diff (REVIEW ONLY)
 on:
+  # Automatically compare each accepted GB/XI full snapshot to its preceding accepted run.
+  workflow_run:
+    workflows:
+      - Weekly GB full official source refresh and pinned replay (SHADOW ONLY)
+      - XI public full raw measure evidence (UNTRUSTED SHADOW)
+    types: [completed]
+    branches: [feat/parallel-scraper]
   workflow_dispatch:
     inputs:
       region:
@@ -23,58 +30,119 @@ concurrency:
   cancel-in-progress: false
 jobs:
   exact-code-diff:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 80
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Confirm two different full-source run IDs
+      - name: Select trusted latest full source and previous independently accepted snapshot
+        id: pair
         env:
-          OLD_RUN: ${{ inputs.before_run_id }}
-          NEW_RUN: ${{ inputs.after_run_id }}
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REGION_INPUT: ${{ inputs.region }}
+          BEFORE_INPUT: ${{ inputs.before_run_id }}
+          AFTER_INPUT: ${{ inputs.after_run_id }}
         run: |
           set -euo pipefail
-          [[ "$OLD_RUN" =~ ^[0-9]{8,16}$ && "$NEW_RUN" =~ ^[0-9]{8,16}$ ]]
-          [[ "$OLD_RUN" != "$NEW_RUN" ]]
+          python - <<'PY'
+          import json,os,re,subprocess
+          from pathlib import Path
+          def api(path):
+              return json.loads(subprocess.check_output(["gh","api",path],text=True))
+          repository=os.environ["GITHUB_REPOSITORY"]
+          def positive(s):
+              if not re.fullmatch(r"[0-9]{8,16}",str(s)):
+                  raise ValueError("Missing/invalid source workflow run ID")
+              return int(s)
+          if os.environ["EVENT_NAME"]=="workflow_run":
+              event=json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+              triggering=event["workflow_run"]
+              allowed={
+                  "Weekly GB full official source refresh and pinned replay (SHADOW ONLY)":
+                      ("GB","weekly-gb-full-source.yml","weekly-gb-full-source"),
+                  "XI public full raw measure evidence (UNTRUSTED SHADOW)":
+                      ("XI","xi-public-full-measures.yml","xi-public-full-acceptance"),
+              }
+              region,workflow,prefix=allowed[triggering["name"]]
+              if (triggering["conclusion"]!="success"
+                      or triggering["head_repository"]["full_name"]!=repository
+                      or triggering["head_branch"]!="feat/parallel-scraper"
+                      or triggering["event"] not in ("schedule","workflow_dispatch","push")):
+                  raise ValueError("Untrusted or unfinished full source workflow event")
+              after=positive(triggering["id"])
+              completed=api(f"repos/{repository}/actions/workflows/{workflow}/runs?branch=feat/parallel-scraper&status=success&per_page=50")["workflow_runs"]
+              before=None
+              for r in completed:
+                  candidate=r["id"]
+                  if candidate>=after or r.get("created_at","")>=triggering["created_at"]:
+                      continue
+                  if r.get("head_branch")!="feat/parallel-scraper":
+                      continue
+                  artifacts=api(f"repos/{repository}/actions/runs/{candidate}/artifacts?per_page=100")["artifacts"]
+                  if any(a["name"]==f"{prefix}-{candidate}" and not a["expired"] for a in artifacts):
+                      before=candidate
+                      break
+          else:
+              region=os.environ["REGION_INPUT"]
+              if region not in ("GB","XI"):
+                  raise ValueError("Select GB or XI")
+              before=positive(os.environ["BEFORE_INPUT"])
+              after=positive(os.environ["AFTER_INPUT"])
+          if before is not None and before==after:
+              raise ValueError("Must use two distinct verified source snapshots")
+          found=before is not None
+          if not found:
+              print("::warning::No earlier identical-format accepted source snapshot; cannot make up a diff")
+          print(f"Region={region}; earlier={before}; later={after}; comparable={found}")
+          with open(os.environ["GITHUB_OUTPUT"],"a") as output:
+              output.write(f"region={region}\\n".replace("\\\\n","\\n"))
+              output.write(f"before={before or ''}\\n".replace("\\\\n","\\n"))
+              output.write(f"after={after}\\n".replace("\\\\n","\\n"))
+              output.write(f"has_pair={str(found).lower()}\\n".replace("\\\\n","\\n"))
+          PY
       - name: Download older GB full official measures
-        if: inputs.region == 'GB'
+        if: steps.pair.outputs.has_pair == 'true' && steps.pair.outputs.region == 'GB'
         uses: actions/download-artifact@v4
         with:
-          run-id: ${{ inputs.before_run_id }}
-          name: weekly-gb-full-source-${{ inputs.before_run_id }}
+          run-id: ${{ steps.pair.outputs.before }}
+          name: weekly-gb-full-source-${{ steps.pair.outputs.before }}
           github-token: ${{ github.token }}
           path: before
       - name: Download newer GB full official measures
-        if: inputs.region == 'GB'
+        if: steps.pair.outputs.has_pair == 'true' && steps.pair.outputs.region == 'GB'
         uses: actions/download-artifact@v4
         with:
-          run-id: ${{ inputs.after_run_id }}
-          name: weekly-gb-full-source-${{ inputs.after_run_id }}
+          run-id: ${{ steps.pair.outputs.after }}
+          name: weekly-gb-full-source-${{ steps.pair.outputs.after }}
           github-token: ${{ github.token }}
           path: after
       - name: Download older independently accepted XI raw source
-        if: inputs.region == 'XI'
+        if: steps.pair.outputs.has_pair == 'true' && steps.pair.outputs.region == 'XI'
         uses: actions/download-artifact@v4
         with:
-          run-id: ${{ inputs.before_run_id }}
-          name: xi-public-full-acceptance-${{ inputs.before_run_id }}
+          run-id: ${{ steps.pair.outputs.before }}
+          name: xi-public-full-acceptance-${{ steps.pair.outputs.before }}
           github-token: ${{ github.token }}
           path: before
       - name: Download newer independently accepted XI raw source
-        if: inputs.region == 'XI'
+        if: steps.pair.outputs.has_pair == 'true' && steps.pair.outputs.region == 'XI'
         uses: actions/download-artifact@v4
         with:
-          run-id: ${{ inputs.after_run_id }}
-          name: xi-public-full-acceptance-${{ inputs.after_run_id }}
+          run-id: ${{ steps.pair.outputs.after }}
+          name: xi-public-full-acceptance-${{ steps.pair.outputs.after }}
           github-token: ${{ github.token }}
           path: after
       - name: Source provenance and non-103 measure change regression
+        if: steps.pair.outputs.has_pair == 'true'
         run: python -m unittest discover -s tests -p 'test_full_source_delta_scope.py' -v
       - name: Compare entire original official source by exact commodity code
+        if: steps.pair.outputs.has_pair == 'true'
         env:
-          REGION: ${{ inputs.region }}
+          REGION: ${{ steps.pair.outputs.region }}
         run: |
           set -euo pipefail
           case "$REGION" in
@@ -98,7 +166,7 @@ jobs:
           print("Exact source changed commodity codes:",len(rows))
           PY
       - name: Save source code diffs and hashes, NEVER publish
-        if: always()
+        if: always() && steps.pair.outputs.has_pair == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: full-source-exact-impact-${{ github.run_id }}
