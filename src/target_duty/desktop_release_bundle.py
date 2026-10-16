@@ -341,7 +341,7 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                         AND geography='1011' ORDER BY ordinal""",(code,)))
                     gb_rate=gb_default_rate(source)
                     option_rows=list(gb_conn.execute("""SELECT measure_type,geography,expression,
-                         additional_code,additional_code,conditions,excluded_areas,
+                         additional_code,NULL,conditions,excluded_areas,
                          effective_start,effective_end,raw_json
                          FROM measures WHERE region='GB' AND code=?
                          AND effective_status='active' AND measure_type IN ('103','105')
