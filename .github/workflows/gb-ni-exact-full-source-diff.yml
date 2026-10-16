@@ -1,5 +1,9 @@
 name: Full GB/NI official source exact code diff (REVIEW ONLY)
 on:
+  # One-time operator request for an exact trusted old/new full source diff.
+  push:
+    branches: [feat/parallel-scraper]
+    paths: [ops/manual-full-diff-run.txt]
   # Automatically compare each accepted GB/XI full snapshot to its preceding accepted run.
   workflow_run:
     workflows:
@@ -87,11 +91,18 @@ jobs:
                       before=candidate
                       break
           else:
-              region=os.environ["REGION_INPUT"]
+              if os.environ["EVENT_NAME"]=="push":
+                  content=Path("ops/manual-full-diff-run.txt").read_text()
+                  values=dict(re.findall(r"(?m)^(region|before_run_id|after_run_id)=(\\S+)$",content))
+                  region=values.get("region")
+                  before=positive(values.get("before_run_id"))
+                  after=positive(values.get("after_run_id"))
+              else:
+                  region=os.environ["REGION_INPUT"]
+                  before=positive(os.environ["BEFORE_INPUT"])
+                  after=positive(os.environ["AFTER_INPUT"])
               if region not in ("GB","XI"):
                   raise ValueError("Select GB or XI")
-              before=positive(os.environ["BEFORE_INPUT"])
-              after=positive(os.environ["AFTER_INPUT"])
           if before is not None and before==after:
               raise ValueError("Must use two distinct verified source snapshots")
           found=before is not None
