@@ -36,8 +36,6 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_xi_measure_crawl.py' -v
       - name: XI source replay and Other semantics acceptance tests
         run: python -m unittest discover -s tests -p 'test_xi_acceptance.py' -v
-      - name: Managed XI source-first workflow safety contract
-        run: python -m unittest discover -s tests -p 'test_xi_source_first_workflow.py' -v
       - name: XI read-only raw source batch lookup and missing-code states
         run: python -m unittest discover -s tests -p 'test_xi_source_lookup.py' -v
       - name: XI country-of-origin official filter comparison safety tests
@@ -92,14 +90,11 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_weekly_full_refresh.py' -v
       - name: Production data versioned binary / paired metadata freshness regression
         run: python -m unittest discover -s tests -p 'test_production_freshness_watch.py' -v
-      - name: Legacy latest-data auto-publisher isolation and timeout failure regression
-        run: |
-          python -m unittest discover -s tests -p 'test_legacy_publish_guard.py' -v
-          python -m src.target_duty.legacy_publish_guard --directory .github/workflows
       - name: Four-dimension final data release readiness fail-closed injection tests
         run: python -m unittest discover -s tests -p 'test_final_release_gate.py' -v
-      - name: Source changes, workflow guards and new XI 16-shard retry contracts
+      - name: Source changes, retained workflow and XI 16-shard retry contracts
         run: |
+          python -m unittest discover -s tests -p 'test_core_actions_layout.py' -v
           python -m unittest discover -s tests -p 'test_stage2_workflow_safety.py' -v
           python -m unittest discover -s tests -p 'test_stage3_workflow_safety.py' -v
           python -m unittest discover -s tests -p 'test_source_refresh_closure.py' -v
