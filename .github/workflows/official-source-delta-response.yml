@@ -129,6 +129,26 @@ jobs:
         run: |
           gh workflow run weekly-gb-full-source.yml --ref feat/parallel-scraper
           echo "::notice::Queued source-only GB latest full replay; production release is not enabled"
+      - name: Start complete XI refresh after successful targeted source replay
+        # Canary changes reveal drift, but the sampled canaries cannot establish
+        # the unchanged status of the remaining ~16k commodity codes. Reuse the
+        # existing weekly full-source workflow, never invent a partial release.
+        if: steps.scope.outputs.xi_changed == 'true' && steps.xi.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          result=json.load(open("xi-changed-canary-review.json"))
+          if (not result["public_changed_canaries_complete"]
+                  or result["failed_responses"]!=0
+                  or result["verified_responses"]!=result["expected_changed_codes"]
+                  or result["expected_changed_codes"]<=0):
+              raise SystemExit("Targeted XI source not independently accepted; full refresh not dispatched")
+          PY
+          gh workflow run xi-public-full-measures.yml --ref feat/parallel-scraper
+          echo "::notice::XI canary drift verified; queued full 16-shard/8-parallel collection, exact diff, and desktop publication chain"
       - name: Fail closed for missing XI changed source responses
         if: steps.scope.outputs.xi_changed == 'true'
         env:
