@@ -392,6 +392,10 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                 rate_options=json.dumps(gb_options+xi_options,ensure_ascii=False,separators=(",",":"))
                 counts["gb_rate_option_codes"]+=bool(gb_options)
                 counts["xi_rate_option_codes"]+=bool(xi_options)
+                counts["gb_rate_source_rows"]+=len(gb_options)
+                counts["xi_rate_source_rows"]+=len(xi_options)
+                counts["missing_rate_expressions"]+=sum(
+                    1 for option in gb_options+xi_options if not option["expression_available"])
                 counts["conditional_rate_options"]+=sum(
                     1 for option in gb_options+xi_options if option["conditional"])
                 counts["china_applicable_rate_options"]+=sum(
@@ -429,6 +433,9 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                            "xi_countervailing_codes":counts["xi_countervailing_codes"],
                            "gb_rate_option_codes":counts["gb_rate_option_codes"],
                            "xi_rate_option_codes":counts["xi_rate_option_codes"],
+                           "gb_rate_source_rows":counts["gb_rate_source_rows"],
+                           "xi_rate_source_rows":counts["xi_rate_source_rows"],
+                           "missing_rate_expressions":counts["missing_rate_expressions"],
                            "conditional_rate_options":counts["conditional_rate_options"],
                            "china_applicable_rate_options":counts["china_applicable_rate_options"]},
         "source_versions":{"GB":gb["version_or_catalogue"],
