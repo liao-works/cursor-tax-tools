@@ -4,6 +4,22 @@ from datetime import date
 from src.target_duty.desktop_release_bundle import simple_rate, xi_rate
 
 class DesktopReleaseBundleTests(unittest.TestCase):
+    def test_production_release_job_only_runs_after_exact_diff_and_has_write_permission(self):
+        from pathlib import Path
+        wf=(Path(__file__).resolve().parents[1]/".github"/"workflows"/"gb-ni-exact-full-source-diff.yml").read_text()
+        prefix,publisher=wf.split("  publish-desktop-data:",1)
+        self.assertNotIn("contents: write",prefix)
+        self.assertIn("contents: write",publisher)
+        self.assertIn("github.event_name == 'workflow_run'",publisher)
+        self.assertIn("needs: exact-code-diff",publisher)
+        self.assertIn("gh release create",publisher)
+        self.assertIn("gh release upload latest-data",publisher)
+        self.assertIn("metadata.json",publisher)
+        self.assertIn("full_source_delta_scope",prefix)
+        xi=(Path(__file__).resolve().parents[1]/".github"/"workflows"/"xi-public-full-measures.yml").read_text()
+        self.assertIn("cron: '0 2 * * *'",xi)
+        self.assertIn("max-parallel: 8",xi)
+
     def test_gb_unique_simple_rate(self):
         self.assertEqual(simple_rate([("6%","","","")]),"6%")
         self.assertEqual(simple_rate([("0.00 %","","","")]),"0.00 %")
