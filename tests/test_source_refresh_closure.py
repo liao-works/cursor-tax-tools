@@ -35,7 +35,12 @@ class SourceRefreshClosureTests(unittest.TestCase):
         self.assertIn("full_source_delta_scope",diff)
         self.assertIn("exact-changed-codes.csv",diff)
         self.assertIn('steps.pair.outputs.has_pair == \'true\'',diff)
-        self.assertNotIn("contents: write",diff)
+        self.assertIn("  publish-desktop-data:",diff)
+        self.assertIn("needs: exact-code-diff",diff)
+        self.assertIn("contents: write",diff)
+        self.assertIn("src.target_duty.desktop_release_bundle",diff)
+        self.assertIn("gh release upload latest-data",diff)
+        self.assertNotIn("contents: write",diff.split("  publish-desktop-data:")[0])
         self.assertNotIn("softprops/action-gh-release",diff)
 
     def test_sixteen_shards_remain_rate_limited_and_recoverable(self):
