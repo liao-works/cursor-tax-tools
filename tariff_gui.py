@@ -5,6 +5,10 @@ import logging
 from tariff_api import TariffAPI
 from tariff_db import TariffDB
 from src.clients.smart_update_client import SmartUpdateChecker
+from src.clients.data_update_notifier import (
+    DEFAULT_METADATA_URL, configured_metadata_url, release_notification_key,
+    check_delay_ms, RETRY_INTERVAL_MS,
+)
 import queue
 import threading
 import asyncio
@@ -52,13 +56,14 @@ def load_config() -> dict:
     """
     default_config = {
         "db_path": "tariffs.db",
-        "metadata_url": "https://github.com/CavinHuang/cursor-tax-tools/releases/download/latest-data/metadata.json"
+        "metadata_url": DEFAULT_METADATA_URL
     }
     
     try:
         if os.path.exists(CONFIG_FILE):
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 config = json.load(f)
+                config["metadata_url"] = configured_metadata_url(config.get("metadata_url"))
                 logger.info(f"✅ 已加载配置文件: {CONFIG_FILE}")
                 return config
         else:
@@ -226,9 +231,14 @@ class TariffGUI:
 
         # ✅ 绑定窗口关闭事件
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self._closing = False
+        self._data_update_check_timer = None
+        self._data_notification_window = None
 
-        # ✅ 启动后自动加载本地数据库信息
+        # Startup and once per 24h while this desktop application is running.
+        # The network check runs in the existing background thread pool.
         self.root.after(500, self._load_initial_local_info)
+        self._schedule_next_data_update_check(2000)
 
     def setup_ui(self):
         """设置UI界面"""
@@ -970,9 +980,7 @@ class TariffGUI:
 
         # 元数据URL
         ttk.Label(config_frame, text="元数据URL:").grid(row=0, column=0, sticky='w', padx=5, pady=5)
-        self.metadata_url_var = tk.StringVar(
-            value="https://github.com/CavinHuang/cursor-tax-tools/releases/download/latest-data/metadata.json"
-        )
+        self.metadata_url_var = tk.StringVar(value=self.config.get("metadata_url", DEFAULT_METADATA_URL))
         ttk.Entry(config_frame, textvariable=self.metadata_url_var, width=70).grid(row=0, column=1, padx=5, pady=5)
 
         # 数据库路径
@@ -1019,6 +1027,15 @@ class TariffGUI:
         ttk.Label(update_frame, text="更新状态:").pack(side='left')
         self.update_status_label = ttk.Label(update_frame, text="未检查", foreground="gray")
         self.update_status_label.pack(side='left', padx=10)
+
+        # Persistent in-app notification, visible until user installs newer data.
+        self.data_update_banner_var = tk.StringVar(value="")
+        self.data_update_banner = ttk.Frame(self.remote_update_frame)
+        ttk.Label(self.data_update_banner, textvariable=self.data_update_banner_var,
+                  foreground="#b45309").pack(side="left", padx=(10, 8))
+        ttk.Button(self.data_update_banner, text="查看更新",
+                   command=lambda: self.notebook.select(self.remote_update_frame)).pack(side="left")
+        # Do not show an empty banner when no new release is available.
 
         # 操作按钮区域
         action_frame = ttk.LabelFrame(self.remote_update_frame, text="操作")
@@ -1152,14 +1169,21 @@ class TariffGUI:
         # ✅ 使用线程池提交任务（避免无限制创建线程）
         self.thread_pool.submit(refresh_task)
 
-    def check_remote_update(self):
-        """检查远程更新"""
-        # ✅ 检查是否有操作正在进行
+    def check_remote_update(self, automatic: bool = False):
+        """Read-only release check (manual or scheduled background operation)."""
         if self.remote_update_in_progress:
-            messagebox.showwarning("提示", "远程更新操作正在进行中，请稍候")
+            if automatic:
+                self._schedule_next_data_update_check(RETRY_INTERVAL_MS)
+            else:
+                messagebox.showwarning("提示", "远程更新操作正在进行中，请稍候")
             return
 
+        # Tk variables belong to the UI thread, never read them from a worker.
+        db_path = self.db_path_var.get()
+        metadata_url = configured_metadata_url(self.metadata_url_var.get())
+
         def check_task():
+            succeeded = False
             with self.remote_update_lock:
                 self.remote_update_in_progress = True
                 try:
@@ -1169,8 +1193,6 @@ class TariffGUI:
                     self.queue.put((self.add_remote_log, ("🔍 开始检查远程更新...",), {}))
 
                     # 初始化更新检查器
-                    db_path = self.db_path_var.get()
-                    metadata_url = self.metadata_url_var.get()
                     self.smart_update_checker = SmartUpdateChecker(metadata_url, db_path)
 
                     # 下载远程元数据
@@ -1207,6 +1229,7 @@ class TariffGUI:
                         remote_metadata, local_db_info, local_metadata
                     )
 
+                    succeeded = True
                     # ✅ 使用队列更新UI
                     if update_needed:
                         self.queue.put((self.update_status_label.config, (), {'text': f"需要更新: {reason}", 'foreground': "orange"}))
@@ -1220,8 +1243,11 @@ class TariffGUI:
                         else:
                             self.queue.put((self.add_remote_log, ("💡 低优先级更新建议",), {}))
 
-                        # ✅ 弹窗询问用户是否要立即更新
-                        self.queue.put((self._show_update_confirmation_dialog, (reason, remote_metadata, details), {}))
+                        if automatic:
+                            # Nonblocking notification; do not automatically install data.
+                            self.queue.put((self._announce_new_data_release, (remote_metadata, reason), {}))
+                        else:
+                            self.queue.put((self._show_update_confirmation_dialog, (reason, remote_metadata, details), {}))
                     else:
                         self.queue.put((self.update_status_label.config, (), {'text': "已是最新", 'foreground': "green"}))
                         self.queue.put((self.add_remote_log, ("✅ 数据库已是最新版本",), {}))
@@ -1235,8 +1261,9 @@ class TariffGUI:
                     self.queue.put((self.remote_progress_bar.stop, (), {}))
                     self.queue.put((self.set_remote_ui_state, (True,), {}))
                     self.remote_update_in_progress = False
+                    if automatic:
+                        self.queue.put((self._finish_daily_data_update_check, (succeeded,), {}))
 
-        # ✅ 使用线程池提交任务（避免无限制创建线程）
         self.thread_pool.submit(check_task)
 
     def force_remote_update(self):
