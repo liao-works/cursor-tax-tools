@@ -46,6 +46,29 @@ class DesktopReleaseBundleTests(unittest.TestCase):
             "measure_conditions":{"data":[{"id":"1","type":"measure_condition"}]}})],day),"")
         self.assertEqual(xi_rate([row(),row(rate="8%",typ="105")],day),"")
 
+    def test_hmrc_official_linked_duty_expression_is_replayed(self):
+        import json
+        from datetime import date
+        measure={
+          "relationships":{
+            "duty_expression":{"data":{"type":"duty_expression","id":"rate-1"}},
+            "measure_conditions":{"data":[]},
+            "additional_code":{"data":None},
+          }
+        }
+        raw_doc={"included":[
+            {"type":"duty_expression","id":"rate-1","attributes":{"base":"7.20 %"}}
+        ]}
+        row=("103","1011","", "2026-01-01",None,json.dumps(measure))
+        self.assertEqual(xi_rate([row],date(2026,10,16),
+                                 json.dumps(raw_doc).encode()),"7.20 %")
+        self.assertEqual(xi_rate([row],date(2026,10,16)),"")
+        measure["relationships"]["measure_conditions"]["data"]=[
+            {"type":"measure_condition","id":"condition-1"}]
+        restricted=("103","1011","","2026-01-01",None,json.dumps(measure))
+        self.assertEqual(xi_rate([restricted],date(2026,10,16),
+                                 json.dumps(raw_doc).encode()),"")
+
     def test_invalid_source_dates_cannot_be_published(self):
         import json
         self.assertEqual(xi_rate([("103","1011","6%",None,None,
