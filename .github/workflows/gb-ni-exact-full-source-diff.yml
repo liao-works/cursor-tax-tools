@@ -99,10 +99,10 @@ jobs:
               print("::warning::No earlier identical-format accepted source snapshot; cannot make up a diff")
           print(f"Region={region}; earlier={before}; later={after}; comparable={found}")
           with open(os.environ["GITHUB_OUTPUT"],"a") as output:
-              output.write(f"region={region}\\n".replace("\\\\n","\\n"))
-              output.write(f"before={before or ''}\\n".replace("\\\\n","\\n"))
-              output.write(f"after={after}\\n".replace("\\\\n","\\n"))
-              output.write(f"has_pair={str(found).lower()}\\n".replace("\\\\n","\\n"))
+              print(f"region={region}",file=output)
+              print(f"before={before or ''}",file=output)
+              print(f"after={after}",file=output)
+              print(f"has_pair={str(found).lower()}",file=output)
           PY
       - name: Download older GB full official measures
         if: steps.pair.outputs.has_pair == 'true' && steps.pair.outputs.region == 'GB'
