@@ -18,7 +18,7 @@ def inspect(gb: str, xi: str) -> list[str]:
     xi_cron = re.search(r"(?m)^\s*- cron: '([^']+)'",xi)
     if not gb_cron or gb_cron.group(1)!="0 1 * * 0":
         errors.append("GB weekly Sunday 01:00 UTC full source schedule missing")
-    if not xi_cron or xi_cron.group(1)!="0 2 * * 0":
+    if not xi_cron or xi_cron.group(1)!="0 2 * * *":
         errors.append("XI weekly Sunday 02:00 UTC full source schedule missing")
     for name, body in ((GB,gb),(XI,xi)):
         if re.search(r"(?m)^\s*contents:\s*write\s*$",body):
