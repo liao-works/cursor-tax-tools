@@ -18,6 +18,7 @@ from pathlib import Path
 
 from .full_source_delta_scope import _source
 from .gb_full_measures import _catalogue
+from .catalog import NA
 from .xi_measure_crawl import candidates
 from .xi_public_full_capture import verify_public
 from .xi_acceptance import decompress_checked
@@ -48,6 +49,30 @@ def simple_rate(rows):
             return ""
         values.append(expression)
     return values[0] if len(values)==1 else ""
+
+
+
+def _blank(value):
+    """DBT CSV export represents missing attributes with #NA/N/A/None."""
+    return value is None or str(value).strip() in NA or str(value).strip() in ("[]","{}")
+
+
+def gb_default_rate(rows):
+    """Select an unconditional base duty, ignoring inapplicable extra-code rows.
+
+    A different unconditional rate, or an unclear base expression, makes
+    the code ambiguous. Never publish a conditional or specific-country rate.
+    """
+    default=[]
+    for expr,additional,conditions,excluded in rows:
+        if not (_blank(additional) and _blank(conditions) and _blank(excluded)):
+            continue
+        expression=(expr or "").strip()
+        if not PERCENT.fullmatch(expression):
+            return ""
+        default.append(expression)
+    distinct=set(default)
+    return next(iter(distinct)) if len(distinct)==1 else ""
 
 
 def xi_rate(rows, as_of:date, original_body:bytes|None=None):
@@ -157,7 +182,10 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                        FROM measures WHERE region='GB' AND code=?
                         AND effective_status='active' AND measure_type IN ('103','105')
                         AND geography='1011' ORDER BY ordinal""",(code,)))
-                    gb_rate=simple_rate(source)
+                    gb_rate=gb_default_rate(source)
+                    counts["gb_103_105_codes"]+=bool(source)
+                    counts["gb_unconditional_candidates"]+=sum(
+                        _blank(r[1]) and _blank(r[2]) and _blank(r[3]) for r in source)
                     counts["gb_percent"]+=bool(gb_rate)
                 if code in xi_codes:
                     source=list(xi_conn.execute("""SELECT measure_type,geography_id,

@@ -1,7 +1,7 @@
 """Data from accepted snapshots must never invent ambiguous or stale rates."""
 import unittest
 from datetime import date
-from src.target_duty.desktop_release_bundle import simple_rate, xi_rate
+from src.target_duty.desktop_release_bundle import simple_rate, gb_default_rate, xi_rate
 
 class DesktopReleaseBundleTests(unittest.TestCase):
     def test_production_release_job_only_runs_after_exact_diff_and_has_write_permission(self):
@@ -29,6 +29,21 @@ class DesktopReleaseBundleTests(unittest.TestCase):
         self.assertEqual(simple_rate([("6%","1234","","")]),"")
         self.assertEqual(simple_rate([("6%","","","GB")]),"")
         self.assertEqual(simple_rate([("£12/100kg","","","")]),"")
+
+    def test_gb_null_sentinels_and_specific_additional_codes(self):
+        self.assertEqual(gb_default_rate([("6.00 %","#NA","N/A","None")]),"6.00 %")
+        self.assertEqual(gb_default_rate([("0%","null","[]","")]),"0%")
+        self.assertEqual(gb_default_rate([
+            ("6%","#NA","#NA","#NA"),
+            ("2%","1234","#NA","#NA"),
+        ]),"6%")
+        self.assertEqual(gb_default_rate([
+            ("6%","#NA","#NA","#NA"),
+            ("8%","N/A","[]","None"),
+        ]),"")
+        self.assertEqual(gb_default_rate([("6%","1234","","")]),"")
+        self.assertEqual(gb_default_rate([("6%","","certificate","")]),"")
+        self.assertEqual(gb_default_rate([("EUR 12/100kg","","","")]),"")
 
     def test_xi_stale_conditional_specific_and_compound_never_auto_populate(self):
         day=date(2026,10,16)
