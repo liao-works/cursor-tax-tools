@@ -1,5 +1,10 @@
 name: XI public full raw measure evidence (UNTRUSTED SHADOW)
 on:
+  # Explicit operator launch: one commit to this control file triggers BOTH full raw-source audits.
+  # Read-only: no production rate release or desktop database replacement.
+  push:
+    branches: [feat/parallel-scraper]
+    paths: ['ops/manual-full-source-run.txt']
   workflow_dispatch:
   # Every Sunday 02:00 UTC / 10:00 Singapore: new XI public source snapshot.
   # Scheduled runs start a fresh frozen catalogue; manual runs can resume.
