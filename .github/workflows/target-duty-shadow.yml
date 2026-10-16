@@ -1,0 +1,31 @@
+name: Target third-country duty (shadow only)
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '37 */4 * * *'
+permissions:
+  contents: read
+jobs:
+  shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Unit tests
+        run: python -m unittest discover -s tests -p 'test_target_duty.py' -v
+      - name: Build focused GB tariff shadow (NO release publishing)
+        run: python -m src.target_duty.build --output target-duty.db
+      - name: Produce isolated preview archive (not production-signed)
+        run: python -m src.target_duty.preview_bundle --output target-duty-preview.zip
+      - name: Save candidates for offline reconciliation
+        uses: actions/upload-artifact@v4
+        with:
+          name: target-duty-shadow-${{ github.run_id }}
+          path: |
+            target-duty.db
+            target-duty.metadata.json
+            target-duty-preview.zip
+          retention-days: 14

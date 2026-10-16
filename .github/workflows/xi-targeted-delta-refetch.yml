@@ -1,0 +1,66 @@
+name: XI exact source-only affected-code live refetch (NEVER RELEASE)
+on:
+  push:
+    branches: [feat/parallel-scraper]
+    paths: [ops/xi-targeted-refetch-launch.txt]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify-selected-codes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Targeted full raw JSON:API response and source-failure regression
+        run: python -m unittest discover -s tests -p 'test_xi_targeted_delta_capture.py' -v
+      - name: Download independent full 17,395-candidate date impact SOURCE queue
+        uses: actions/download-artifact@v4
+        with:
+          run-id: 38695817246
+          name: xi-expiry-affected-code-queue-38695817246
+          github-token: ${{ github.token }}
+          path: queue
+      - name: Fetch actual NI public responses for ONLY 8 changed source codes
+        id: refetch
+        continue-on-error: true
+        run: |
+          python -m src.target_duty.xi_targeted_delta_capture \
+            --queue-csv queue/xi-expired-candidate-affected-codes.csv \
+            --queue-report queue/xi-expired-candidate-affected-codes.json \
+            --as-of 2026-10-15 \
+            --output-db xi-targeted-original-responses.db \
+            --output-report xi-targeted-live-audit.json
+      - name: Preserve source-only original responses and errors
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xi-targeted-source-date-refetch-${{ github.run_id }}
+          path: |
+            xi-targeted-original-responses.db
+            xi-targeted-live-audit.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Hard fail on ANY missing source response; never certify rate
+        env:
+          REFRESH: ${{ steps.refetch.outcome }}
+        run: |
+          set -euo pipefail
+          [[ "$REFRESH" == success ]] || { echo "::error::Incomplete target code refresh"; exit 1; }
+          python - <<'PY'
+          import json
+          x=json.load(open("xi-targeted-live-audit.json"))
+          assert x["selected_distinct_codes"]==8
+          assert x["verified_public_responses"]==8
+          assert x["failed_responses"]==0
+          assert x["source_success_complete"] is True
+          assert x["NI_Other_payable_certified"] is False
+          assert x["production_eligible"] is False
+          assert x["all_NI_source_changes_captured"] is False
+          print("Exact selected public XI 2026-10-15 changed code responses replayed:",
+                x["verified_public_responses"])
+          PY

@@ -1,0 +1,3 @@
+2026-10-15 P0 independent read-only verification of actual latest-data vs versioned release.
+Expected: stale 2026-10-01 production DB -> FAIL, no release changes.
+Check metadata SHA, versioned binary parity, SQLite integrity, schema, record count and file pair age.

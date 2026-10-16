@@ -1,0 +1,4 @@
+Original approved public XI raw source run: 38567997207
+Frozen source date: 2026-10-14; 97 chapters; 16,728 original responses
+Expected: 17,395 103/105 candidate measures, all raw legal/condition/geo references
+No HMRC OAuth, no managed provenance, no payable NI Other duty, no production promotion

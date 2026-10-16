@@ -1,0 +1,103 @@
+name: XI full 103-105 original certificate and condition evidence (SHADOW ONLY)
+on:
+  push:
+    branches: [feat/parallel-scraper]
+    paths: [ops/xi-condition-source-launch.txt]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: xi-condition-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate real-shaped condition and trader-status scenarios
+        run: |
+          python -m unittest discover -s tests -p 'test_xi_condition_evidence.py' -v
+      - name: Recover 97-chapter original public XI catalogue from successful source run
+        uses: actions/download-artifact@v4
+        with:
+          name: xi-public-full-catalogue-38567997207
+          run-id: 38567997207
+          github-token: ${{ github.token }}
+          path: evidence
+      - name: Recover all 4 immutable original XI raw measure checkpoints
+        uses: actions/download-artifact@v4
+        with:
+          pattern: xi-public-full-shard-*-38567997207
+          run-id: 38567997207
+          github-token: ${{ github.token }}
+          path: evidence/shards
+      - name: Independently SHA-replay and derive original legal/conditions/footnote records
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import glob,json
+          from src.target_duty.xi_condition_evidence import export
+          paths=sorted(glob.glob("evidence/shards/xi-public-full-shard-*-38567997207/xi-public-shard-*.db"))
+          if len(paths)!=4:
+              raise SystemExit(f"Missing official source shard(s): {len(paths)} / 4")
+          out=export("evidence/xi-public-full-catalogue.db",
+            "evidence/xi-public-frozen-manifest.json",paths,
+            output_csv="xi-condition-details-candidates.csv",
+            output_report="xi-condition-details-summary.json")
+          assert out["source_full_complete"]
+          assert out["expected_codes"]==16728
+          assert out["verified_original_responses"]==16728
+          assert out["candidate_codes"]==16630
+          assert out["candidate_measures"]==17395
+          assert out["codes_without_candidates"]==98
+          assert out["certified_payable_rates"]==0
+          assert out["ni_other_verified"] is False
+          assert out["production_eligible"] is False
+          print(json.dumps(out,ensure_ascii=False,indent=2))
+          PY
+      - name: Review source evidence detail schema and all row guardrails
+        run: |
+          python - <<'PY'
+          import csv,hashlib,json
+          r=json.load(open("xi-condition-details-summary.json"))
+          h=hashlib.sha256()
+          with open("xi-condition-details-candidates.csv","rb") as f:
+              for part in iter(lambda:f.read(1024*1024),b""):
+                  h.update(part)
+          assert h.hexdigest()==r["output_csv_sha256"]
+          with open("xi-condition-details-candidates.csv",newline="") as f:
+              rows=csv.DictReader(f)
+              count=0
+              for row in rows:
+                  count+=1
+                  assert row["production_eligible"]=="false"
+                  assert row["review_required"]=="true"
+                  assert row["ni_other_payable_rate"]==""
+                  assert len(row["original_response_sha256"])==64
+                  for col in ("condition_evidence_json",
+                              "condition_permutations_json",
+                              "excluded_geographies_json",
+                              "measure_components_json",
+                              "legal_acts_json","footnotes_json",
+                              "additional_codes_json","missing_nested_references_json"):
+                      assert isinstance(json.loads(row[col]),list)
+                  assert row["additional_code_state"] in (
+                      "not_exposed","source_explicit_none","source_referenced")
+          assert count==17395
+          print("All 17,395 source-detail records are conservative & SHA pinned")
+          PY
+      - name: Store full structured review evidence (never publish desktop rates)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xi-original-condition-evidence-${{ github.run_id }}
+          path: |
+            xi-condition-details-candidates.csv
+            xi-condition-details-summary.json
+          if-no-files-found: warn
+          retention-days: 30

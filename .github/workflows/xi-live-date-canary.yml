@@ -1,0 +1,63 @@
+name: XI selected real public source 10-15 date drift canary (SHADOW)
+on:
+  push:
+    branches: [feat/parallel-scraper]
+    paths: [ops/xi-live-date-canary-launch.txt]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Date drift, source malformed and no payable-rate contract tests
+        run: |
+          python -m unittest discover -s tests -p 'test_xi_live_date_canary.py' -v
+      - uses: actions/download-artifact@v4
+        with:
+          name: xi-public-full-shard-0-38567997207
+          run-id: 38567997207
+          github-token: ${{ github.token }}
+          path: evidence
+      - name: Query new-date official public XI source, compare original 2026-10-14
+        id: fetch
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.xi_live_date_canary \
+            --baseline-shard evidence/xi-public-shard-0.db \
+            --baseline-date 2026-10-14 \
+            --current-date 2026-10-15 \
+            --codes 0101210000,0101299000,0207412010,0713101000,0713109000,0805102210 \
+            --output xi-live-date-canary-results.json
+      - name: Always preserve actual source fingerprints and source failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xi-public-date-drift-canary-${{ github.run_id }}
+          path: xi-live-date-canary-results.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Final non-production and completeness guard
+        env:
+          FETCH_OUTCOME: ${{ steps.fetch.outcome }}
+        run: |
+          set -euo pipefail
+          [[ "$FETCH_OUTCOME" == success ]]
+          python - <<'PY'
+          import json
+          a=json.load(open("xi-live-date-canary-results.json"))
+          assert a["fetched"]==6 and a["failed"]==0
+          assert not a["production_eligible"]
+          assert not a["ni_other_verified"]
+          assert not a["full_xi_freshness_verified"]
+          assert a["measures_eligible_for_payable_rates"]==0
+          print("Canary compared six original SHA-verified snapshots to actual 2026-10-15 public API responses")
+          print("Changed source candidate sets:",a["semantic_candidate_changes"])
+          PY

@@ -1,0 +1,2 @@
+2026-10-15: Check official DBT newest version, require published CSVW and full tables, replay pinned GB full evidence; output all changed 103 candidate codes with no payable rates.
+No fallback to older v4.0.1627; no latest-data writes.

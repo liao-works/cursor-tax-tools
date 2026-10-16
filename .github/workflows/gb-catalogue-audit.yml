@@ -1,0 +1,116 @@
+name: Official GB commodity catalogue audit (shadow only)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/target_duty/catalog.py'
+      - 'tests/test_catalog.py'
+      - 'src/target_duty/gap_measures.py'
+      - 'tests/test_gap_measures.py'
+      - 'src/target_duty/region_measures.py'
+      - 'tests/test_region_measures.py'
+      - 'src/target_duty/hmrc_bulk_feasibility.py'
+      - 'tests/test_hmrc_bulk_feasibility.py'
+      - '.github/workflows/gb-catalogue-audit.yml'
+  # Schedules only execute from the repository default branch; no production
+  # branch or release is modified by this workflow.
+
+permissions:
+  contents: read
+
+jobs:
+  catalogue-and-coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Offline catalogue regression tests
+        run: python -m unittest discover -s tests -p 'test_catalog.py' -v
+      - name: Offline all-measure source regression tests
+        run: python -m unittest discover -s tests -p 'test_gap_measures.py' -v
+      - name: Offline region-separated canonical measures regression tests
+        run: python -m unittest discover -s tests -p 'test_region_measures.py' -v
+      - name: Offline HMRC Bulk continuity and integrity contract tests
+        run: python -m unittest discover -s tests -p 'test_hmrc_bulk_feasibility.py' -v
+      - name: Download and stage FULL official DBT commodity catalogue
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from datetime import date
+          from pathlib import Path
+          from src.target_duty.catalog import download_catalog, build
+          raw = Path("gb-official-commodities.csv")
+          resolved_url = download_catalog("latest", raw)
+          result = build(str(raw), "gb-commodity-catalogue.db",
+                         as_of=date.today(), source_version="latest",
+                         resolved_url=resolved_url)
+          print(json.dumps(result, indent=2))
+          PY
+      - name: Obtain checksum-verified existing production snapshot
+        if: github.event_name == 'workflow_dispatch'
+        run: python -m src.target_duty.legacy --output legacy-tariffs.db
+      - name: Build separate 103/1011 comparison from SAME official source version
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(python -c 'import json; print(json.load(open("gb-commodity-catalogue.metadata.json"))["resolved_version"] or "")')"
+          [[ "$VERSION" =~ ^v[0-9]+(\.[0-9]+)*$ ]] || { echo "DBT alias did not resolve to a pinned version"; exit 1; }
+          echo "Reconciliation pinned to $VERSION"
+          python -m src.target_duty.build             --version "$VERSION"             --output focused-gb.db             --legacy-db legacy-tariffs.db
+      - name: Compare catalogue, legacy and focused GB scopes
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          python -m src.target_duty.catalog compare \
+            --catalogue gb-commodity-catalogue.db \
+            --legacy legacy-tariffs.db \
+            --focused focused-gb.db \
+            --output gb-catalogue-coverage.json
+      - name: Audit ALL active leaf gaps against unfiltered official measures
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(python -c 'import json; print(json.load(open("gb-commodity-catalogue.metadata.json"))["resolved_version"] or "")')"
+          python -m src.target_duty.gap_measures \
+            --catalogue gb-commodity-catalogue.db \
+            --focused focused-gb.db \
+            --version "$VERSION" \
+            --as-of "$(python -c 'import json; print(json.load(open("gb-commodity-catalogue.metadata.json"))["as_of"])')" \
+            --workers 3 --limit 1000 --output gb-gap-measures.json
+      - name: Build read-only canonical GB measure evidence from gap audit
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.region_measures build \
+            --gb gb-gap-measures.db \
+            --output region-measures-shadow.db
+          python -m src.target_duty.region_measures query \
+            --database region-measures-shadow.db --region GB \
+            --code 9930240000 > region-measures-sample.json
+      - name: Preserve source and review evidence (NOT a production release)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gb-official-catalogue-audit-${{ github.run_id }}
+          path: |
+            gb-official-commodities.csv
+            gb-commodity-catalogue.db
+            gb-commodity-catalogue.metadata.json
+            gb-catalogue-coverage.json
+            gb-catalogue-coverage.csv
+            gb-gap-measures.json
+            gb-gap-measures.db
+            gb-gap-measures.csv
+            region-measures-shadow.db
+            region-measures-shadow.json
+            region-measures-sample.json
+          retention-days: 14

@@ -1,0 +1,200 @@
+name: XI official chapter source canary (untrusted public shadow)
+
+on:
+  pull_request:
+    paths:
+      - 'src/target_duty/xi_catalogue.py'
+      - 'tests/test_xi_catalogue.py'
+      - 'src/target_duty/xi_measure_crawl.py'
+      - 'tests/test_xi_measure_crawl.py'
+      - 'src/target_duty/xi_drift_guard.py'
+      - 'tests/test_xi_drift_guard.py'
+      - 'src/target_duty/xi_acceptance.py'
+      - 'tests/test_xi_acceptance.py'
+      - 'src/target_duty/xi_run_plan.py'
+      - 'tests/test_xi_run_plan.py'
+      - 'src/target_duty/xi_coverage_receipt.py'
+      - 'tests/test_xi_coverage_receipt.py'
+      - 'src/target_duty/xi_checkpoint_chain.py'
+      - 'tests/test_xi_checkpoint_chain.py'
+      - 'src/target_duty/xi_archive.py'
+      - 'tests/test_xi_archive.py'
+      - 'src/target_duty/xi_origin_compare.py'
+      - 'tests/test_xi_origin_compare.py'
+      - '.github/workflows/xi-chapter-canary.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  xi-source-schema-canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Validate XI nomenclature schema locally
+        run: python -m unittest discover -s tests -p 'test_xi_catalogue.py' -v
+      - name: Probe ONLY two official XI chapter endpoints (not production coverage)
+        run: |
+          python -m src.target_duty.xi_catalogue \
+            --as-of 2026-10-14 \
+            --public-canary --max-chapters 2 \
+            --output xi-catalogue-canary.db
+      - name: Probe only five XI commodity measure responses (public review-only)
+        run: |
+          python -m src.target_duty.xi_measure_crawl \
+            --catalogue xi-catalogue-canary.db \
+            --as-of 2026-10-14 --limit 5 --min-interval 1.5 \
+            --public-canary --output xi-measures-canary.db
+      - name: Verify stored XI API bytes, measures and incomplete 2-chapter coverage
+        run: |
+          python -m src.target_duty.xi_acceptance \
+            --catalogue xi-catalogue-canary.db \
+            --measures xi-measures-canary.db \
+            --output xi-acceptance-canary.json
+      - name: Compare one XI code using US and CN origin-specific official filters
+        run: |
+          python -m src.target_duty.xi_origin_compare \
+            --code 0101210000 --as-of 2026-10-14 \
+            --origins US,CN --public-canary \
+            --min-interval 1.5 \
+            --output xi-origin-comparison-canary.db
+      - name: Independently plan next XI public canary shard from verified checkpoint
+        run: |
+          python -m src.target_duty.xi_run_plan \
+            --catalogue xi-catalogue-canary.db \
+            --checkpoint xi-measures-canary.db \
+            --public-canary --batch-size 5 \
+            --output xi-next-shard-canary.json
+          python - <<'PY'
+          import json
+          a=json.load(open("xi-next-shard-canary.json"))
+          assert a["source_scope"]=="partial_or_fixture"
+          assert a["remaining_codes"]==511
+          assert a["next_shard"]["start_index"]==5
+          assert a["all_managed_source_responses_verified"] is False
+          assert a["ni_other_verified"] is False
+          print("XI limited canary next shard and missing codes verified")
+          PY
+      - name: Generate per-chapter XI source coverage receipt (partial canary only)
+        run: |
+          python -m src.target_duty.xi_coverage_receipt \
+            --catalogue xi-catalogue-canary.db \
+            --checkpoint xi-measures-canary.db \
+            --public-canary \
+            --output xi-chapter-receipt-canary.json
+          python - <<'PY'
+          import json
+          r=json.load(open("xi-chapter-receipt-canary.json"))
+          assert r["chapters_collected"]==2
+          assert r["active_declarable_codes"]==516
+          assert r["successful_responses"]==5
+          assert r["missing_responses"]==511
+          assert r["failed_responses"]==0
+          assert r["managed_full_source_coverage_pass"] is False
+          assert r["ni_other_verified"] is False
+          print("Verified two-chapter partial source receipt; NOT NI full source or duty.")
+          PY
+      - name: Confirm actual same-as-of XI source anchors remain stable
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.xi_drift_guard \
+            --catalogue xi-catalogue-canary.db \
+            --checkpoint xi-measures-canary.db \
+            --as-of 2026-10-14 \
+            --public-canary --count 2 --min-interval 1.5 \
+            --require-stable \
+            --evidence-db xi-drift-canary-evidence.db \
+            --output xi-drift-canary.json
+          python - <<'PY'
+          import json
+          r=json.load(open("xi-drift-canary.json"))
+          assert r["source_scope"]=="partial_or_fixture"
+          assert r["anchor_count"]==2
+          assert r["resume_source_stability_gate_pass"] is True
+          assert r["atomic_official_snapshot_verified"] is False
+          assert r["ni_other_verified"] is False
+          print("Sample XI drift anchors stable; atomic snapshot NOT proven")
+          PY
+      - name: Create and independently verify source-only XI checkpoint continuity receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.xi_merge \
+            --catalogue xi-catalogue-canary.db \
+            --shards xi-measures-canary.db \
+            --as-of 2026-10-14 \
+            --output xi-merged-canary.db
+          python -m src.target_duty.xi_checkpoint_chain seal \
+            --catalogue xi-catalogue-canary.db \
+            --checkpoint xi-merged-canary.db \
+            --merge-report xi-merged-canary.json \
+            --public-canary --output xi-canary-continuity.json
+          python -m src.target_duty.xi_checkpoint_chain verify \
+            --catalogue xi-catalogue-canary.db \
+            --checkpoint xi-merged-canary.db \
+            --merge-report xi-merged-canary.json \
+            --public-canary --output xi-canary-continuity.json
+          python - <<'PY'
+          import json
+          p=json.load(open("xi-canary-continuity.json"))
+          assert p["source_scope"]=="partial_or_fixture"
+          assert p["total_official_codes"]==516
+          assert p["successful_codes"]==5
+          assert p["missing_codes"]==511
+          assert p["parent_chain_sha256"] is None
+          assert p["production_eligible"] is False
+          assert p["chain_authenticated_or_signed"] is False
+          print("Partial canary checkpoint linkage verified; full NI source NOT certified")
+          PY
+      - name: Package, restore and replay partial XI source archive (UNSIGNED canary)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.xi_archive pack \
+            --catalogue xi-catalogue-canary.db \
+            --checkpoint xi-merged-canary.db \
+            --merge-report xi-merged-canary.json \
+            --chain xi-canary-continuity.json \
+            --public-canary --output xi-public-source-archive.zip
+          python -m src.target_duty.xi_archive restore \
+            --archive xi-public-source-archive.zip \
+            --destination xi-archive-restored \
+            --public-canary
+          python - <<'PY'
+          import json,sqlite3
+          from pathlib import Path
+          assert Path("xi-archive-restored/chain.json").is_file()
+          with sqlite3.connect("xi-archive-restored/checkpoint.db") as db:
+              assert db.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
+              assert db.execute("SELECT COUNT(*) FROM requests").fetchone()[0]==5
+          print("Public XI archive restored; UNSIGNED and not eligible for managed production")
+          PY
+      - name: Preserve only limited XI public probe evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xi-public-chapter-canary-${{ github.run_id }}
+          path: |
+            xi-catalogue-canary.db
+            xi-catalogue-canary.json
+            xi-measures-canary.db
+            xi-measures-canary.db.metadata.json
+            xi-acceptance-canary.json
+            xi-next-shard-canary.json
+            xi-chapter-receipt-canary.json
+            xi-drift-canary.json
+            xi-drift-canary-evidence.db
+            xi-merged-canary.db
+            xi-merged-canary.json
+            xi-canary-continuity.json
+            xi-public-source-archive.zip
+            xi-origin-comparison-canary.json
+            xi-origin-comparison-canary.db
+          if-no-files-found: warn
+          retention-days: 7

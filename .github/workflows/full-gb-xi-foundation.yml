@@ -1,0 +1,187 @@
+name: Full GB and independent XI foundation tests (shadow)
+
+on:
+  pull_request:
+    paths:
+      - 'src/target_duty/gb_full_measures.py'
+      - 'tests/test_gb_full_measures.py'
+      - 'src/target_duty/gb_compact_review.py'
+      - 'tests/test_gb_compact_review.py'
+      - 'src/target_duty/gb_review_diff.py'
+      - 'tests/test_gb_review_diff.py'
+      - 'src/target_duty/dbt_source_health.py'
+      - 'tests/test_dbt_source_health.py'
+      - 'src/target_duty/xi_catalogue.py'
+      - 'tests/test_xi_catalogue.py'
+      - 'src/target_duty/xi_measure_crawl.py'
+      - 'src/target_duty/xi_duty_projection.py'
+      - 'src/target_duty/xi_condition_evidence.py'
+      - 'src/target_duty/xi_live_date_canary.py'
+      - 'src/target_duty/final_release_gate.py'
+      - 'src/target_duty/legacy_publish_guard.py'
+      - 'src/target_duty/production_freshness_watch.py'
+      - 'src/target_duty/daily_official_change_watch.py'
+      - 'src/target_duty/full_source_delta_scope.py'
+      - 'src/target_duty/gb_compact_impact_queue.py'
+      - 'tests/test_gb_compact_impact_queue.py'
+      - 'src/target_duty/xi_date_impact_queue.py'
+      - 'src/target_duty/xi_targeted_delta_capture.py'
+      - 'tests/test_xi_targeted_delta_capture.py'
+      - '.github/workflows/xi-targeted-delta-refetch.yml'
+      - 'tests/test_xi_date_impact_queue.py'
+      - '.github/workflows/xi-date-impact-queue.yml'
+      - '.github/workflows/dbt-newest-replay-shadow.yml'
+      - 'tests/test_full_source_delta_scope.py'
+      - 'src/target_duty/xi_daily_baseline.py'
+      - 'tests/test_xi_daily_baseline.py'
+      - 'tests/test_daily_official_change_watch.py'
+      - 'ops/xi-daily-canary-baseline-20261014.json'
+      - '.github/workflows/daily-official-source-watch.yml'
+      - '.github/workflows/weekly-gb-full-source.yml'
+      - 'tests/test_weekly_full_refresh.py'
+      - 'tests/test_production_freshness_watch.py'
+      - '.github/workflows/production-tariff-freshness-watch.yml'
+      - 'tests/test_legacy_publish_guard.py'
+      - '.github/workflows/scrape-tariff.yml'
+      - '.github/workflows/scrape-tariff-parallel.yml'
+      - '.github/workflows/scrape-tariff-parallel-improved.yml'
+      - 'tests/test_final_release_gate.py'
+      - 'tests/test_xi_live_date_canary.py'
+      - '.github/workflows/xi-live-date-canary.yml'
+      - 'tests/test_xi_condition_evidence.py'
+      - '.github/workflows/xi-condition-source-review.yml'
+      - 'src/target_duty/xi_applicability_review.py'
+      - 'tests/test_xi_applicability_review.py'
+      - '.github/workflows/xi-duty-applicability-review.yml'
+      - 'tests/test_xi_duty_projection.py'
+      - 'tests/test_xi_measure_crawl.py'
+      - 'src/target_duty/xi_drift_guard.py'
+      - 'tests/test_xi_drift_guard.py'
+      - 'src/target_duty/xi_acceptance.py'
+      - 'tests/test_xi_acceptance.py'
+      - 'src/target_duty/xi_run_plan.py'
+      - 'src/target_duty/xi_full_capture.py'
+      - 'tests/test_xi_full_capture.py'
+      - 'src/target_duty/xi_parallel_capture.py'
+      - 'tests/test_xi_parallel_capture.py'
+      - 'src/target_duty/xi_public_full_capture.py'
+      - 'tests/test_xi_public_full_capture.py'
+      - 'src/target_duty/xi_public_gap_ledger.py'
+      - 'tests/test_xi_public_gap_ledger.py'
+      - '.github/workflows/xi-public-full-measures.yml'
+      - '.github/workflows/xi-full-managed-one-shot.yml'
+      - 'src/target_duty/gb_xi_coverage_matrix.py'
+      - 'tests/test_gb_xi_coverage_matrix.py'
+      - 'tests/test_xi_run_plan.py'
+      - 'tests/test_xi_source_first_workflow.py'
+      - 'src/target_duty/xi_source_lookup.py'
+      - 'tests/test_xi_source_lookup.py'
+      - '.github/workflows/xi-public-five-chapter-probe.yml'
+      - 'src/target_duty/xi_coverage_receipt.py'
+      - 'tests/test_xi_coverage_receipt.py'
+      - 'src/target_duty/xi_checkpoint_chain.py'
+      - 'tests/test_xi_checkpoint_chain.py'
+      - 'src/target_duty/xi_archive.py'
+      - 'tests/test_xi_archive.py'
+      - 'src/target_duty/xi_s3_vault.py'
+      - 'tests/test_xi_s3_vault.py'
+      - 'src/target_duty/xi_origin_compare.py'
+      - 'tests/test_xi_origin_compare.py'
+      - 'src/target_duty/xi_merge.py'
+      - 'tests/test_xi_merge.py'
+      - 'src/target_duty/xi_frozen_catalogue.py'
+      - 'tests/test_xi_frozen_catalogue.py'
+      - '.github/workflows/xi-managed-coverage.yml'
+      - '.github/workflows/full-gb-xi-foundation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evidence-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Full DBT expanded measures contract regression
+        run: python -m unittest discover -s tests -p 'test_gb_full_measures.py' -v
+      - name: Compact GB target evidence contract regression
+        run: python -m unittest discover -s tests -p 'test_gb_compact_review.py' -v
+      - name: DBT latest source health versus pinned reproduction tests
+        run: python -m unittest discover -s tests -p 'test_dbt_source_health.py' -v
+      - name: GB 103/1011 cross-version change and review-only safety contract
+        run: python -m unittest discover -s tests -p 'test_gb_review_diff.py' -v
+      - name: Independent XI chapter inventory contract regression
+        run: python -m unittest discover -s tests -p 'test_xi_catalogue.py' -v
+      - name: XI bounded raw measure collection regression
+        run: python -m unittest discover -s tests -p 'test_xi_measure_crawl.py' -v
+      - name: XI source replay and Other semantics acceptance tests
+        run: python -m unittest discover -s tests -p 'test_xi_acceptance.py' -v
+      - name: Managed XI source-first workflow safety contract
+        run: python -m unittest discover -s tests -p 'test_xi_source_first_workflow.py' -v
+      - name: XI read-only raw source batch lookup and missing-code states
+        run: python -m unittest discover -s tests -p 'test_xi_source_lookup.py' -v
+      - name: XI country-of-origin official filter comparison safety tests
+        run: python -m unittest discover -s tests -p 'test_xi_origin_compare.py' -v
+      - name: XI cross-batch replay and conflict safe merge tests
+        run: python -m unittest discover -s tests -p 'test_xi_merge.py' -v
+      - name: Frozen full XI source catalogue and indexed shard plan
+        run: python -m unittest discover -s tests -p 'test_xi_frozen_catalogue.py' -v
+      - name: Frozen XI full-source completion, retries, tamper and next-shard tests
+        run: python -m unittest discover -s tests -p 'test_xi_run_plan.py' -v
+      - name: Four-way XI full managed source partition and strict offline merge tests
+        run: python -m unittest discover -s tests -p 'test_xi_parallel_capture.py' -v
+      - name: XI full public source gap ledger, incomplete shards, duplicate and source tamper tests
+        run: python -m unittest discover -s tests -p 'test_xi_public_gap_ledger.py' -v
+      - name: NI candidate country-origin and applicability triage regressions
+        run: python -m unittest discover -s tests -p 'test_xi_applicability_review.py' -v
+      - name: XI public as-of daily candidate drift and incomplete source tests
+        run: python -m unittest discover -s tests -p 'test_xi_live_date_canary.py' -v
+      - name: XI complete measure conditions certificates permutations and origin-risk safety tests
+        run: python -m unittest discover -s tests -p 'test_xi_condition_evidence.py' -v
+      - name: XI linked raw duty expression projection and fail-closed conditions tests
+        run: python -m unittest discover -s tests -p 'test_xi_duty_projection.py' -v
+      - name: Strict official public 97-chapter raw XI source replay tests
+        run: python -m unittest discover -s tests -p 'test_xi_public_full_capture.py' -v
+      - name: Durable full managed XI source capture and recovery tests
+        run: python -m unittest discover -s tests -p 'test_xi_full_capture.py' -v
+      - name: GB and XI independently replayed source-to-desktop coverage matrix
+        run: python -m unittest discover -s tests -p 'test_gb_xi_coverage_matrix.py' -v
+      - name: Complete managed XI 97-chapter source coverage receipt safety tests
+        run: python -m unittest discover -s tests -p 'test_xi_coverage_receipt.py' -v
+      - name: Replay verified XI cross-run source drift guard contract
+        run: python -m unittest discover -s tests -p 'test_xi_drift_guard.py' -v
+      - name: XI prior-to-current source checkpoint continuity and tamper tests
+        run: python -m unittest discover -s tests -p 'test_xi_checkpoint_chain.py' -v
+      - name: Signed XI archive pack/restore and malicious ZIP rejection tests
+        run: python -m unittest discover -s tests -p 'test_xi_archive.py' -v
+      - name: XI S3 Object Lock upload/download recovery failure injection
+        run: python -m unittest discover -s tests -p 'test_xi_s3_vault.py' -v
+      - name: Weekly full-source canary source provenance, missing response and date baseline tests
+        run: python -m unittest discover -s tests -p 'test_xi_daily_baseline.py' -v
+      - name: NI verified source-only exact affected-code live refetch and one-503 failure injection
+        run: python -m unittest discover -s tests -p 'test_xi_targeted_delta_capture.py' -v
+      - name: Actual NI source expiry-to-code queue and GB 103 measure-change scope tests
+        run: |
+          python -m unittest discover -s tests -p 'test_gb_compact_impact_queue.py' -v
+          python -m unittest discover -s tests -p 'test_xi_date_impact_queue.py' -v
+      - name: Full GB all-measure and XI raw-response exact affected-code delta regression
+        run: python -m unittest discover -s tests -p 'test_full_source_delta_scope.py' -v
+      - name: Official daily version / XI expiry and canary signal regression
+        run: python -m unittest discover -s tests -p 'test_daily_official_change_watch.py' -v
+      - name: Weekly full GB and XI fresh-from-source coverage, snapshot and publishing safety tests
+        run: python -m unittest discover -s tests -p 'test_weekly_full_refresh.py' -v
+      - name: Production data versioned binary / paired metadata freshness regression
+        run: python -m unittest discover -s tests -p 'test_production_freshness_watch.py' -v
+      - name: Legacy latest-data auto-publisher isolation and timeout failure regression
+        run: |
+          python -m unittest discover -s tests -p 'test_legacy_publish_guard.py' -v
+          python -m src.target_duty.legacy_publish_guard --directory .github/workflows
+      - name: Four-dimension final data release readiness fail-closed injection tests
+        run: python -m unittest discover -s tests -p 'test_final_release_gate.py' -v
+      - name: Existing region evidence contract regression
+        run: python -m unittest discover -s tests -p 'test_region_measures.py' -v

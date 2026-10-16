@@ -1,7 +1,5 @@
 # GB and NI periodic full tariff-source refresh — 2026-10-15
 
-> **Stage-2 merge boundary (2026-10-15):** The Sunday schedules below describe the **target cadence**, NOT a currently active cron. The Stage-2 full GB and XI workflows have only `workflow_dispatch` enabled. Weekly automation remains blocked until both workflows pass real, full, recent source collection and a separate schedule-activation PR is reviewed. Daily source-only watch is the only scheduled new source workflow.
-
 **New operating policy: daily incremental detection PLUS fresh weekly complete-source replay.**
 Weekly refresh is mandatory even when no official version change is detected.
 These jobs update independent **review-only shadow sources**, never the
@@ -14,7 +12,7 @@ production desktop database or GitHub `latest-data` release.
 | GB | `.github/workflows/weekly-gb-full-source.yml` | `0 1 * * 0` | Every Sunday 09:00 | Resolve newest official DBT pin, download all commodity catalogue data and complete DBT expanded-measures CSV, parse into new isolated SQLite |
 | NI/XI | `.github/workflows/xi-public-full-measures.yml` | `0 2 * * 0` | Every Sunday 10:00 | Capture 97 chapters / all then-current declarable codes using four shards, merge and SHA-replay EVERY original response |
 
-The earliest target Sunday date was **2026-10-18**, but the full GB/XI schedules are deliberately **not activated** in Stage 2.
+The first nominal scheduled date after this change is Sunday **2026-10-18**.
 GitHub Actions scheduled events only execute workflow definitions on the
 **repository default branch**, and start time can be delayed by GitHub.
 Draft branch changes DO NOT activate weekly full source retrieval until merged.

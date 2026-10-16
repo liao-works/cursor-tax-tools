@@ -1,0 +1,253 @@
+name: Newest DBT GB replay candidate (manual, NEVER publish)
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/dbt-newest-replay-shadow.yml'
+      - 'src/target_duty/gb_full_measures.py'
+      - 'src/target_duty/gb_compact_review.py'
+      - 'src/target_duty/gb_review_diff.py'
+      - 'src/target_duty/gb_source_ledger.py'
+      - 'tests/test_gb_source_ledger.py'
+      - 'src/target_duty/dbt_version_discovery.py'
+      - 'src/target_duty/catalog.py'
+      - 'src/target_duty/build.py'
+  push:
+    branches: [feat/parallel-scraper]
+    paths: [ops/gb-incremental-review-launch.txt]
+  workflow_dispatch:
+    inputs:
+      baseline_run_id:
+        description: 'Previously verified pinned-GB source-proof Actions run ID'
+        type: string
+        required: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: dbt-newest-shadow-replay
+  cancel-in-progress: false
+
+jobs:
+  source-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify current-data gating, GB source provenance and delta scope
+        run: |
+          python -m unittest discover -s tests -p 'test_dbt_version_discovery.py' -v
+          python -m unittest discover -s tests -p 'test_gb_review_diff.py' -v
+          python -m unittest discover -s tests -p 'test_gb_source_ledger.py' -v
+          python -m unittest discover -s tests -p 'test_gb_compact_impact_queue.py' -v
+  newest-dbt-candidate:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify baseline run ID before reading same-repository artifacts
+        shell: bash
+        env:
+          BASELINE_RUN: ${{ inputs.baseline_run_id || '38538010446' }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$BASELINE_RUN" =~ ^[0-9]{1,16}$ ]]; then
+            echo "::error::A previously verified pinned GB Actions run ID is required"
+            exit 1
+          fi
+      - name: Independently test GB evidence version comparison and tamper detection
+        run: python -m unittest discover -s tests -p 'test_gb_review_diff.py' -v
+      - name: Retrieve prior pinned GB compact audit for cross-version comparison
+        uses: actions/download-artifact@v4
+        with:
+          name: gb-full-source-proof-${{ inputs.baseline_run_id || '38538010446' }}
+          run-id: ${{ inputs.baseline_run_id || '38538010446' }}
+          github-token: ${{ github.token }}
+          path: baseline/
+      - name: Require unmodified previous pinned GB compact manifest
+        run: |
+          test -f baseline/gb-compact-103-review.db
+          test -f baseline/gb-compact-103-review.json
+      - name: Require newest OFFICIAL version, all required tables and CSVW columns
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.dbt_version_discovery \
+            --previous-pin v4.0.1626 \
+            --output dbt-newest-before.json \
+            --require-available
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          report=json.loads(Path("dbt-newest-before.json").read_text())
+          version=report["newest_official_version"]
+          if report["state"]!="ready_for_full_data_replay":
+              raise SystemExit("Newest DBT metadata incomplete; refuse fallback")
+          if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+",version):
+              raise SystemExit("Official newest pin missing or invalid")
+          Path("dbt-selected-version.txt").write_text(version)
+          print("Latest DBT version preflighted:",version)
+          PY
+      - name: Download EXACT pinned newest commodity catalogue
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(cat dbt-selected-version.txt)"
+          python -m src.target_duty.catalog build \
+            --version "$VERSION" \
+            --output gb-newest-catalogue.db
+      - name: Independently build filtered 103/1011 baseline for newest pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.build \
+            --version "$(cat dbt-selected-version.txt)" \
+            --output gb-newest-focused.db
+      - name: Download FULL source pinned to newest version, preserve source SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from src.target_duty.gb_full_measures import download
+          pin=Path("dbt-selected-version.txt").read_text()
+          result=download(pin,"gb-newest-expanded.csv")
+          Path("gb-newest-download.json").write_text(json.dumps(result,indent=2)+"\n")
+          print(json.dumps(result,indent=2))
+          PY
+      - name: Validate all source rows and baseline parity, build review-only SQLite
+        shell: bash
+        run: |
+          set -euo pipefail
+          AS_OF="$(python -c 'import json;print(json.load(open("gb-newest-catalogue.metadata.json"))["as_of"])')"
+          python -m src.target_duty.gb_full_measures \
+            --csv gb-newest-expanded.csv \
+            --catalogue gb-newest-catalogue.db \
+            --focused gb-newest-focused.db \
+            --version "$(cat dbt-selected-version.txt)" \
+            --as-of "$AS_OF" --min-rows 100000 \
+            --output gb-newest-full-shadow.db
+          python -m src.target_duty.gb_compact_review \
+            --full-db gb-newest-full-shadow.db \
+            --catalogue gb-newest-catalogue.db \
+            --output gb-newest-compact-review.db --max-mb 256
+      - name: Generate a full one-row-per-commodity GB source usability ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests -p 'test_gb_source_ledger.py' -v
+          python -m src.target_duty.gb_source_ledger \
+            --database gb-newest-compact-review.db \
+            --output-csv gb-newest-all-codes.csv \
+            --output-report gb-newest-code-coverage.json
+          python - <<'PY'
+          import csv,json
+          r=json.load(open("gb-newest-code-coverage.json"))
+          with open("gb-newest-all-codes.csv",encoding="utf-8",newline="") as f:
+              assert sum(1 for _ in csv.DictReader(f))==r["official_active_leaf_codes"]
+          assert r["candidate_codes"]+r["unresolved_codes"]==r["official_active_leaf_codes"]
+          assert not r["production_eligible"] and not r["all_rates_payable_verified"]
+          print("All official GB active commodity codes are accounted for; rates still require applicability review")
+          PY
+      - name: Recheck official newest metadata after full download (no source drift)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.dbt_version_discovery \
+            --previous-pin "$(cat dbt-selected-version.txt)" \
+            --output dbt-newest-after.json \
+            --require-available
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          before=json.loads(Path("dbt-newest-before.json").read_text())
+          after=json.loads(Path("dbt-newest-after.json").read_text())
+          full=json.loads(Path("gb-newest-full-shadow.json").read_text())
+          compact=json.loads(Path("gb-newest-compact-review.json").read_text())
+          pin=Path("dbt-selected-version.txt").read_text()
+          if before["newest_official_version"]!=pin or after["newest_official_version"]!=pin:
+              raise SystemExit("Official dataset advanced during import; block this candidate")
+          if not before["schema_compatibility_proven"] or not after["schema_compatibility_proven"]:
+              raise SystemExit("Official version schema no longer verified")
+          if full["version"]!=pin or compact["version"]!=pin:
+              raise SystemExit("DBT source and compact candidate pin mismatch")
+          if compact["active_target_codes"]!=full["active_103_1011_codes"]:
+              raise SystemExit("GB 103/1011 source parity failed")
+          if full["production_eligible"] or compact["production_eligible"]:
+              raise SystemExit("Review-only source output cannot authorize production")
+          print("Newest GB evidence replayed without version drift; release NOT authorized.")
+          PY
+      # IMPORTANT: source changes are expected between official versions.
+      # Keep the full diff as evidence and preserve its high-risk flag;
+      # this check tests data completeness, NOT automatic applicability.
+      - name: Compare new GB third-country candidates with trusted prior compact evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.gb_review_diff \
+            --before baseline/gb-compact-103-review.db \
+            --after gb-newest-compact-review.db \
+            --output gb-newest-versus-baseline.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d=json.loads(Path("gb-newest-versus-baseline.json").read_text())
+          assert d["new_version"] == Path("dbt-selected-version.txt").read_text()
+          assert d["production_eligible"] is False
+          assert d["manual_business_review_required"] is True
+          print("Real GB prior/current full-source differences:",d["counts"])
+          print("High-risk change review:",d["high_risk_change_present"])
+          PY
+      - name: Export exact changed 103 GB source candidate codes for independent review
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.gb_compact_impact_queue \
+            --before baseline/gb-compact-103-review.db \
+            --after gb-newest-compact-review.db \
+            --csv gb-changed-103-source-codes.csv \
+            --report gb-changed-103-source-codes.json
+          python - <<'PY'
+          import csv,json
+          r=json.load(open("gb-changed-103-source-codes.json"))
+          with open("gb-changed-103-source-codes.csv",newline="") as f:
+              items=list(csv.DictReader(f))
+          assert len(items)==r["affected_commodity_codes"]
+          assert len({row["code"] for row in items})==len(items)
+          assert r["production_eligible"] is False
+          assert r["other_measures_proven_unchanged"] is False
+          assert all(not x["payable_rate"] for x in items)
+          print("Full exact GB 103 candidate REVIEW queue:",len(items))
+          PY
+      - name: Archive full and compact source evidence proofs (review only)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dbt-newest-shadow-proof-${{ github.run_id }}
+          path: |
+            dbt-selected-version.txt
+            dbt-newest-before.json
+            dbt-newest-after.json
+            gb-newest-download.json
+            gb-newest-catalogue.metadata.json
+            gb-newest-focused.metadata.json
+            gb-newest-full-shadow.json
+            gb-newest-compact-review.json
+            gb-newest-compact-review.db
+            gb-newest-versus-baseline.json
+            gb-changed-103-source-codes.csv
+            gb-changed-103-source-codes.json
+            gb-newest-all-codes.csv
+            gb-newest-code-coverage.json
+          if-no-files-found: warn
+          retention-days: 14

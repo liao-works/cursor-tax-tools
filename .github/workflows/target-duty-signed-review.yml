@@ -1,0 +1,52 @@
+name: Signed target duty review (manual, no release)
+on:
+  workflow_dispatch:
+    inputs:
+      key_id:
+        description: 'Pinned Ed25519 review signing key identifier'
+        required: true
+        type: string
+        default: 'liao-review-2026'
+permissions:
+  contents: read
+jobs:
+  sign-shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TAX_V2_ED25519_PRIVATE_SEED_HEX: ${{ secrets.TAX_V2_ED25519_PRIVATE_SEED_HEX }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned signing implementation
+        run: python -m pip install 'cryptography==46.0.4'
+      - name: Require managed private key (never log it)
+        shell: bash
+        run: |
+          if [ -z "$TAX_V2_ED25519_PRIVATE_SEED_HEX" ]; then
+            echo 'Configure TAX_V2_ED25519_PRIVATE_SEED_HEX repository secret first'
+            exit 1
+          fi
+      - name: Fetch SHA-verified legacy reference for NI stale comparison
+        run: python -m src.target_duty.legacy --output legacy-tariffs.db
+      - name: Build only GB 103 / 1011 and perform shadow checks
+        run: |
+          python -m src.target_duty.build --legacy-db legacy-tariffs.db --output target-duty.db
+          python -m src.target_duty.reconcile --old legacy-tariffs.db --new target-duty.db --output target-duty-diff.json
+          python -m src.target_duty.preview_bundle --db target-duty.db --output target-duty-preview.zip
+      - name: Ed25519 sign a REVIEW-ONLY manifest, not the production release
+        env:
+          KEY_ID: ${{ inputs.key_id }}
+        run: |
+          python -m src.target_duty.signed_review --preview target-duty-preview.zip --output target-duty-signed-review.zip --key-id "$KEY_ID"
+      - name: Upload review evidence (no publish permissions)
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-target-duty-review-${{ github.run_id }}
+          path: |
+            target-duty-signed-review.zip
+            target-duty-diff.json
+            target-duty-diff.csv
+          retention-days: 14

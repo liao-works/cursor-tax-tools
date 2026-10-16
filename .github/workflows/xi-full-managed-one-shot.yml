@@ -1,0 +1,169 @@
+name: NI official full-source four-shard audit (SHADOW ONLY)
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/parallel-scraper]
+    paths: [ops/xi-full-managed-launch.txt]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: xi-managed-all-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  catalogue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HMRC_CLIENT_ID: ${{ secrets.HMRC_CLIENT_ID }}
+      HMRC_CLIENT_SECRET: ${{ secrets.HMRC_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Require approved official API credentials
+        run: |
+          if [[ -z "$HMRC_CLIENT_ID" || -z "$HMRC_CLIENT_SECRET" ]]; then
+            echo "::error::Missing HMRC_CLIENT_ID / HMRC_CLIENT_SECRET. No API requests made."
+            exit 1
+          fi
+      - name: Freeze all official managed XI chapters
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.xi_catalogue --as-of "$(date -u +%F)" --min-chapter-interval 1.2 --output xi-full-catalogue-shadow.db
+          python -m src.target_duty.xi_frozen_catalogue freeze --catalogue xi-full-catalogue-shadow.db --manifest xi-frozen-manifest.json
+          python -m src.target_duty.xi_parallel_capture plan --catalogue xi-full-catalogue-shadow.db --manifest xi-frozen-manifest.json --workers 4 --output xi-partitions.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xi-full-official-catalogue-${{ github.run_id }}
+          path: |
+            xi-full-catalogue-shadow.db
+            xi-full-catalogue-shadow.json
+            xi-frozen-manifest.json
+            xi-partitions.json
+          if-no-files-found: error
+          retention-days: 30
+  capture:
+    needs: catalogue
+    runs-on: ubuntu-latest
+    timeout-minutes: 320
+    strategy:
+      fail-fast: false
+      matrix:
+        index: [0, 1, 2, 3]
+    env:
+      HMRC_CLIENT_ID: ${{ secrets.HMRC_CLIENT_ID }}
+      HMRC_CLIENT_SECRET: ${{ secrets.HMRC_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: xi-full-official-catalogue-${{ github.run_id }}
+          path: .
+      - name: Fetch bounded, independent full-source partition
+        run: |
+          set -euo pipefail
+          DAY="$(python -c 'import json;print(json.load(open("xi-frozen-manifest.json"))["as_of"])')"
+          python -m src.target_duty.xi_parallel_capture shard --catalogue xi-full-catalogue-shadow.db --manifest xi-frozen-manifest.json --as-of "$DAY" --workers 4 --index "${{ matrix.index }}" --batch-size 500 --interval 2.0 --output "xi-shard-${{ matrix.index }}.db"
+      - name: Persist exact original responses and failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xi-full-official-shard-${{ matrix.index }}-${{ github.run_id }}
+          path: |
+            xi-shard-*.db
+            xi-shard-*.json
+            xi-shard-*.db.metadata.json
+          retention-days: 30
+          if-no-files-found: warn
+  final_audit:
+    needs: [catalogue, capture]
+    if: always() && needs.catalogue.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      HMRC_CLIENT_ID: ${{ secrets.HMRC_CLIENT_ID }}
+      HMRC_CLIENT_SECRET: ${{ secrets.HMRC_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: xi-full-official-catalogue-${{ github.run_id }}
+          path: .
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: xi-full-official-shard-*-${{ github.run_id }}
+          path: shards
+      - name: Merge every official commodity response with original-byte replay
+        run: |
+          python - <<'PY'
+          import glob,json,subprocess,sys
+          paths=sorted(glob.glob("shards/xi-full-official-shard-*-*/xi-shard-*.db"))
+          if len(paths)!=4:
+              raise SystemExit("Missing required XI worker evidence")
+          day=json.load(open("xi-frozen-manifest.json"))["as_of"]
+          subprocess.run([sys.executable,"-m","src.target_duty.xi_merge",
+            "--catalogue","xi-full-catalogue-shadow.db","--as-of",day,
+            "--shards",*paths,"--output","xi-full-merged-review.db"],check=True)
+          PY
+      - name: Official source zero-gap acceptance (not payable duty)
+        id: acceptance
+        continue-on-error: true
+        run: |
+          python -m src.target_duty.xi_acceptance --catalogue xi-full-catalogue-shadow.db --measures xi-full-merged-review.db --strict --output xi-full-acceptance.json
+      - name: Refetch three source drift anchors
+        id: drift
+        if: steps.acceptance.outcome == 'success'
+        continue-on-error: true
+        run: |
+          DAY="$(python -c 'import json;print(json.load(open("xi-frozen-manifest.json"))["as_of"])')"
+          python -m src.target_duty.xi_drift_guard --catalogue xi-full-catalogue-shadow.db --manifest xi-frozen-manifest.json --checkpoint xi-full-merged-review.db --as-of "$DAY" --count 3 --min-interval 2 --require-stable --output xi-drift-review.json
+      - name: Record full 97 chapter completeness
+        if: always()
+        continue-on-error: true
+        run: |
+          if [[ -f xi-full-merged-review.db ]]; then
+            python -m src.target_duty.xi_coverage_receipt --catalogue xi-full-catalogue-shadow.db --manifest xi-frozen-manifest.json --checkpoint xi-full-merged-review.db --output xi-chapter-coverage-receipt.json
+          fi
+      - name: Upload independent source evidence ONLY
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xi-full-official-acceptance-${{ github.run_id }}
+          path: |
+            xi-full-merged-review.db
+            xi-full-merged-review.json
+            xi-full-acceptance.json
+            xi-drift-review.json
+            xi-chapter-coverage-receipt.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Fail closed if responses or official source evidence incomplete
+        env:
+          SOURCE_RESULT: ${{ needs.capture.result }}
+          ACCEPT_RESULT: ${{ steps.acceptance.outcome }}
+          DRIFT_RESULT: ${{ steps.drift.outcome }}
+        run: |
+          set -euo pipefail
+          if [[ "$SOURCE_RESULT" != success || "$ACCEPT_RESULT" != success || "$DRIFT_RESULT" != success ]]; then
+            echo "::error::NI source incomplete or unstable; no production publish"
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          a=json.load(open("xi-full-acceptance.json"))
+          c=json.load(open("xi-chapter-coverage-receipt.json"))
+          assert a["missing_codes"]==a["request_failures"]==0
+          assert a["independent_catalogue_scope_ok"] and a["all_collected_measure_responses_verified"]
+          assert c["managed_full_source_coverage_pass"]
+          assert not a["production_eligible"] and not a["other_semantics_verified"]
+          print("All NI raw official responses captured and replayed:",a["requests_recorded"])
+          print("No duty-rate publication has been authorized")
+          PY
