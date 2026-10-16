@@ -12,6 +12,10 @@ on:
       - 'tests/test_stage2_workflow_safety.py'
       - 'tests/test_daily_official_change_watch.py'
       - 'tests/test_weekly_full_refresh.py'
+      - 'tests/test_source_refresh_closure.py'
+      - 'tests/test_xi_canary_delta_refetch.py'
+      - '.github/workflows/official-source-delta-response.yml'
+      - '.github/workflows/gb-ni-exact-full-source-diff.yml'
 permissions:
   contents: read
 jobs:
@@ -38,3 +42,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_xi_public_gap_ledger.py' -v
           python -m unittest discover -s tests -p 'test_xi_merge.py' -v
           python -m unittest discover -s tests -p 'test_xi_daily_baseline.py' -v
+      - name: Fresh GB/XI change-detection to capture workflow regression
+        run: |
+          python -m unittest discover -s tests -p 'test_source_refresh_closure.py' -v
+          python -m unittest discover -s tests -p 'test_xi_canary_delta_refetch.py' -v
