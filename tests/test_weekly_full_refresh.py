@@ -52,8 +52,8 @@ def inspect(gb: str, xi: str) -> list[str]:
         errors.append("XI scheduled catalogue must use current date")
     if xi.count('os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch"')!=2:
         errors.append("XI scheduled source must NOT reuse prior run catalogues/shards")
-    if "matrix:" not in xi or "worker: [0, 1, 2, 3, 4, 5, 6, 7]" not in xi or "max-parallel: 4" not in xi or "--workers 8" not in xi:
-        errors.append("XI full-source eight-shard bounded concurrency coverage missing")
+    if "matrix:" not in xi or "worker: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]" not in xi or "max-parallel: 8" not in xi or "--workers 16" not in xi:
+        errors.append("XI full-source sixteen-shard bounded concurrency coverage missing")
     if "xi_public_gap_ledger" not in xi or "xi_merge" not in xi:
         errors.append("XI independent gap audit/merge missing")
     if ("xi-daily-watch-baseline-" not in xi
@@ -94,8 +94,8 @@ class WeeklyFullSourceSchedulerTests(unittest.TestCase):
     def test_xi_stale_resume_and_missing_partition_detected(self):
         modified=self.xi.replace('os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch"','True')
         self.assertTrue(any("reuse" in x for x in inspect(self.gb,modified)))
-        modified=self.xi.replace("worker: [0, 1, 2, 3, 4, 5, 6, 7]","worker: [0, 1, 2, 3, 4, 5, 6]")
-        self.assertTrue(any("eight-shard" in x for x in inspect(self.gb,modified)))
+        modified=self.xi.replace("worker: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]","worker: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]")
+        self.assertTrue(any("sixteen-shard" in x for x in inspect(self.gb,modified)))
 
     def test_cannot_restore_release_upload_write_access_or_partial_merge(self):
         assert inspect(self.gb,self.xi)==[]
