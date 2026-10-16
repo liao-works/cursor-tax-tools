@@ -52,14 +52,42 @@ class DesktopReleaseBundleTests(unittest.TestCase):
             import json
             return (typ,geo,rate,start,end,json.dumps({"relationships":rels or {}}))
         self.assertEqual(xi_rate([row()],day),"5%")
-        self.assertEqual(xi_rate([row(typ="105")],day),"5%")
+        self.assertEqual(xi_rate([row(typ="105")],day),"")
         self.assertEqual(xi_rate([row(start="2027-01-01")],day),"")
         self.assertEqual(xi_rate([row(end="2026-10-15")],day),"")
         self.assertEqual(xi_rate([row(geo="GB")],day),"")
         self.assertEqual(xi_rate([row(rate="10% + EUR 8 / 100 kg")],day),"")
         self.assertEqual(xi_rate([row(rels={
             "measure_conditions":{"data":[{"id":"1","type":"measure_condition"}]}})],day),"")
-        self.assertEqual(xi_rate([row(),row(rate="8%",typ="105")],day),"")
+        self.assertEqual(xi_rate([
+            row(rate="6%",typ="103"),
+            row(rate="0%",typ="103",rels={
+                "measure_conditions":{"data":[{"id":"1","type":"measure_condition"}]}})
+        ],day),"6%")
+        self.assertEqual(xi_rate([row(),row(rate="8%",typ="105")],day),"5%")
+
+    def test_normal_china_third_country_rate_never_takes_authorised_use_zero(self):
+        from pathlib import Path
+        import json
+        day=date(2026,10,16)
+        ordinary=("103","1011","10%","2026-01-01",None,
+                  json.dumps({"relationships":{}}))
+        authorised=("105","1011","0%","2026-01-01",None,
+                    json.dumps({"relationships":{
+                        "measure_conditions":{"data":[{"type":"measure_condition","id":"N990"}]}}}))
+        channel_islands=("103","1080","0%","2026-01-01",None,
+                         json.dumps({"relationships":{}}))
+        self.assertEqual(xi_rate([ordinary,authorised,channel_islands],day),"10%")
+        self.assertEqual(xi_rate([authorised,channel_islands],day),"")
+        self.assertEqual(xi_rate([("105","1011","0%","2026-01-01",None,
+                                  json.dumps({"relationships":{}}))],day),"")
+        # 103 is only the broad Chinese/general third-country rate here.
+        # 105/authorised use may be displayed separately later.
+        source=(Path(__file__).resolve().parents[1]/
+                "src"/"target_duty"/"desktop_release_bundle.py").read_text()
+        self.assertIn("measure_type = '103'",source)
+        self.assertIn('if kind != "103" or geo!="1011"',source)
+        self.assertNotIn("measure_type IN ('103','105')",source)
 
     def test_hmrc_official_linked_duty_expression_is_replayed(self):
         import json
