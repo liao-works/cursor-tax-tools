@@ -149,7 +149,7 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                     "https://www.trade-tariff.service.gov.uk/uk/commodities/"+code if code in gb_codes else "",
                     ni_rate,
                     "https://www.trade-tariff.service.gov.uk/xi/commodities/"+code if code in xi_codes else "",
-                    "", "", "", day.isoformat()))
+                    "", "", "", None))
             dest.commit()
             if dest.execute("PRAGMA integrity_check").fetchone()[0]!="ok":
                 raise ValueError("Desktop SQLite integrity failed")
