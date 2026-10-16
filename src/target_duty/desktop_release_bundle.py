@@ -1,6 +1,6 @@
 """Build a deterministic desktop database from two independently complete sources.
 
-Publishes only unambiguous active 103/105 third-country percent expressions.
+Publishes only unambiguous active 103 (ordinary MFN/third-country) percent expressions.
 Other categories/conditions remain empty, never guessed as zero. Both original
 source snapshots must replay, hash-verify and cover their full active catalogue.
 """
@@ -76,7 +76,11 @@ def gb_default_rate(rows):
 
 
 def xi_rate(rows, as_of:date, original_body:bytes|None=None):
-    """Use official linked duty-expression evidence; reject conditional ambiguity."""
+    """Use ordinary 103/1011 third-country duty, not 105 authorised-use rates.
+
+    105 can be 0% only for special authorised use; it is not a default rate
+    for Chinese-origin/general third-country imports. Never invent a rate.
+    """
     related={}
     if original_body is not None:
         document=json.loads(original_body)
@@ -84,7 +88,7 @@ def xi_rate(rows, as_of:date, original_body:bytes|None=None):
                  for x in document.get("included",[]) if isinstance(x,dict)}
     selected=[]
     for kind, geo, expr, start, end, raw in rows:
-        if kind not in ("103","105") or geo!="1011":
+        if kind != "103" or geo!="1011":
             continue
         try:
             begin=date.fromisoformat(start[:10])
@@ -180,17 +184,17 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                 if code in gb_codes:
                     source=list(gb_conn.execute("""SELECT expression,additional_code,conditions,excluded_areas
                        FROM measures WHERE region='GB' AND code=?
-                        AND effective_status='active' AND measure_type IN ('103','105')
+                        AND effective_status='active' AND measure_type = '103'
                         AND geography='1011' ORDER BY ordinal""",(code,)))
                     gb_rate=gb_default_rate(source)
-                    counts["gb_103_105_codes"]+=bool(source)
+                    counts["gb_mfn_103_codes"]+=bool(source)
                     counts["gb_unconditional_candidates"]+=sum(
                         _blank(r[1]) and _blank(r[2]) and _blank(r[3]) for r in source)
                     counts["gb_percent"]+=bool(gb_rate)
                 if code in xi_codes:
                     source=list(xi_conn.execute("""SELECT measure_type,geography_id,
                         duty_expression,effective_start,effective_end,raw_json
-                        FROM measures WHERE code=? AND measure_type IN ('103','105')
+                        FROM measures WHERE code=? AND measure_type = '103'
                         ORDER BY ordinal""",(code,)))
                     original=xi_conn.execute(
                         "SELECT response_sha256,compressed_body FROM requests WHERE code=?",
@@ -233,7 +237,7 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                            "XI_as_of":xi["as_of"].isoformat(),
                            "XI_catalogue_sha256":xi["version_or_catalogue"]},
         "coverage":{"GB":len(gb_codes),"XI":len(xi_codes)},
-        "rate_scope":"Unambiguous active third-country percentage only; ambiguous/compound remain blank",
+        "rate_scope":"Unconditional type 103/1011 MFN third-country percentage (normally China and other third countries); type 105 authorised-use, country-specific, conditional and compound rates not substituted",
         "download_urls":{
             "primary":"https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/tariffs.db",
             "metadata":"https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/metadata.json"},
