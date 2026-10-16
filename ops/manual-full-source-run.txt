@@ -1,0 +1,6 @@
+# Manual complete GB/XI source-only capture requested 2026-10-16 (UTC).
+# Controlled source audit, no latest-data release and no desktop tariffs.db mutation.
+# Trigger both .github/workflows/weekly-gb-full-source.yml and xi-public-full-measures.yml.
+requested_scope=GB_XI_FULL_ORIGINAL_SOURCE
+source_as_of=runtime_utc_date
+production_eligible=false
