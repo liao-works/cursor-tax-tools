@@ -37,6 +37,7 @@ jobs:
       - name: Offline HMRC Bulk continuity and integrity contract tests
         run: python -m unittest discover -s tests -p 'test_hmrc_bulk_feasibility.py' -v
       - name: Download and stage FULL official DBT commodity catalogue
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           set -euo pipefail
@@ -53,8 +54,10 @@ jobs:
           print(json.dumps(result, indent=2))
           PY
       - name: Obtain checksum-verified existing production snapshot
+        if: github.event_name == 'workflow_dispatch'
         run: python -m src.target_duty.legacy --output legacy-tariffs.db
       - name: Build separate 103/1011 comparison from SAME official source version
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           set -euo pipefail
@@ -63,6 +66,7 @@ jobs:
           echo "Reconciliation pinned to $VERSION"
           python -m src.target_duty.build             --version "$VERSION"             --output focused-gb.db             --legacy-db legacy-tariffs.db
       - name: Compare catalogue, legacy and focused GB scopes
+        if: github.event_name == 'workflow_dispatch'
         run: |
           python -m src.target_duty.catalog compare \
             --catalogue gb-commodity-catalogue.db \
@@ -70,6 +74,7 @@ jobs:
             --focused focused-gb.db \
             --output gb-catalogue-coverage.json
       - name: Audit ALL active leaf gaps against unfiltered official measures
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           set -euo pipefail
@@ -81,6 +86,7 @@ jobs:
             --as-of "$(python -c 'import json; print(json.load(open("gb-commodity-catalogue.metadata.json"))["as_of"])')" \
             --workers 3 --limit 1000 --output gb-gap-measures.json
       - name: Build read-only canonical GB measure evidence from gap audit
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           set -euo pipefail

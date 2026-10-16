@@ -31,7 +31,22 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  source-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify current-data gating, GB source provenance and delta scope
+        run: |
+          python -m unittest discover -s tests -p 'test_dbt_version_discovery.py' -v
+          python -m unittest discover -s tests -p 'test_gb_review_diff.py' -v
+          python -m unittest discover -s tests -p 'test_gb_source_ledger.py' -v
+          python -m unittest discover -s tests -p 'test_gb_compact_impact_queue.py' -v
   newest-dbt-candidate:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 80
     steps:

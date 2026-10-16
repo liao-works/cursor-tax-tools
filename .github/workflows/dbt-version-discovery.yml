@@ -23,6 +23,7 @@ jobs:
       - name: Unit-test official semver and fail-closed newest-version discovery
         run: python -m unittest discover -s tests -p 'test_dbt_version_discovery.py' -v
       - name: Validate CSVW schema parser against separately verified official pinned version
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           set -euo pipefail
@@ -50,6 +51,7 @@ jobs:
               raise SystemExit("Previous pinned DBT CSVW contract has changed")
           PY
       - name: Query official DBT versions and newest version table inventory
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           set -euo pipefail
@@ -78,6 +80,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
       - name: Explicit official metadata / schema acceptance gate (fail closed)
+        if: github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           python - <<'PY'
