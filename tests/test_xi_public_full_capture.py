@@ -82,6 +82,67 @@ class PublicCompleteTests(unittest.TestCase):
         self.assertEqual(accepted["responses_replayed"],97)
         self.assertFalse(accepted["production_eligible"])
 
+    def test_sixteen_partition_zero_overlap_complete_replay(self):
+        shards=[]
+        expected_sum=0
+        for worker in range(16):
+            path=str(self.root/f"sixteen-{worker}.db")
+            result=collect_partition(self.catalogue,self.manifest,path,
+                                     worker=worker,workers=16,batch_size=3,interval=0,
+                                     fetcher=payload)
+            self.assertTrue(result["complete"])
+            self.assertEqual(result["failed"],0)
+            self.assertEqual(result["missing"],0)
+            expected_sum+=result["expected"]
+            shards.append(path)
+        self.assertEqual(expected_sum,97)
+        combine(self.catalogue,shards,self.merged,as_of=DAY)
+        accepted=public_acceptance(self.catalogue,self.manifest,self.merged)
+        self.assertEqual(accepted["responses_replayed"],97)
+        self.assertEqual(accepted["failed"],0)
+        self.assertEqual(accepted["missing"],0)
+
+    def test_second_pass_retries_failed_and_missing_not_successful_codes(self):
+        calls={}
+        first_code="0101000000"
+        def once_unavailable(code,day):
+            calls[code]=calls.get(code,0)+1
+            if code==first_code and calls[code]==1:
+                raise OSError("HTTP 503 temporary upstream failure")
+            return payload(code,day)
+        path=str(self.root/"retry-0.db")
+        first=collect_partition(self.catalogue,self.manifest,path,
+                                worker=0,workers=16,batch_size=3,interval=0,
+                                fetcher=once_unavailable)
+        self.assertFalse(first["complete"])
+        self.assertEqual(first["failed"],1)
+        self.assertGreater(first["missing"],0)
+        successful_before={c:n for c,n in calls.items() if c!=first_code}
+        second=collect_partition(self.catalogue,self.manifest,path,
+                                 worker=0,workers=16,batch_size=3,interval=0,
+                                 fetcher=once_unavailable)
+        self.assertTrue(second["complete"])
+        self.assertEqual(second["successful"],second["expected"])
+        self.assertEqual(second["failed"],0)
+        self.assertEqual(second["missing"],0)
+        self.assertEqual(calls[first_code],2)
+        for code,n in successful_before.items():
+            self.assertEqual(calls[code],n,"successful first-pass responses must not be fetched again")
+
+    def test_second_pass_persistent_failure_remains_incomplete(self):
+        def unavailable(code,day):
+            if code=="0101000000":
+                raise OSError("HTTP 429 persistent throttling")
+            return payload(code,day)
+        path=str(self.root/"retry-still-missing.db")
+        for attempt in range(2):
+            report=collect_partition(self.catalogue,self.manifest,path,
+                                     worker=0,workers=16,batch_size=3,interval=0,
+                                     fetcher=unavailable)
+        self.assertFalse(report["complete"])
+        self.assertEqual(report["failed"],1)
+        self.assertFalse(report["production_eligible"])
+
     def test_failures_not_mistaken_for_zero_duty(self):
         def broken(code, day):
             if code=="0101000000":
