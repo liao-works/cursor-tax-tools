@@ -20,6 +20,7 @@ from .full_source_delta_scope import _source
 from .gb_full_measures import _catalogue
 from .xi_measure_crawl import candidates
 from .xi_public_full_capture import verify_public
+from .xi_acceptance import decompress_checked
 
 PERCENT=re.compile(r"^\s*(?:\d+(?:\.\d+)?|\.\d+)\s*%\s*$")
 CODE=re.compile(r"[0-9]{10}\Z")
@@ -49,8 +50,13 @@ def simple_rate(rows):
     return values[0] if len(values)==1 else ""
 
 
-def xi_rate(rows, as_of:date):
-    """Only nonconditional active original 103/105 responses qualify."""
+def xi_rate(rows, as_of:date, original_body:bytes|None=None):
+    """Use official linked duty-expression evidence; reject conditional ambiguity."""
+    related={}
+    if original_body is not None:
+        document=json.loads(original_body)
+        related={(str(x.get("type")),str(x.get("id"))):x
+                 for x in document.get("included",[]) if isinstance(x,dict)}
     selected=[]
     for kind, geo, expr, start, end, raw in rows:
         if kind not in ("103","105") or geo!="1011":
@@ -65,11 +71,28 @@ def xi_rate(rows, as_of:date):
         node=json.loads(raw)
         rel=node.get("relationships") or {}
         for name in ("measure_conditions","measure_condition_permutation_groups",
-                     "excluded_countries","additional_code"):
+                     "excluded_countries","additional_code","additional_codes"):
             val=(rel.get(name) or {}).get("data")
             if isinstance(val,dict) or (isinstance(val,list) and val):
                 return ""
-        selected.append((expr, "", "", ""))
+        # HMRC v2 frequently leaves resolved_duty_expression blank and supplies
+        # its actual expression through included duty_expression.base/verbose_duty.
+        link=(rel.get("duty_expression") or {}).get("data")
+        if isinstance(link,list) and len(link)!=1:
+            return ""
+        if isinstance(link,list):
+            link=link[0]
+        if isinstance(link,dict):
+            duty=related.get((str(link.get("type")),str(link.get("id"))))
+            if duty is not None:
+                attrs=duty.get("attributes") or {}
+                linked=attrs.get("base") or attrs.get("verbose_duty") or ""
+                if not isinstance(linked,str):
+                    return ""
+                # Prefer the actual relationship over a potentially shortened inline summary.
+                if linked.strip():
+                    expr=linked
+        selected.append((expr,"","",""))
     return simple_rate(selected)
 
 
@@ -141,7 +164,15 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                         duty_expression,effective_start,effective_end,raw_json
                         FROM measures WHERE code=? AND measure_type IN ('103','105')
                         ORDER BY ordinal""",(code,)))
-                    ni_rate=xi_rate(source,xi["as_of"])
+                    original=xi_conn.execute(
+                        "SELECT response_sha256,compressed_body FROM requests WHERE code=?",
+                        (code,)).fetchone()
+                    if not original or not original[0]:
+                        raise ValueError("Accepted XI full source missing response for "+code)
+                    raw=decompress_checked(original[1])
+                    if hashlib.sha256(raw).hexdigest()!=original[0]:
+                        raise ValueError("XI raw response fingerprint mismatch for "+code)
+                    ni_rate=xi_rate(source,xi["as_of"],raw)
                     counts["xi_percent"]+=bool(ni_rate)
                 dest.execute("INSERT INTO tariffs VALUES (?,?,?,?,?,?,?,?,?,?)",(
                     code,gb_descr.get(code) or xi_descr.get(code) or "",
@@ -183,6 +214,7 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
         raise ValueError("Suspiciously incomplete official commodity catalogue")
     # Do not overwrite a mostly populated desktop DB with mostly blank rates
     # if the official expression layout changes unexpectedly.
+    print("Verified simple percentage coverage:",dict(counts))
     if counts["gb_percent"]<10_000 or counts["xi_percent"]<10_000:
         raise ValueError("Insufficient unambiguous GB/XI percentage coverage for desktop release")
     meta.write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
