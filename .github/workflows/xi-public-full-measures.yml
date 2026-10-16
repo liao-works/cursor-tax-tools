@@ -68,10 +68,10 @@ jobs:
     timeout-minutes: 340
     strategy:
       fail-fast: false
-      # Eight bounded partitions, at most four simultaneous API clients.
-      max-parallel: 4
+      # Sixteen bounded source partitions, at most eight simultaneous API clients.
+      max-parallel: 8
       matrix:
-        worker: [0, 1, 2, 3, 4, 5, 6, 7]
+        worker: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -119,7 +119,7 @@ jobs:
           if path.is_file():
               frozen=verify_public("xi-public-full-catalogue.db","xi-public-frozen-manifest.json")
               codes=candidates("xi-public-full-catalogue.db")
-              start,length=bounds(len(codes),8,worker)
+              start,length=bounds(len(codes),16,worker)
               assigned=set(codes[start:start+length])
               with sqlite3.connect(path.resolve().as_uri()+"?mode=ro",uri=True) as db:
                   if db.execute("PRAGMA integrity_check").fetchone()[0]!="ok":
@@ -136,12 +136,41 @@ jobs:
               else:
                   print("::warning::Prior XI shard layout or snapshot differs; collecting this partition from scratch")
           PY
-      - name: Collect raw XI commodity measure responses
+      - name: First pass - collect and persist original XI commodity responses
         id: crawl
         continue-on-error: true
+        shell: bash
         run: |
           set -euo pipefail
-          python -m src.target_duty.xi_public_full_capture shard --catalogue xi-public-full-catalogue.db --manifest xi-public-frozen-manifest.json --worker "${{ matrix.worker }}" --workers 8 --batch-size 250 --interval 2.5 --output "xi-public-shard-${{ matrix.worker }}.db"
+          python -m src.target_duty.xi_public_full_capture shard --catalogue xi-public-full-catalogue.db --manifest xi-public-frozen-manifest.json --worker "${{ matrix.worker }}" --workers 16 --batch-size 250 --interval 2.5 --output "xi-public-shard-${{ matrix.worker }}.db"
+          python - <<'PY'
+          import glob,json
+          path=glob.glob("xi-public-shard-*.public-review.json")
+          assert len(path)==1, "First-pass source report missing"
+          r=json.load(open(path[0]))
+          if not r["complete"] or r["failed"] or r["missing"]:
+              raise SystemExit("First pass incomplete: retry failed/missing XI responses from preserved checkpoint")
+          PY
+      - name: Second pass - retry ONLY failed or missing XI responses
+        id: retry
+        if: steps.crawl.outcome == 'failure'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Avoid eight failed clients retrying in lockstep during a source throttle.
+          sleep $((15 + 3 * ${{ matrix.worker }}))
+          # Same worker, frozen SHA and SQLite checkpoint; prior successful raw
+          # responses are replay-verified and skipped by xi_measure_crawl.collect.
+          python -m src.target_duty.xi_public_full_capture shard --catalogue xi-public-full-catalogue.db --manifest xi-public-frozen-manifest.json --worker "${{ matrix.worker }}" --workers 16 --batch-size 250 --interval 2.5 --output "xi-public-shard-${{ matrix.worker }}.db"
+          python - <<'PY'
+          import glob,json
+          path=glob.glob("xi-public-shard-*.public-review.json")
+          assert len(path)==1, "Second-pass source report missing"
+          r=json.load(open(path[0]))
+          if not r["complete"] or r["failed"] or r["missing"]:
+              raise SystemExit("Second pass incomplete: retain source failures and reject final merge")
+          PY
       - name: Preserve original responses and failed response receipts
         if: always()
         uses: actions/upload-artifact@v4
@@ -157,10 +186,11 @@ jobs:
       - name: Reject failed source partitions
         env:
           CRAWL: ${{ steps.crawl.outcome }}
+          RETRY: ${{ steps.retry.outcome }}
         run: |
           set -euo pipefail
-          if [[ "$CRAWL" != success ]]; then
-            echo "::error::XI public raw response error; evidence saved, no release"
+          if [[ "$CRAWL" != success && "$RETRY" != success ]]; then
+            echo "::error::XI source incomplete after second pass; both attempts saved, no release"
             exit 1
           fi
           python - <<'PY'
@@ -208,7 +238,7 @@ jobs:
                 "source errors",result["source_errors"],
                 "chapters incomplete",result["incomplete_chapters"])
           PY
-      - name: Replay, merge and check all eight source partitions
+      - name: Replay, merge and check all sixteen source partitions
         id: merge
         continue-on-error: true
         run: |
@@ -216,8 +246,8 @@ jobs:
           python - <<'PY'
           import glob,json,subprocess,sys
           paths=sorted(glob.glob("shards/xi-public-full-shard-*-*/xi-public-shard-*.db"))
-          if len(paths)!=8:
-              raise SystemExit(f"Required 8 actual source shards, got {len(paths)}")
+          if len(paths)!=16:
+              raise SystemExit(f"Required 16 actual source shards, got {len(paths)}")
           day=json.load(open("xi-public-frozen-manifest.json"))["as_of"]
           subprocess.run([sys.executable,"-m","src.target_duty.xi_merge",
             "--catalogue","xi-public-full-catalogue.db","--as-of",day,
