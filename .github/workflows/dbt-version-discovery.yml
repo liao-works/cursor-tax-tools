@@ -1,11 +1,6 @@
 name: DBT latest version discovery and schema preflight (no release)
 
 on:
-  pull_request:
-    paths:
-      - 'src/target_duty/dbt_version_discovery.py'
-      - 'tests/test_dbt_version_discovery.py'
-      - '.github/workflows/dbt-version-discovery.yml'
   workflow_dispatch:
 
 permissions:
