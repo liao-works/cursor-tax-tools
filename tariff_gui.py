@@ -1036,6 +1036,7 @@ class TariffGUI:
         # 操作按钮区域
         action_frame = ttk.LabelFrame(self.remote_update_frame, text="操作")
         action_frame.pack(fill='x', padx=10, pady=10)
+        self.remote_update_action_frame = action_frame
 
         button_frame = ttk.Frame(action_frame)
         button_frame.pack(pady=10)
@@ -1297,7 +1298,7 @@ class TariffGUI:
         key = release_notification_key(remote_metadata)
         version = str(remote_metadata["version"])
         self.data_update_banner_var.set(f"发现已发布的数据更新：{version}")
-        self.data_update_banner.pack(fill="x", padx=10, pady=(0, 4))
+        self.data_update_banner.pack(before=self.remote_update_action_frame, fill="x", padx=10, pady=(0, 4))
         self.notebook.tab(self.remote_update_frame, text="远程数据更新 ●")
         if (self.config.get("last_data_update_notification") == key
                 or getattr(self, "_last_notified_release", None) == key):
