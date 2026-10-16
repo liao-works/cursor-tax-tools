@@ -41,6 +41,7 @@ class SourceRefreshClosureTests(unittest.TestCase):
     def test_sixteen_shards_remain_rate_limited_and_recoverable(self):
         xi=(ROOT/"xi-public-full-measures.yml").read_text()
         self.assertIn("max-parallel: 8",xi)
+        self.assertIn("ops/manual-xi-full-run.txt",xi)
         self.assertIn("worker: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]",xi)
         self.assertIn("--workers 16",xi)
         self.assertIn("len(paths)!=16",xi)

@@ -4,7 +4,7 @@ on:
   # Read-only: no production rate release or desktop database replacement.
   push:
     branches: [feat/parallel-scraper]
-    paths: ['ops/manual-full-source-run.txt']
+    paths: ['ops/manual-full-source-run.txt', 'ops/manual-xi-full-run.txt']
   workflow_dispatch:
   # Every Sunday 02:00 UTC / 10:00 Singapore: new XI public source snapshot.
   # Scheduled runs start a fresh frozen catalogue; manual runs can resume.
