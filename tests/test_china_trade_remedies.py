@@ -71,6 +71,20 @@ class ChinaTradeRemedyTests(unittest.TestCase):
         self.assertEqual(out[0]["additional_code"],"B999")
         self.assertEqual(summary(out,"countervailing"),"13.25 %（其他企业，B999）")
 
+    def test_xi_official_other_c999_is_an_exporter_residual_not_an_unknown_rate(self):
+        # Real XI JSON:API records describe residual code C999 as simply "Other".
+        doc={"included":[
+            {"type":"duty_expression","id":"one","attributes":{"base":"35.60 %"}},
+            {"type":"additional_code","id":"add","attributes":{
+                "code":"C999","description":"Other"}},
+        ]}
+        links={"duty_expression":{"data":{"type":"duty_expression","id":"one"}},
+               "additional_code":{"data":{"type":"additional_code","id":"add"}}}
+        found=xi_remedies([xi(kind="552",expression="",rels=links)],TODAY,json.dumps(doc).encode())
+        self.assertEqual(summary(found,"anti_dumping"),"35.60 %（其他企业，C999）")
+        found[0]["additional_code"]="C123"
+        self.assertEqual(summary(found,"anti_dumping"),"按企业/条件适用（见详情）")
+
     def test_ni_country_exclusion_and_conditional_are_not_plain_rates(self):
         included={"included":[
             {"type":"geographical_area","id":"CN","attributes":{"code":"CN"}}
