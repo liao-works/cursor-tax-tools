@@ -4,7 +4,9 @@ on:
   # Read-only: no production rate release or desktop database replacement.
   push:
     branches: [feat/parallel-scraper]
-    paths: ['ops/manual-full-source-run.txt']
+    paths:
+      - ops/manual-full-source-run.txt
+      - ops/manual-gb-full-run.txt
   # Every Sunday 01:00 UTC / 09:00 Singapore; source-only, never publish.
   schedule:
     - cron: '0 1 * * 0'

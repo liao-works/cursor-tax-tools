@@ -62,6 +62,26 @@ class PublicCompleteTests(unittest.TestCase):
         self.assertFalse(result["production_eligible"])
         self.assertFalse(result["ni_other_verified"])
 
+    def test_eight_partition_merging_replays_every_code_without_overlap(self):
+        shards=[]
+        assigned=0
+        for i in range(8):
+            target=str(self.root/f"eight-{i}.db")
+            r=collect_partition(self.catalogue,self.manifest,target,
+                                worker=i,workers=8,batch_size=7,interval=0,
+                                fetcher=payload)
+            self.assertTrue(r["complete"])
+            self.assertEqual(r["failed"],0)
+            self.assertEqual(r["missing"],0)
+            assigned+=r["expected"]
+            shards.append(target)
+        self.assertEqual(assigned,97)
+        combined=combine(self.catalogue,shards,self.merged,as_of=DAY)
+        accepted=public_acceptance(self.catalogue,self.manifest,self.merged)
+        self.assertTrue(accepted["public_full_raw_source_coverage"])
+        self.assertEqual(accepted["responses_replayed"],97)
+        self.assertFalse(accepted["production_eligible"])
+
     def test_failures_not_mistaken_for_zero_duty(self):
         def broken(code, day):
             if code=="0101000000":

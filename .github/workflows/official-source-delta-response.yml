@@ -1,0 +1,147 @@
+name: Daily source change targeted response (READ-ONLY; GB full review trigger)
+on:
+  workflow_run:
+    workflows:
+      - Daily official GB/NI source-change and effective-date watch (SHADOW ONLY)
+    types: [completed]
+    branches: [feat/parallel-scraper]
+  # Controlled operator replay of a previously persisted daily signal.
+  push:
+    branches: [feat/parallel-scraper]
+    paths: [ops/manual-source-delta-run.txt]
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Read-only daily official source watch run ID
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: write # dispatches source-only GB full replay, NEVER a release or contents mutation
+concurrency:
+  group: daily-source-delta-response-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  react:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Resolve official daily run and verify owner/branch/source identity
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_INPUT: ${{ inputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,os,re,subprocess
+          from pathlib import Path
+          event_name=os.environ["GITHUB_EVENT_NAME"]
+          if event_name=="workflow_run":
+              event=json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+              run_id=str(event["workflow_run"]["id"])
+          elif event_name=="push":
+              content=Path("ops/manual-source-delta-run.txt").read_text()
+              match=re.fullmatch(r"source_run_id=([0-9]{8,16})\s*",content)
+              if not match:
+                  raise SystemExit("Operator signal ID missing or invalid")
+              run_id=match.group(1)
+          else:
+              run_id=os.environ["SOURCE_INPUT"]
+          if not re.fullmatch(r"[0-9]{8,16}",run_id):
+              raise SystemExit("Invalid daily signal run ID")
+          run=json.loads(subprocess.check_output(
+              ["gh","api",f"repos/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{run_id}"],text=True))
+          if (run["name"]!="Daily official GB/NI source-change and effective-date watch (SHADOW ONLY)"
+                  or run["head_branch"]!="feat/parallel-scraper"
+                  or run["head_repository"]["full_name"]!=os.environ["GITHUB_REPOSITORY"]
+                  or run["status"]!="completed"
+                  or run["event"] not in ("schedule","workflow_dispatch")):
+              raise SystemExit("Only completed official daily monitors on default branch are trusted")
+          with open(os.environ["GITHUB_OUTPUT"],"a") as output:
+              print(f"run_id={run_id}",file=output)
+          PY
+      - name: Obtain exact persisted daily signal (including fail-closed monitor runs)
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ steps.source.outputs.run_id }}
+          name: daily-official-source-signals-${{ steps.source.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: evidence
+      - name: Independently review change signal and decide bounded next actions
+        id: scope
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,os,re
+          from pathlib import Path
+          report=json.loads(Path("evidence/daily-official-source-signals.json").read_text())
+          if (report.get("kind")!="gb-ni-daily-official-change-signal-v1"
+                  or report.get("release_permitted") is not False
+                  or report.get("production_database_mutated") is not False
+                  or report.get("ni_other_payable_verified") is not False
+                  or report.get("xi_sample_covers_entire_source") is not False):
+              raise SystemExit("Signal cannot be used as accepted full source or release")
+          changed=report.get("xi_changed_raw_response_codes")
+          if (not isinstance(changed,list) or len(changed)>30
+                  or any(not re.fullmatch(r"[0-9]{10}",str(code)) for code in changed)):
+              raise SystemExit("Malformed bounded XI canary change list")
+          # A successfully published newest source schema is required before a
+          # new GB full replay. Officially registered but missing tables remains BLOCKED.
+          gb_ready=report.get("gb_official_schema_ready") is True
+          gb_pending=report.get("gb_version_changed") is True or report.get("gb_baseline_age_days",0)>7
+          gb_refresh=gb_ready and gb_pending and "GB" not in report.get("source_errors",{})
+          with open(os.environ["GITHUB_OUTPUT"],"a") as output:
+              print(f"gb_refresh={str(gb_refresh).lower()}",file=output)
+              print(f"xi_changed={str(bool(changed)).lower()}",file=output)
+          print("Source only; GB full replay:",gb_refresh,"XI changed canaries:",changed)
+          if gb_pending and not gb_ready:
+              print("::warning::GB newer source registered without required tables; fail-closed and retry tomorrow")
+          PY
+      - name: Re-fetch only changed XI canaries, reparse official original responses
+        if: steps.scope.outputs.xi_changed == 'true'
+        id: xi
+        continue-on-error: true
+        run: |
+          python -m src.target_duty.xi_canary_delta_refetch \
+            --signal evidence/daily-official-source-signals.json \
+            --output-db xi-changed-canary-source.db \
+            --output-report xi-changed-canary-review.json
+      - name: Save daily scoped XI original responses and errors, no payable rate
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-xi-changed-canary-evidence-${{ github.run_id }}
+          path: |
+            evidence/daily-official-source-signals.json
+            xi-changed-canary-source.db
+            xi-changed-canary-review.json
+          retention-days: 30
+          if-no-files-found: error
+      - name: Automatically dispatch fresh GB official full-source replay only if ready
+        if: steps.scope.outputs.gb_refresh == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run weekly-gb-full-source.yml --ref feat/parallel-scraper
+          echo "::notice::Queued source-only GB latest full replay; production release is not enabled"
+      - name: Fail closed for missing XI changed source responses
+        if: steps.scope.outputs.xi_changed == 'true'
+        env:
+          XI_OUTCOME: ${{ steps.xi.outcome }}
+        run: |
+          [[ "$XI_OUTCOME" == success ]] || { echo "::error::Changed XI source re-fetch failed"; exit 1; }
+          python - <<'PY'
+          import json
+          r=json.load(open("xi-changed-canary-review.json"))
+          assert r["public_changed_canaries_complete"]
+          assert r["verified_responses"]==r["expected_changed_codes"]
+          assert r["failed_responses"]==0
+          assert r["production_eligible"] is False
+          assert r["ni_other_payable_verified"] is False
+          assert r["all_XI_source_changes_captured"] is False
+          PY
