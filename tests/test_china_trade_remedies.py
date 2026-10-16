@@ -138,6 +138,14 @@ class ChinaTradeRemedyTests(unittest.TestCase):
         self.assertTrue(options[0]["conditional"])
         self.assertTrue(options[0]["china_applicable"])
 
+    def test_conditional_row_without_expression_is_still_retained(self):
+        rows=[("103","1011","","","","certificate required","","2026-01-01","",json.dumps({
+            "measure__sid":"3","measure__type__description":"Third country duty"}))]
+        options=_gb_rate_options(rows,TODAY)
+        self.assertEqual(len(options),1)
+        self.assertFalse(options[0]["expression_available"])
+        self.assertEqual(options[0]["conditions"],"certificate required")
+
     def test_desktop_schema_wires_all_four_columns_and_detail(self):
         s=(Path(__file__).resolve().parents[1]/
            "src"/"target_duty"/"desktop_release_bundle.py").read_text()
