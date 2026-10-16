@@ -99,11 +99,17 @@ def xi_rate(rows, as_of:date, original_body:bytes|None=None):
             continue
         node=json.loads(raw)
         rel=node.get("relationships") or {}
+        has_special_scope = False
         for name in ("measure_conditions","measure_condition_permutation_groups",
                      "excluded_countries","additional_code","additional_codes"):
             val=(rel.get(name) or {}).get("data")
             if isinstance(val,dict) or (isinstance(val,list) and val):
-                return ""
+                has_special_scope = True
+                break
+        if has_special_scope:
+            # A special 103 variant does not invalidate an independent ordinary
+            # 103 base measure. Never use the special variant as default.
+            continue
         # HMRC v2 frequently leaves resolved_duty_expression blank and supplies
         # its actual expression through included duty_expression.base/verbose_duty.
         link=(rel.get("duty_expression") or {}).get("data")
