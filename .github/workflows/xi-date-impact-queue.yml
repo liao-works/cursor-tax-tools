@@ -1,7 +1,7 @@
 name: XI exact effective-date impacted 103/105 source codes (READ ONLY)
 on:
   push:
-    branches: [feat/target-third-country-duty-v1]
+    branches: [feat/parallel-scraper]
     paths: [ops/xi-date-impact-launch.txt]
   workflow_dispatch:
 permissions:

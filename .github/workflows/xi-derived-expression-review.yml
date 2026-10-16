@@ -2,7 +2,7 @@ name: NI source-linked duty expression projection (REVIEW only)
 on:
   workflow_dispatch:
   push:
-    branches: [feat/target-third-country-duty-v1]
+    branches: [feat/parallel-scraper]
     paths: [ops/xi-derived-expression-launch.txt]
 permissions:
   contents: read

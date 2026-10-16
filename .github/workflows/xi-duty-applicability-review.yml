@@ -1,7 +1,7 @@
 name: XI source-only applicability 16,728-code review (NEVER RELEASE)
 on:
   push:
-    branches: [feat/target-third-country-duty-v1]
+    branches: [feat/parallel-scraper]
     paths: [ops/xi-applicability-launch.txt]
   workflow_dispatch:
 permissions:
