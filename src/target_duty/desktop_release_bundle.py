@@ -1,0 +1,199 @@
+"""Build a deterministic desktop database from two independently complete sources.
+
+Publishes only unambiguous active 103/105 third-country percent expressions.
+Other categories/conditions remain empty, never guessed as zero. Both original
+source snapshots must replay, hash-verify and cover their full active catalogue.
+"""
+from __future__ import annotations
+import argparse
+import hashlib
+import json
+import re
+import sqlite3
+import tempfile
+from collections import Counter
+from contextlib import closing
+from datetime import date, datetime, timezone
+from pathlib import Path
+
+from .full_source_delta_scope import _source
+from .gb_full_measures import _catalogue
+from .xi_measure_crawl import candidates
+from .xi_public_full_capture import verify_public
+
+PERCENT=re.compile(r"^\s*(?:\d+(?:\.\d+)?|\.\d+)\s*%\s*$")
+CODE=re.compile(r"[0-9]{10}\Z")
+SQL="""CREATE TABLE tariffs (
+ code TEXT PRIMARY KEY,description TEXT,rate TEXT,url TEXT,
+ north_ireland_rate TEXT,north_ireland_url TEXT,other_rate TEXT,
+ anti_dumping_rate TEXT,countervailing_rate TEXT,
+ last_updated DATETIME
+);
+CREATE INDEX idx_tariffs_description ON tariffs(description);
+"""
+
+
+def simple_rate(rows):
+    """Multiple applicable or conditional measures are never guessed."""
+    if not rows:
+        return ""
+    values=[]
+    for expression, additional, conditions, excluded in rows:
+        expression=(expression or "").strip()
+        if (not PERCENT.fullmatch(expression) or
+                (additional or "").strip() or
+                (conditions or "").strip() not in ("","[]","null") or
+                (excluded or "").strip() not in ("","[]","null")):
+            return ""
+        values.append(expression)
+    return values[0] if len(values)==1 else ""
+
+
+def xi_rate(rows, as_of:date):
+    """Only nonconditional active original 103/105 responses qualify."""
+    selected=[]
+    for kind, geo, expr, start, end, raw in rows:
+        if kind not in ("103","105") or geo!="1011":
+            continue
+        try:
+            begin=date.fromisoformat(start[:10])
+            finish=date.fromisoformat(end[:10]) if end else None
+        except (TypeError,ValueError):
+            return ""
+        if begin>as_of or (finish and finish<as_of):
+            continue
+        node=json.loads(raw)
+        rel=node.get("relationships") or {}
+        for name in ("measure_conditions","measure_condition_permutation_groups",
+                     "excluded_countries","additional_code"):
+            val=(rel.get(name) or {}).get("data")
+            if isinstance(val,dict) or (isinstance(val,list) and val):
+                return ""
+        selected.append((expr, "", "", ""))
+    return simple_rate(selected)
+
+
+def hash_file(path:Path):
+    h=hashlib.sha256()
+    with path.open("rb") as f:
+        for block in iter(lambda:f.read(1024*1024),b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
+          xi_manifest:str, output_db:str, output_metadata:str):
+    input_paths=[Path(s).resolve() for s in (gb_db,gb_catalogue,xi_db,xi_catalogue,xi_manifest)]
+    out=Path(output_db).resolve()
+    meta=Path(output_metadata).resolve()
+    if out==meta or out in input_paths or meta in input_paths:
+        raise ValueError("Never overwrite input source files")
+    gb=_source(gb_db,region="GB")
+    xi=_source(xi_db,region="XI")
+    verified=verify_public(xi_catalogue,xi_manifest)
+    if (gb["source_rows"]<1_000_000 or
+            verified["as_of"]!=xi["as_of"].isoformat() or
+            verified["catalogue_sha256"]!=xi["version_or_catalogue"]):
+        raise ValueError("Complete GB/XI snapshot provenance is missing")
+    gb_codes=_catalogue(gb_catalogue,gb["version_or_catalogue"],gb["as_of"])
+    xi_codes=set(candidates(xi_catalogue))
+    if len(xi_codes)!=len(xi["codes"]) or not gb_codes:
+        raise ValueError("XI/GB current catalogue not fully covered")
+    day=max(gb["as_of"],xi["as_of"])
+    if abs((gb["as_of"]-xi["as_of"]).days)>7:
+        raise ValueError("GB/XI snapshots too far apart for combined desktop release")
+    gb_descr={}
+    with closing(sqlite3.connect(Path(gb_catalogue).resolve().as_uri()+"?mode=ro",uri=True)) as db:
+        for code,description in db.execute("SELECT code,description FROM commodities WHERE active=1 AND suffix80=1"):
+            if code in gb_codes and code not in gb_descr and description:
+                gb_descr[code]=description
+    xi_descr={}
+    with closing(sqlite3.connect(Path(xi_catalogue).resolve().as_uri()+"?mode=ro",uri=True)) as db:
+        for code,description in db.execute("SELECT code,description FROM nomenclature WHERE active=1 AND declarable=1"):
+            if code in xi_codes and description:
+                xi_descr[code]=description
+    out.parent.mkdir(parents=True,exist_ok=True)
+    meta.parent.mkdir(parents=True,exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=out.parent) as temp:
+        stage=Path(temp)/"tariffs.db"
+        with closing(sqlite3.connect(stage)) as dest, closing(
+                sqlite3.connect(Path(gb_db).resolve().as_uri()+"?mode=ro",uri=True)
+            ) as gb_conn, closing(
+                sqlite3.connect(Path(xi_db).resolve().as_uri()+"?mode=ro",uri=True)
+            ) as xi_conn:
+            dest.executescript(SQL)
+            counts=Counter()
+            all_codes=sorted(gb_codes|xi_codes)
+            for code in all_codes:
+                if not CODE.fullmatch(code):
+                    raise ValueError("Invalid official declarable code")
+                gb_rate=""
+                ni_rate=""
+                if code in gb_codes:
+                    source=list(gb_conn.execute("""SELECT expression,additional_code,conditions,excluded_areas
+                       FROM measures WHERE region='GB' AND code=?
+                        AND effective_status='active' AND measure_type IN ('103','105')
+                        AND geography='1011' ORDER BY ordinal""",(code,)))
+                    gb_rate=simple_rate(source)
+                    counts["gb_percent"]+=bool(gb_rate)
+                if code in xi_codes:
+                    source=list(xi_conn.execute("""SELECT measure_type,geography_id,
+                        duty_expression,effective_start,effective_end,raw_json
+                        FROM measures WHERE code=? AND measure_type IN ('103','105')
+                        ORDER BY ordinal""",(code,)))
+                    ni_rate=xi_rate(source,xi["as_of"])
+                    counts["xi_percent"]+=bool(ni_rate)
+                dest.execute("INSERT INTO tariffs VALUES (?,?,?,?,?,?,?,?,?,?)",(
+                    code,gb_descr.get(code) or xi_descr.get(code) or "",
+                    gb_rate,
+                    "https://www.trade-tariff.service.gov.uk/uk/commodities/"+code if code in gb_codes else "",
+                    ni_rate,
+                    "https://www.trade-tariff.service.gov.uk/xi/commodities/"+code if code in xi_codes else "",
+                    "", "", "", day.isoformat()))
+            dest.commit()
+            if dest.execute("PRAGMA integrity_check").fetchone()[0]!="ok":
+                raise ValueError("Desktop SQLite integrity failed")
+            if dest.execute("SELECT COUNT(*) FROM tariffs").fetchone()[0]!=len(all_codes):
+                raise ValueError("Desktop code union has holes")
+        stage.replace(out)
+    digest=hash_file(out)
+    version="data-"+day.strftime("%Y%m%d")+"-"+digest[:16]
+    stamp=datetime.now(timezone.utc).isoformat()
+    report={
+        "version":version,
+        "timestamp":stamp,
+        "last_modified":stamp,
+        "file_hash":"sha256:"+digest,
+        "file_size":out.stat().st_size,
+        "record_count":len(gb_codes|xi_codes),
+        "changes_summary":{"total_updates":counts["gb_percent"]+counts["xi_percent"],
+                           "gb_available_simple_percent":counts["gb_percent"],
+                           "xi_available_simple_percent":counts["xi_percent"]},
+        "source_versions":{"GB":gb["version_or_catalogue"],
+                           "GB_as_of":gb["as_of"].isoformat(),
+                           "XI_as_of":xi["as_of"].isoformat(),
+                           "XI_catalogue_sha256":xi["version_or_catalogue"]},
+        "coverage":{"GB":len(gb_codes),"XI":len(xi_codes)},
+        "rate_scope":"Unambiguous active third-country percentage only; ambiguous/compound remain blank",
+        "download_urls":{
+            "primary":"https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/tariffs.db",
+            "metadata":"https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/metadata.json"},
+    }
+    if len(gb_codes)<10_000 or len(xi_codes)<10_000:
+        raise ValueError("Suspiciously incomplete official commodity catalogue")
+    meta.write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+    return report
+
+
+def main():
+    parser=argparse.ArgumentParser()
+    for arg in ("gb-db","gb-catalogue","xi-db","xi-catalogue","xi-manifest",
+                "output-db","output-metadata"):
+        parser.add_argument("--"+arg,required=True)
+    a=vars(parser.parse_args())
+    print(json.dumps(build(a["gb_db"],a["gb_catalogue"],a["xi_db"],
+                     a["xi_catalogue"],a["xi_manifest"],
+                     a["output_db"],a["output_metadata"]),ensure_ascii=False,indent=2))
+
+if __name__=="__main__":
+    main()
