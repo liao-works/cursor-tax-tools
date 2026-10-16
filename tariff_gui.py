@@ -1266,6 +1266,79 @@ class TariffGUI:
 
         self.thread_pool.submit(check_task)
 
+    def _schedule_next_data_update_check(self, delay_ms: int):
+        """Schedule on Tk's event loop; never block UI with network traffic."""
+        if getattr(self, "_closing", False):
+            return
+        previous = getattr(self, "_data_update_check_timer", None)
+        if previous is not None:
+            self.root.after_cancel(previous)
+        self._data_update_check_timer = self.root.after(
+            delay_ms, self._run_daily_data_update_check
+        )
+
+    def _run_daily_data_update_check(self):
+        """Check on app startup and at least once per day while it stays open."""
+        self._data_update_check_timer = None
+        if not self._closing:
+            self.check_remote_update(automatic=True)
+
+    def _finish_daily_data_update_check(self, succeeded: bool):
+        """Reschedule even if metadata service was temporarily inaccessible."""
+        if not self._closing:
+            self._schedule_next_data_update_check(check_delay_ms(succeeded=succeeded))
+
+    def _close_data_release_notification(self):
+        window = self._data_notification_window
+        self._data_notification_window = None
+        if window is not None and window.winfo_exists():
+            window.destroy()
+
+    def _announce_new_data_release(self, remote_metadata: dict, reason: str):
+        """Persistent banner + once-per-release non-modal desktop popup."""
+        if self._closing:
+            return
+        key = release_notification_key(remote_metadata)
+        version = str(remote_metadata["version"])
+        self.data_update_banner_var.set(f"发现已发布的数据更新：{version}")
+        self.data_update_banner.pack(fill="x", padx=10, pady=(0, 4))
+        self.notebook.tab(self.remote_update_frame, text="远程数据更新 ●")
+        if (self.config.get("last_data_update_notification") == key
+                or getattr(self, "_last_notified_release", None) == key):
+            return
+        self._last_notified_release = key
+        self.config["last_data_update_notification"] = key
+        self.config["metadata_url"] = configured_metadata_url(self.metadata_url_var.get())
+        self.config["db_path"] = self.db_path_var.get()
+        save_config(self.config)  # Save immediately: no repeated alerts after restarting.
+
+        self._close_data_release_notification()
+        window = tk.Toplevel(self.root)
+        self._data_notification_window = window
+        window.title("关税数据更新通知")
+        window.geometry("460x200")
+        window.resizable(False, False)
+        window.transient(self.root)
+        window.protocol("WM_DELETE_WINDOW", self._close_data_release_notification)
+        body = ttk.Frame(window, padding=18)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="有新的关税数据库可用",
+                  font=("TkDefaultFont", 12, "bold")).pack(anchor="w", pady=(0, 10))
+        ttk.Label(body,
+                  text=f"数据版本：{version}\n{reason}\n不会自动覆盖本地数据，请选择是否更新。",
+                  wraplength=415, justify="left").pack(anchor="w", fill="x")
+        actions = ttk.Frame(body)
+        actions.pack(anchor="e", side="bottom", pady=(12, 0))
+        ttk.Button(actions, text="稍后更新",
+                   command=self._close_data_release_notification).pack(side="left", padx=5)
+        def install():
+            self._close_data_release_notification()
+            self.notebook.select(self.remote_update_frame)
+            self.force_remote_update()
+        ttk.Button(actions, text="立即更新", command=install).pack(side="left", padx=5)
+        window.lift()
+        window.bell()
+
     def force_remote_update(self):
         """强制更新"""
         # ✅ 检查是否有操作正在进行
@@ -1467,6 +1540,10 @@ class TariffGUI:
             record_count = local_db_info.get('record_count', 0)
             self.local_records_label.config(text=str(record_count))
             self.add_remote_log(f"📊 本地记录数已更新: {record_count:,} 条")
+            # Clear pending release state only after the database update succeeded.
+            self.data_update_banner.pack_forget()
+            self.notebook.tab(self.remote_update_frame, text="远程数据更新")
+            self._close_data_release_notification()
 
         except Exception as e:
             logger.error(f"刷新本地信息失败: {str(e)}")
@@ -1555,9 +1632,14 @@ class TariffGUI:
             ):
                 return
 
+        self._closing = True
+        if self._data_update_check_timer is not None:
+            self.root.after_cancel(self._data_update_check_timer)
+            self._data_update_check_timer = None
+
         # ✅ 保存配置文件
         self.config["db_path"] = self.db_path_var.get()
-        self.config["metadata_url"] = self.metadata_url_var.get()
+        self.config["metadata_url"] = configured_metadata_url(self.metadata_url_var.get())
         save_config(self.config)
 
         # ✅ 关闭线程池（等待当前任务完成，但不接受新任务）
