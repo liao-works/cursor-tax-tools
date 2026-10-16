@@ -1,0 +1,6 @@
+requested_scope=XI_FULL_ORIGINAL_97_CHAPTERS
+partition_count=16
+max_parallel=8
+second_pass_retry=true
+source_as_of=runtime_utc_date
+trigger_reason=verify_sixteen_way_real_capture
