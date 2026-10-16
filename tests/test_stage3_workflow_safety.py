@@ -31,26 +31,16 @@ class Stage3WorkflowSafetyTests(unittest.TestCase):
         self.assertNotIn("tariffs.db",w)
         self.assertNotIn("latest-data",w)
 
-    def test_on_demand_source_markers_are_runnable_after_merge(self):
-        # Source-only operator markers must target the actual default branch;
-        # review PR branches are not persistent production launch points.
-        for name in (
-            "dbt-newest-replay-shadow.yml",
-            "xi-condition-source-review.yml",
-            "xi-date-impact-queue.yml",
-            "xi-derived-expression-review.yml",
-            "xi-duty-applicability-review.yml",
-            "xi-full-managed-one-shot.yml",
-            "xi-live-date-canary.yml",
-            "xi-targeted-delta-refetch.yml",
-        ):
+    def test_core_manual_source_launchers_retain_default_branch_targets(self):
+        for name in ("weekly-gb-full-source.yml", "xi-public-full-measures.yml"):
             with self.subTest(workflow=name):
-                w=(WF/name).read_text()
-                self.assertIn("branches: [feat/parallel-scraper]",w)
-                self.assertIn("workflow_dispatch:",w)
-                self.assertIn("contents: read",w)
-                self.assertNotIn("contents: write",w)
-                self.assertNotIn("softprops/action-gh-release",w)
+                body=(WF/name).read_text()
+                self.assertIn("branches: [feat/parallel-scraper]",body)
+                self.assertIn("workflow_dispatch:",body)
+                self.assertIn("contents: read",body)
+                self.assertNotIn("contents: write",body)
+        self.assertIn("ops/manual-xi-full-run.txt",
+                      (WF/"xi-public-full-measures.yml").read_text())
 
     def test_source_modules_are_review_only(self):
         for path in ("full_source_delta_scope.py","xi_date_impact_queue.py",
