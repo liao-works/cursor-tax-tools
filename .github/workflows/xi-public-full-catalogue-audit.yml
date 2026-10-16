@@ -12,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: xi-public-all-chapters-${{ github.ref }}
+  group: xi-public-all-chapters-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
