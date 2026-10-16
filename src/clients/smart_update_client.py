@@ -32,6 +32,7 @@ import backoff
 
 # ✅ 导入数据库路径处理函数
 from src.db.database import get_writable_db_path
+from src.clients.data_update_notifier import assess_published_update
 
 logger = logging.getLogger(__name__)
 
@@ -215,77 +216,15 @@ class SmartUpdateChecker:
             raise FileOperationError(f"获取数据库信息失败: {str(e)}")
 
     def check_update_needed(self, remote_metadata: Dict, local_db_info: Dict, local_metadata: Dict = None) -> Tuple[bool, str, Dict]:
-        """检查是否需要更新"""
-        reasons = []
-        update_needed = False
+        """Compare the actual PUBLISHED database content, not scraped shadow runs.
 
-        # 1. 检查文件是否存在
-        if not local_db_info.get('exists'):
-            update_needed = True
-            reasons.append("本地数据库文件不存在")
-            return True, " | ".join(reasons), {'priority': 'high'}
-
-        # 2. 检查版本号
-        remote_version = remote_metadata.get('version')
-        local_version = local_metadata.get('version') if local_metadata else None
-
-        if remote_version != local_version:
-            update_needed = True
-            reasons.append(f"版本不匹配: {local_version} → {remote_version}")
-
-        # 3. 检查文件哈希
-        remote_hash = remote_metadata.get('file_hash')
-        local_hash = local_db_info.get('file_hash')
-
-        if remote_hash != local_hash:
-            update_needed = True
-            reasons.append("文件内容已变更")
-
-        # 4. 检查更新时间
-        remote_time = remote_metadata.get('timestamp')
-        local_time = local_db_info.get('last_modified')
-
-        if remote_time and local_time:
-            try:
-                remote_dt = datetime.fromisoformat(remote_time.replace('Z', '+00:00'))
-                local_dt = datetime.fromisoformat(local_time.replace('Z', '+00:00'))
-
-                if remote_dt > local_dt:
-                    reasons.append(f"远程数据更新时间更新: {remote_time} > {local_time}")
-                    # 如果时间更新但哈希相同，可能是元数据更新，不强制数据库更新
-                    if not update_needed:
-                        reasons.append("仅元数据更新，数据库文件无需更新")
-                        return False, " | ".join(reasons), {'priority': 'low'}
-            except ValueError:
-                logger.warning("⚠️ 时间戳解析失败")
-
-        # 5. 检查变更数量阈值
-        changes_summary = remote_metadata.get('changes_summary', {})
-        min_threshold = remote_metadata.get('client_instructions', {}).get('min_change_threshold', 10)
-        total_changes = changes_summary.get('total_updates', 0)
-
-        if total_changes < min_threshold and update_needed:
-            reasons.append(f"变更数量({total_changes})少于阈值({min_threshold})，可跳过更新")
-            update_needed = False
-
-        # 6. 检查数据完整性
-        if local_db_info.get('record_count', 0) != remote_metadata.get('record_count', 0):
-            update_needed = True
-            reasons.append(f"记录数量不匹配: {local_db_info.get('record_count')} → {remote_metadata.get('record_count')}")
-
-        # 确定更新优先级
-        priority = 'medium'
-        if update_needed:
-            if any("不存在" in reason or "不匹配" in reason for reason in reasons):
-                priority = 'high'
-            elif total_changes > 100:
-                priority = 'high'
-            elif total_changes > 50:
-                priority = 'medium'
-            else:
-                priority = 'low'
-
-        return update_needed, " | ".join(reasons) if reasons else "无需更新", {'priority': priority}
+        A small changes_summary.total_updates, filesystem timestamps, or an
+        unchanged display version must not hide a changed release asset.
+        """
+        try:
+            return assess_published_update(remote_metadata, local_db_info, local_metadata)
+        except ValueError as exc:
+            raise MetadataError(str(exc)) from exc
 
     @backoff.on_exception(
         backoff.expo,

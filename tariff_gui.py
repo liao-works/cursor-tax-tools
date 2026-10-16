@@ -5,6 +5,10 @@ import logging
 from tariff_api import TariffAPI
 from tariff_db import TariffDB
 from src.clients.smart_update_client import SmartUpdateChecker
+from src.clients.data_update_notifier import (
+    DEFAULT_METADATA_URL, configured_metadata_url, release_notification_key,
+    check_delay_ms, RETRY_INTERVAL_MS,
+)
 import queue
 import threading
 import asyncio
@@ -41,50 +45,47 @@ def resource_path(relative_path: str) -> str:
 import json
 
 
-CONFIG_FILE = "gui_config.json"
+# Persistent settings live in the user profile, never in a read-only install
+# directory. Existing portable installations are migrated on first save.
+_USER_SETTINGS_DIR = (
+    os.path.join(os.environ.get("APPDATA") or os.path.expanduser("~"), "TariffTools")
+    if sys.platform == "win32"
+    else os.path.join(os.path.expanduser("~"), ".tarifftools")
+)
+CONFIG_FILE = os.path.join(_USER_SETTINGS_DIR, "gui_config.json")
+LEGACY_CONFIG_FILE = "gui_config.json"
 
 
 def load_config() -> dict:
-    """加载GUI配置文件
-    
-    Returns:
-        dict: 配置字典，如果文件不存在则返回默认配置
-    """
-    default_config = {
-        "db_path": "tariffs.db",
-        "metadata_url": "https://github.com/CavinHuang/cursor-tax-tools/releases/download/latest-data/metadata.json"
-    }
-    
-    try:
-        if os.path.exists(CONFIG_FILE):
-            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-                config = json.load(f)
-                logger.info(f"✅ 已加载配置文件: {CONFIG_FILE}")
+    """Read persisted desktop settings; migrate only the retired metadata URL."""
+    defaults = {"db_path": "tariffs.db", "metadata_url": DEFAULT_METADATA_URL}
+    for path in (CONFIG_FILE, LEGACY_CONFIG_FILE):
+        try:
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as stream:
+                    saved = json.load(stream)
+                if not isinstance(saved, dict):
+                    raise ValueError("GUI 配置内容必须是对象")
+                config = dict(defaults)
+                config.update(saved)
+                config["metadata_url"] = configured_metadata_url(config.get("metadata_url"))
                 return config
-        else:
-            logger.info(f"ℹ️ 配置文件不存在，使用默认配置")
-            return default_config
-    except Exception as e:
-        logger.error(f"❌ 加载配置文件失败: {e}")
-        return default_config
+        except (OSError, ValueError, TypeError) as exc:
+            logger.warning("配置文件 %s 读取失败：%s", path, exc)
+    return defaults
 
 
 def save_config(config: dict) -> bool:
-    """保存GUI配置文件
-    
-    Args:
-        config: 配置字典
-        
-    Returns:
-        bool: 保存是否成功
-    """
+    """Atomically preserve last-notified release across application restarts."""
     try:
-        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-            json.dump(config, f, ensure_ascii=False, indent=2)
-        logger.info(f"✅ 配置已保存到: {CONFIG_FILE}")
+        os.makedirs(_USER_SETTINGS_DIR, exist_ok=True)
+        tmp_path = CONFIG_FILE + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as stream:
+            json.dump(config, stream, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, CONFIG_FILE)
         return True
-    except Exception as e:
-        logger.error(f"❌ 保存配置文件失败: {e}")
+    except (OSError, TypeError, ValueError) as exc:
+        logger.warning("保存桌面配置失败：%s", exc)
         return False
 
 
@@ -226,9 +227,14 @@ class TariffGUI:
 
         # ✅ 绑定窗口关闭事件
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self._closing = False
+        self._data_update_check_timer = None
+        self._data_notification_window = None
 
-        # ✅ 启动后自动加载本地数据库信息
+        # Startup and once per 24h while this desktop application is running.
+        # The network check runs in the existing background thread pool.
         self.root.after(500, self._load_initial_local_info)
+        self._schedule_next_data_update_check(2000)
 
     def setup_ui(self):
         """设置UI界面"""
@@ -970,9 +976,7 @@ class TariffGUI:
 
         # 元数据URL
         ttk.Label(config_frame, text="元数据URL:").grid(row=0, column=0, sticky='w', padx=5, pady=5)
-        self.metadata_url_var = tk.StringVar(
-            value="https://github.com/CavinHuang/cursor-tax-tools/releases/download/latest-data/metadata.json"
-        )
+        self.metadata_url_var = tk.StringVar(value=self.config.get("metadata_url", DEFAULT_METADATA_URL))
         ttk.Entry(config_frame, textvariable=self.metadata_url_var, width=70).grid(row=0, column=1, padx=5, pady=5)
 
         # 数据库路径
@@ -1020,9 +1024,19 @@ class TariffGUI:
         self.update_status_label = ttk.Label(update_frame, text="未检查", foreground="gray")
         self.update_status_label.pack(side='left', padx=10)
 
+        # Persistent in-app notification, visible until user installs newer data.
+        self.data_update_banner_var = tk.StringVar(value="")
+        self.data_update_banner = ttk.Frame(self.remote_update_frame)
+        ttk.Label(self.data_update_banner, textvariable=self.data_update_banner_var,
+                  foreground="#b45309").pack(side="left", padx=(10, 8))
+        ttk.Button(self.data_update_banner, text="查看更新",
+                   command=lambda: self.notebook.select(self.remote_update_frame)).pack(side="left")
+        # Do not show an empty banner when no new release is available.
+
         # 操作按钮区域
         action_frame = ttk.LabelFrame(self.remote_update_frame, text="操作")
         action_frame.pack(fill='x', padx=10, pady=10)
+        self.remote_update_action_frame = action_frame
 
         button_frame = ttk.Frame(action_frame)
         button_frame.pack(pady=10)
@@ -1152,14 +1166,21 @@ class TariffGUI:
         # ✅ 使用线程池提交任务（避免无限制创建线程）
         self.thread_pool.submit(refresh_task)
 
-    def check_remote_update(self):
-        """检查远程更新"""
-        # ✅ 检查是否有操作正在进行
+    def check_remote_update(self, automatic: bool = False):
+        """Read-only release check (manual or scheduled background operation)."""
         if self.remote_update_in_progress:
-            messagebox.showwarning("提示", "远程更新操作正在进行中，请稍候")
+            if automatic:
+                self._schedule_next_data_update_check(RETRY_INTERVAL_MS)
+            else:
+                messagebox.showwarning("提示", "远程更新操作正在进行中，请稍候")
             return
 
+        # Tk variables belong to the UI thread, never read them from a worker.
+        db_path = self.db_path_var.get()
+        metadata_url = configured_metadata_url(self.metadata_url_var.get())
+
         def check_task():
+            succeeded = False
             with self.remote_update_lock:
                 self.remote_update_in_progress = True
                 try:
@@ -1169,8 +1190,6 @@ class TariffGUI:
                     self.queue.put((self.add_remote_log, ("🔍 开始检查远程更新...",), {}))
 
                     # 初始化更新检查器
-                    db_path = self.db_path_var.get()
-                    metadata_url = self.metadata_url_var.get()
                     self.smart_update_checker = SmartUpdateChecker(metadata_url, db_path)
 
                     # 下载远程元数据
@@ -1207,6 +1226,7 @@ class TariffGUI:
                         remote_metadata, local_db_info, local_metadata
                     )
 
+                    succeeded = True
                     # ✅ 使用队列更新UI
                     if update_needed:
                         self.queue.put((self.update_status_label.config, (), {'text': f"需要更新: {reason}", 'foreground': "orange"}))
@@ -1220,8 +1240,11 @@ class TariffGUI:
                         else:
                             self.queue.put((self.add_remote_log, ("💡 低优先级更新建议",), {}))
 
-                        # ✅ 弹窗询问用户是否要立即更新
-                        self.queue.put((self._show_update_confirmation_dialog, (reason, remote_metadata, details), {}))
+                        if automatic:
+                            # Nonblocking notification; do not automatically install data.
+                            self.queue.put((self._announce_new_data_release, (remote_metadata, reason), {}))
+                        else:
+                            self.queue.put((self._show_update_confirmation_dialog, (reason, remote_metadata, details), {}))
                     else:
                         self.queue.put((self.update_status_label.config, (), {'text': "已是最新", 'foreground': "green"}))
                         self.queue.put((self.add_remote_log, ("✅ 数据库已是最新版本",), {}))
@@ -1235,9 +1258,83 @@ class TariffGUI:
                     self.queue.put((self.remote_progress_bar.stop, (), {}))
                     self.queue.put((self.set_remote_ui_state, (True,), {}))
                     self.remote_update_in_progress = False
+                    if automatic:
+                        self.queue.put((self._finish_daily_data_update_check, (succeeded,), {}))
 
-        # ✅ 使用线程池提交任务（避免无限制创建线程）
         self.thread_pool.submit(check_task)
+
+    def _schedule_next_data_update_check(self, delay_ms: int):
+        """Schedule on Tk's event loop; never block UI with network traffic."""
+        if getattr(self, "_closing", False):
+            return
+        previous = getattr(self, "_data_update_check_timer", None)
+        if previous is not None:
+            self.root.after_cancel(previous)
+        self._data_update_check_timer = self.root.after(
+            delay_ms, self._run_daily_data_update_check
+        )
+
+    def _run_daily_data_update_check(self):
+        """Check on app startup and at least once per day while it stays open."""
+        self._data_update_check_timer = None
+        if not self._closing:
+            self.check_remote_update(automatic=True)
+
+    def _finish_daily_data_update_check(self, succeeded: bool):
+        """Reschedule even if metadata service was temporarily inaccessible."""
+        if not self._closing:
+            self._schedule_next_data_update_check(check_delay_ms(succeeded=succeeded))
+
+    def _close_data_release_notification(self):
+        window = self._data_notification_window
+        self._data_notification_window = None
+        if window is not None and window.winfo_exists():
+            window.destroy()
+
+    def _announce_new_data_release(self, remote_metadata: dict, reason: str):
+        """Persistent banner + once-per-release non-modal desktop popup."""
+        if self._closing:
+            return
+        key = release_notification_key(remote_metadata)
+        version = str(remote_metadata["version"])
+        self.data_update_banner_var.set(f"发现已发布的数据更新：{version}")
+        self.data_update_banner.pack(before=self.remote_update_action_frame, fill="x", padx=10, pady=(0, 4))
+        self.notebook.tab(self.remote_update_frame, text="远程数据更新 ●")
+        if (self.config.get("last_data_update_notification") == key
+                or getattr(self, "_last_notified_release", None) == key):
+            return
+        self._last_notified_release = key
+        self.config["last_data_update_notification"] = key
+        self.config["metadata_url"] = configured_metadata_url(self.metadata_url_var.get())
+        self.config["db_path"] = self.db_path_var.get()
+        save_config(self.config)  # Save immediately: no repeated alerts after restarting.
+
+        self._close_data_release_notification()
+        window = tk.Toplevel(self.root)
+        self._data_notification_window = window
+        window.title("关税数据更新通知")
+        window.geometry("460x200")
+        window.resizable(False, False)
+        window.transient(self.root)
+        window.protocol("WM_DELETE_WINDOW", self._close_data_release_notification)
+        body = ttk.Frame(window, padding=18)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="有新的关税数据库可用",
+                  font=("TkDefaultFont", 12, "bold")).pack(anchor="w", pady=(0, 10))
+        ttk.Label(body,
+                  text=f"数据版本：{version}\n{reason}\n不会自动覆盖本地数据，请选择是否更新。",
+                  wraplength=415, justify="left").pack(anchor="w", fill="x")
+        actions = ttk.Frame(body)
+        actions.pack(anchor="e", side="bottom", pady=(12, 0))
+        ttk.Button(actions, text="稍后更新",
+                   command=self._close_data_release_notification).pack(side="left", padx=5)
+        def install():
+            self._close_data_release_notification()
+            self.notebook.select(self.remote_update_frame)
+            self.force_remote_update()
+        ttk.Button(actions, text="立即更新", command=install).pack(side="left", padx=5)
+        window.lift()
+        window.bell()
 
     def force_remote_update(self):
         """强制更新"""
@@ -1440,6 +1537,10 @@ class TariffGUI:
             record_count = local_db_info.get('record_count', 0)
             self.local_records_label.config(text=str(record_count))
             self.add_remote_log(f"📊 本地记录数已更新: {record_count:,} 条")
+            # Clear pending release state only after the database update succeeded.
+            self.data_update_banner.pack_forget()
+            self.notebook.tab(self.remote_update_frame, text="远程数据更新")
+            self._close_data_release_notification()
 
         except Exception as e:
             logger.error(f"刷新本地信息失败: {str(e)}")
@@ -1528,9 +1629,14 @@ class TariffGUI:
             ):
                 return
 
+        self._closing = True
+        if self._data_update_check_timer is not None:
+            self.root.after_cancel(self._data_update_check_timer)
+            self._data_update_check_timer = None
+
         # ✅ 保存配置文件
         self.config["db_path"] = self.db_path_var.get()
-        self.config["metadata_url"] = self.metadata_url_var.get()
+        self.config["metadata_url"] = configured_metadata_url(self.metadata_url_var.get())
         save_config(self.config)
 
         # ✅ 关闭线程池（等待当前任务完成，但不接受新任务）
