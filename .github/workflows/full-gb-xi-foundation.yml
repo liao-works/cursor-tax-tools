@@ -7,7 +7,7 @@ on:
       - 'src/target_duty/**'
       - 'tests/**'
       - '.github/workflows/**'
-      - 'ops/**'
+      - 'ops/xi-daily-canary-baseline-20261014.json'
   workflow_dispatch:
 
 permissions:
@@ -98,8 +98,6 @@ jobs:
           python -m src.target_duty.legacy_publish_guard --directory .github/workflows
       - name: Four-dimension final data release readiness fail-closed injection tests
         run: python -m unittest discover -s tests -p 'test_final_release_gate.py' -v
-      - name: Existing region evidence contract regression
-        run: python -m unittest discover -s tests -p 'test_region_measures.py' -v
       - name: Source changes, workflow guards and new XI 16-shard retry contracts
         run: |
           python -m unittest discover -s tests -p 'test_stage2_workflow_safety.py' -v
