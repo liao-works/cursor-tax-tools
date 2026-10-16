@@ -38,13 +38,17 @@ class SourceRefreshClosureTests(unittest.TestCase):
         self.assertNotIn("contents: write",diff)
         self.assertNotIn("softprops/action-gh-release",diff)
 
-    def test_eight_shards_remain_rate_limited_and_recoverable(self):
+    def test_sixteen_shards_remain_rate_limited_and_recoverable(self):
         xi=(ROOT/"xi-public-full-measures.yml").read_text()
-        self.assertIn("max-parallel: 4",xi)
-        self.assertIn("worker: [0, 1, 2, 3, 4, 5, 6, 7]",xi)
-        self.assertIn("--workers 8",xi)
-        self.assertIn("len(paths)!=8",xi)
+        self.assertIn("max-parallel: 8",xi)
+        self.assertIn("worker: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]",xi)
+        self.assertIn("--workers 16",xi)
+        self.assertIn("len(paths)!=16",xi)
         self.assertIn("previous.issubset(assigned)",xi)
+        self.assertIn("Second pass - retry ONLY failed or missing XI responses",xi)
+        self.assertIn("if: steps.crawl.outcome == 'failure'",xi)
+        self.assertIn("RETRY: ${{ steps.retry.outcome }}",xi)
+        self.assertIn('"$CRAWL" != success && "$RETRY" != success',xi)
         self.assertIn('config.get("catalogue_sha256")==frozen["catalogue_sha256"]',xi)
         self.assertIn("if: always()",xi)
         self.assertIn("retention-days: 30",xi)

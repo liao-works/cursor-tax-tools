@@ -42,9 +42,9 @@ class StagedReadOnlySourceTests(unittest.TestCase):
                          "gb-daily-watch-pin-"):
             self.assertIn(required,w)
 
-    def test_xi_all_eight_current_day_shards_and_raw_acceptance(self):
+    def test_xi_all_sixteen_current_day_shards_and_raw_acceptance(self):
         w=(WORKFLOWS/"xi-public-full-measures.yml").read_text()
-        for required in ("worker: [0, 1, 2, 3, 4, 5, 6, 7]", "max-parallel: 4", "--workers 8","xi_public_full_capture",
+        for required in ("worker: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]", "max-parallel: 8", "--workers 16","xi_public_full_capture",
                          "xi_public_gap_ledger","xi_merge","xi_daily_baseline",
                          "xi-daily-watch-baseline-","public_full_raw_source_coverage",
                          'a["ni_other_verified"]'):
