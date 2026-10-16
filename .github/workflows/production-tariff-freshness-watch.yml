@@ -1,15 +1,17 @@
 name: Production latest-data integrity and 48h freshness watch (READ ONLY)
 on:
-  push:
-    branches: [feat/target-third-country-duty-v1]
-    paths: [ops/production-freshness-watch-launch.txt]
+  pull_request:
+    paths:
+      - '.github/workflows/production-tariff-freshness-watch.yml'
+      - 'src/target_duty/production_freshness_watch.py'
+      - 'tests/test_production_freshness_watch.py'
   schedule:
     - cron: '0 0 * * *'
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  inspect:
+  unit-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -17,9 +19,19 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Fail-closed metadata pairing, versioned SHA and corrupted SQLite tests
+      - name: Verify stale, torn, wrong-pin and corrupt SQLite fail closed
         run: python -m unittest discover -s tests -p 'test_production_freshness_watch.py' -v
-      - name: Inspect actual paired latest-data and immutable versioned release (NO WRITES)
+  inspect:
+    if: github.event_name != 'pull_request'
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Inspect production latest-data and immutable versioned release (NO WRITES)
         id: check
         continue-on-error: true
         run: |

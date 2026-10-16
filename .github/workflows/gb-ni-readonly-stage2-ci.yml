@@ -1,0 +1,40 @@
+name: GB/NI read-only source stage 2 (tests, never publish)
+on:
+  push:
+    branches: [feat/gb-ni-readonly-source-batch2-20261015]
+  pull_request:
+    paths:
+      - '.github/workflows/daily-official-source-watch.yml'
+      - '.github/workflows/weekly-gb-full-source.yml'
+      - '.github/workflows/xi-public-full-measures.yml'
+      - '.github/workflows/gb-ni-readonly-stage2-ci.yml'
+      - 'src/target_duty/**'
+      - 'tests/test_stage2_workflow_safety.py'
+      - 'tests/test_daily_official_change_watch.py'
+      - 'tests/test_weekly_full_refresh.py'
+permissions:
+  contents: read
+jobs:
+  source-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify review-only workflow registration, full XI partition and zero publisher
+        run: python -m unittest discover -s tests -p 'test_stage2_workflow_safety.py' -v
+      - name: Daily pinned GB/NI version, API loss and expiry guards
+        run: python -m unittest discover -s tests -p 'test_daily_official_change_watch.py' -v
+      - name: GB full importer and official DBT newest-version compatibility
+        run: |
+          python -m unittest discover -s tests -p 'test_dbt_version_discovery.py' -v
+          python -m unittest discover -s tests -p 'test_gb_full_measures.py' -v
+      - name: XI full public inventory / independent original-response validation
+        run: |
+          python -m unittest discover -s tests -p 'test_xi_catalogue.py' -v
+          python -m unittest discover -s tests -p 'test_xi_public_full_capture.py' -v
+          python -m unittest discover -s tests -p 'test_xi_public_gap_ledger.py' -v
+          python -m unittest discover -s tests -p 'test_xi_merge.py' -v
+          python -m unittest discover -s tests -p 'test_xi_daily_baseline.py' -v

@@ -1,11 +1,8 @@
 name: XI public full raw measure evidence (UNTRUSTED SHADOW)
 on:
-  push:
-    branches: [feat/target-third-country-duty-v1]
-    paths: [ops/xi-public-full-launch.txt]
   workflow_dispatch:
-  # Sunday 02:00 UTC / 10:00 Singapore: refresh all XI public source.
-  # Scheduled workflows run only from the repository default branch.
+  # Every Sunday 02:00 UTC / 10:00 Singapore: new XI public source snapshot.
+  # Scheduled runs start a fresh frozen catalogue; manual runs can resume.
   schedule:
     - cron: '0 2 * * 0'
 permissions:

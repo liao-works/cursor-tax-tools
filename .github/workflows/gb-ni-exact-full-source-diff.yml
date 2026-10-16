@@ -1,0 +1,109 @@
+name: Full GB/NI official source exact code diff (REVIEW ONLY)
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: Two independently complete source snapshots from one region
+        type: choice
+        options: [GB, XI]
+        required: true
+      before_run_id:
+        description: Previous complete source capture run ID
+        required: true
+        type: string
+      after_run_id:
+        description: New complete source capture run ID
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: full-source-diff-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  exact-code-diff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Confirm two different full-source run IDs
+        env:
+          OLD_RUN: ${{ inputs.before_run_id }}
+          NEW_RUN: ${{ inputs.after_run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$OLD_RUN" =~ ^[0-9]{8,16}$ && "$NEW_RUN" =~ ^[0-9]{8,16}$ ]]
+          [[ "$OLD_RUN" != "$NEW_RUN" ]]
+      - name: Download older GB full official measures
+        if: inputs.region == 'GB'
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.before_run_id }}
+          name: weekly-gb-full-source-${{ inputs.before_run_id }}
+          github-token: ${{ github.token }}
+          path: before
+      - name: Download newer GB full official measures
+        if: inputs.region == 'GB'
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.after_run_id }}
+          name: weekly-gb-full-source-${{ inputs.after_run_id }}
+          github-token: ${{ github.token }}
+          path: after
+      - name: Download older independently accepted XI raw source
+        if: inputs.region == 'XI'
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.before_run_id }}
+          name: xi-public-full-acceptance-${{ inputs.before_run_id }}
+          github-token: ${{ github.token }}
+          path: before
+      - name: Download newer independently accepted XI raw source
+        if: inputs.region == 'XI'
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.after_run_id }}
+          name: xi-public-full-acceptance-${{ inputs.after_run_id }}
+          github-token: ${{ github.token }}
+          path: after
+      - name: Source provenance and non-103 measure change regression
+        run: python -m unittest discover -s tests -p 'test_full_source_delta_scope.py' -v
+      - name: Compare entire original official source by exact commodity code
+        env:
+          REGION: ${{ inputs.region }}
+        run: |
+          set -euo pipefail
+          case "$REGION" in
+            GB) SRC="gb-weekly-measures.db";;
+            XI) SRC="xi-public-full-merged.db";;
+            *) exit 1;;
+          esac
+          python -m src.target_duty.full_source_delta_scope \
+            --region "$REGION" --before "before/$SRC" --after "after/$SRC" \
+            --csv exact-changed-codes.csv --report exact-diff-report.json
+          python - <<'PY'
+          import csv,hashlib,json
+          r=json.load(open("exact-diff-report.json"))
+          with open("exact-changed-codes.csv",newline="") as f: rows=list(csv.DictReader(f))
+          assert r["affected_codes"]==len(rows)
+          assert r["changed_code_csv_sha256"]==hashlib.sha256(
+              open("exact-changed-codes.csv","rb").read()).hexdigest()
+          assert not r["production_eligible"] and not r["ni_other_verified"]
+          assert r["legal_payable_rates_produced"]==0
+          assert all(x["payable_rate"]=="" and x["production_eligible"]=="false" for x in rows)
+          print("Exact source changed commodity codes:",len(rows))
+          PY
+      - name: Save source code diffs and hashes, NEVER publish
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-source-exact-impact-${{ github.run_id }}
+          path: |
+            exact-changed-codes.csv
+            exact-diff-report.json
+          retention-days: 30
+          if-no-files-found: warn
