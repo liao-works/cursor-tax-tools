@@ -31,26 +31,167 @@ SQL="""CREATE TABLE tariffs (
  north_ireland_rate TEXT,north_ireland_url TEXT,other_rate TEXT,
  anti_dumping_rate TEXT,countervailing_rate TEXT,
  ni_anti_dumping_rate TEXT,ni_countervailing_rate TEXT,
- trade_remedy_details TEXT,last_updated DATETIME
+ trade_remedy_details TEXT,rate_options TEXT,last_updated DATETIME
 );
 CREATE INDEX idx_tariffs_description ON tariffs(description);
 """
 
 
+def _clean(value):
+    value="" if value is None else str(value).strip()
+    return "" if value in ("", "#NA", "N/A", "NULL", "null", "None", "[]", "{}") else value
+
+
+def _expression(value):
+    """Accept percentage, specific, compound and monetary duty expressions."""
+    return _clean(value)
+
+
 def simple_rate(rows):
-    """Multiple applicable or conditional measures are never guessed."""
+    """Return one exact unconditional expression, including specific/compound duty."""
     if not rows:
         return ""
     values=[]
     for expression, additional, conditions, excluded in rows:
-        expression=(expression or "").strip()
-        if (not PERCENT.fullmatch(expression) or
-                (additional or "").strip() or
-                (conditions or "").strip() not in ("","[]","null") or
-                (excluded or "").strip() not in ("","[]","null")):
+        expression=_expression(expression)
+        if (not expression or _clean(additional) or _clean(conditions) or _clean(excluded)):
             return ""
         values.append(expression)
-    return values[0] if len(values)==1 else ""
+    distinct=set(values)
+    return next(iter(distinct)) if len(distinct)==1 else ""
+
+
+def _gb_rate_options(rows, as_of):
+    options=[]
+    for kind, geo, expression, additional, additional_desc, conditions, excluded, start, end, raw in rows:
+        raw_obj=json.loads(raw) if isinstance(raw,str) else (raw or {})
+        option={
+            "region":"GB",
+            "measure_type":str(kind),
+            "measure_type_description":_clean(raw_obj.get("measure__type__description")),
+            "geography":_clean(geo),
+            "geography_description":_clean(raw_obj.get("measure__geographical_area__description")),
+            "expression":_expression(expression),
+            "additional_code":_clean(additional),
+            "additional_description":_clean(additional_desc or raw_obj.get("measure__additional_code__description")),
+            "conditions":_clean(conditions),
+            "excluded_areas":_clean(excluded),
+            "effective_start":_clean(start),
+            "effective_end":_clean(end),
+            "source_id":_clean(raw_obj.get("measure__sid")),
+        }
+        if not option["expression"]:
+            continue
+        option["special_use"] = option["measure_type"] == "105"
+        option["conditional"] = bool(option["additional_code"] or option["conditions"] or option["excluded_areas"] or option["special_use"])
+        option["china_applicable"] = (
+            option["geography"] == "CN" or
+            (option["geography"] == "1011" and "CN" not in option["excluded_areas"].upper())
+        )
+        option["applicability"] = (
+            "default" if option["measure_type"] == "103" and option["geography"] == "1011"
+            and not option["conditional"] else
+            "authorised_use" if option["special_use"] else
+            "conditional"
+        )
+        options.append(option)
+    return options
+
+
+def _xi_relation_map(document):
+    return {(str(x.get("type")), str(x.get("id"))):x
+            for x in document.get("included",[]) if isinstance(x,dict)}
+
+
+def _xi_refs(node, name):
+    value=((node.get("relationships") or {}).get(name) or {}).get("data")
+    if isinstance(value,dict):
+        return [value]
+    if isinstance(value,list):
+        return [x for x in value if isinstance(x,dict)]
+    return []
+
+
+def _xi_linked(index, refs):
+    return [index[(str(r.get("type")),str(r.get("id")))]
+            for r in refs if (str(r.get("type")),str(r.get("id"))) in index]
+
+
+def _xi_text(nodes):
+    values=[]
+    for node in nodes:
+        attrs=node.get("attributes") or {}
+        value=(attrs.get("description") or attrs.get("formatted_description")
+               or attrs.get("name") or attrs.get("base") or attrs.get("verbose_duty"))
+        if value:
+            values.append(str(value).strip())
+    return "; ".join(dict.fromkeys(values))
+
+
+def _xi_rate_options(rows, original_body, as_of):
+    document=json.loads(original_body)
+    index=_xi_relation_map(document)
+    options=[]
+    for kind, geo, expression, start, end, raw in rows:
+        if str(kind) not in ("103","105"):
+            continue
+        node=json.loads(raw) if isinstance(raw,str) else raw
+        linked_expr=_xi_linked(index,_xi_refs(node,"duty_expression"))
+        expr=_expression(expression)
+        if linked_expr:
+            attrs=linked_expr[0].get("attributes") or {}
+            expr=_expression(attrs.get("base") or attrs.get("verbose_duty") or expr)
+        additional=_xi_linked(index,_xi_refs(node,"additional_code"))
+        if not additional:
+            additional=_xi_linked(index,_xi_refs(node,"additional_codes"))
+        conditions=(_xi_linked(index,_xi_refs(node,"measure_conditions"))
+                    +_xi_linked(index,_xi_refs(node,"measure_condition_permutation_groups")))
+        excluded=_xi_linked(index,_xi_refs(node,"excluded_countries"))
+        geos=_xi_linked(index,_xi_refs(node,"geographical_area"))
+        type_nodes=_xi_linked(index,_xi_refs(node,"measure_type"))
+        additional_codes=[]
+        for item in additional:
+            attrs=item.get("attributes") or {}
+            code=_clean(attrs.get("code") or attrs.get("additional_code"))
+            if code:
+                additional_codes.append(code)
+        excluded_codes=[]
+        for item in excluded:
+            attrs=item.get("attributes") or {}
+            excluded_codes.append(_clean(attrs.get("code") or attrs.get("id")))
+        geo_id=_clean(geo or ((geos[0].get("attributes") or {}).get("id") if geos else ""))
+        option={
+            "region":"XI",
+            "measure_type":str(kind),
+            "measure_type_description":_xi_text(type_nodes),
+            "geography":geo_id,
+            "geography_description":_xi_text(geos),
+            "expression":expr,
+            "additional_code":",".join(dict.fromkeys(additional_codes)),
+            "additional_description":_xi_text(additional),
+            "conditions":_xi_text(conditions) or ("见官方措施条件" if conditions else ""),
+            "excluded_areas":",".join(dict.fromkeys(x for x in excluded_codes if x)),
+            "effective_start":_clean(start),
+            "effective_end":_clean(end),
+            "source_id":_clean(node.get("id")),
+        }
+        if not option["expression"]:
+            continue
+        option["special_use"]=option["measure_type"]=="105"
+        option["conditional"]=bool(option["additional_code"] or option["conditions"]
+                                    or option["excluded_areas"] or option["special_use"])
+        option["china_applicable"]=(
+            option["geography"]=="CN" or
+            (option["geography"]=="1011" and "CN" not in option["excluded_areas"].upper())
+        )
+        option["applicability"]=(
+            "default" if option["measure_type"]=="103" and option["geography"]=="1011"
+            and not option["conditional"] else
+            "authorised_use" if option["special_use"] else
+            "conditional"
+        )
+        options.append(option)
+    return options
 
 
 
@@ -191,12 +332,21 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                 ni_rate=""
                 gb_trade=[]
                 ni_trade=[]
+                gb_options=[]
+                xi_options=[]
                 if code in gb_codes:
                     source=list(gb_conn.execute("""SELECT expression,additional_code,conditions,excluded_areas
                        FROM measures WHERE region='GB' AND code=?
                         AND effective_status='active' AND measure_type = '103'
                         AND geography='1011' ORDER BY ordinal""",(code,)))
                     gb_rate=gb_default_rate(source)
+                    option_rows=list(gb_conn.execute("""SELECT measure_type,geography,expression,
+                         additional_code,additional_code,conditions,excluded_areas,
+                         effective_start,effective_end,raw_json
+                         FROM measures WHERE region='GB' AND code=?
+                         AND effective_status='active' AND measure_type IN ('103','105')
+                         ORDER BY ordinal""",(code,)))
+                    gb_options=_gb_rate_options(option_rows,gb["as_of"])
                     counts["gb_mfn_103_codes"]+=bool(source)
                     counts["gb_unconditional_candidates"]+=sum(
                         _blank(r[1]) and _blank(r[2]) and _blank(r[3]) for r in source)
@@ -221,6 +371,11 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                     if hashlib.sha256(raw).hexdigest()!=original[0]:
                         raise ValueError("XI raw response fingerprint mismatch for "+code)
                     ni_rate=xi_rate(source,xi["as_of"],raw)
+                    option_rows=list(xi_conn.execute("""SELECT measure_type,geography_id,
+                        duty_expression,effective_start,effective_end,raw_json
+                        FROM measures WHERE code=? AND measure_type IN ('103','105')
+                        ORDER BY ordinal""",(code,)))
+                    xi_options=_xi_rate_options(option_rows,raw,xi["as_of"])
                     counts["xi_percent"]+=bool(ni_rate)
                     trade_rows=list(xi_conn.execute("""SELECT measure_type,geography_id,
                         duty_expression,effective_start,effective_end,raw_json
@@ -236,14 +391,21 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                 counts["xi_anti_dumping_codes"]+=bool(ni_antidumping)
                 counts["xi_countervailing_codes"]+=bool(ni_countervailing)
                 details=json.dumps(gb_trade+ni_trade,ensure_ascii=False,separators=(",",":"))
-                dest.execute("INSERT INTO tariffs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",(
+                rate_options=json.dumps(gb_options+xi_options,ensure_ascii=False,separators=(",",":"))
+                counts["gb_rate_option_codes"]+=bool(gb_options)
+                counts["xi_rate_option_codes"]+=bool(xi_options)
+                counts["conditional_rate_options"]+=sum(
+                    1 for option in gb_options+xi_options if option["conditional"])
+                counts["china_applicable_rate_options"]+=sum(
+                    1 for option in gb_options+xi_options if option["china_applicable"])
+                dest.execute("INSERT INTO tariffs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(
                     code,gb_descr.get(code) or xi_descr.get(code) or "",
                     gb_rate,
                     "https://www.trade-tariff.service.gov.uk/uk/commodities/"+code if code in gb_codes else "",
                     ni_rate,
                     "https://www.trade-tariff.service.gov.uk/xi/commodities/"+code if code in xi_codes else "",
                     "", gb_antidumping, gb_countervailing,
-                    ni_antidumping, ni_countervailing, details, None))
+                    ni_antidumping, ni_countervailing, details, rate_options, None))
             dest.commit()
             if dest.execute("PRAGMA integrity_check").fetchone()[0]!="ok":
                 raise ValueError("Desktop SQLite integrity failed")
@@ -266,13 +428,17 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                            "gb_anti_dumping_codes":counts["gb_anti_dumping_codes"],
                            "gb_countervailing_codes":counts["gb_countervailing_codes"],
                            "xi_anti_dumping_codes":counts["xi_anti_dumping_codes"],
-                           "xi_countervailing_codes":counts["xi_countervailing_codes"]},
+                           "xi_countervailing_codes":counts["xi_countervailing_codes"],
+                           "gb_rate_option_codes":counts["gb_rate_option_codes"],
+                           "xi_rate_option_codes":counts["xi_rate_option_codes"],
+                           "conditional_rate_options":counts["conditional_rate_options"],
+                           "china_applicable_rate_options":counts["china_applicable_rate_options"]},
         "source_versions":{"GB":gb["version_or_catalogue"],
                            "GB_as_of":gb["as_of"].isoformat(),
                            "XI_as_of":xi["as_of"].isoformat(),
                            "XI_catalogue_sha256":xi["version_or_catalogue"]},
         "coverage":{"GB":len(gb_codes),"XI":len(xi_codes)},
-        "rate_scope":"China-origin ordinary 103/1011 MFN; GB/XI China or non-excluded Erga Omnes 551/552 anti-dumping and 553/554 countervailing; producer/code/conditions retained in trade_remedy_details, no assumed universal exporter rate",
+        "rate_scope":"China-origin ordinary 103/1011 plus all active 103/105 conditional/specific-use options; GB/XI China or non-excluded Erga Omnes 551/552 anti-dumping and 553/554 countervailing; exact source conditions, additional codes, exclusions and effective dates retained in rate_options/trade_remedy_details",
         "download_urls":{
             "primary":"https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/tariffs.db",
             "metadata":"https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/metadata.json"},
