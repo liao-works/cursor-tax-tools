@@ -1,8 +1,8 @@
 name: Target third-country duty (shadow only)
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '37 */4 * * *'
+  # Legacy four-hour shadow build was redundant with the current source watches.
+  # Keep only explicit operator inspection; no recurring noisy test run.
 permissions:
   contents: read
 jobs:
