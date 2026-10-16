@@ -80,8 +80,7 @@ def _gb_rate_options(rows, as_of):
             "effective_end":_clean(end),
             "source_id":_clean(raw_obj.get("measure__sid")),
         }
-        if not option["expression"]:
-            continue
+        option["expression_available"] = bool(option["expression"])
         option["special_use"] = option["measure_type"] == "105"
         option["conditional"] = bool(option["additional_code"] or option["conditions"] or option["excluded_areas"] or option["special_use"])
         option["china_applicable"] = (
@@ -175,8 +174,7 @@ def _xi_rate_options(rows, original_body, as_of):
             "effective_end":_clean(end),
             "source_id":_clean(node.get("id")),
         }
-        if not option["expression"]:
-            continue
+        option["expression_available"] = bool(option["expression"])
         option["special_use"]=option["measure_type"]=="105"
         option["conditional"]=bool(option["additional_code"] or option["conditions"]
                                     or option["excluded_areas"] or option["special_use"])
