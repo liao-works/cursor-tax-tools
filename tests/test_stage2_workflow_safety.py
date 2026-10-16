@@ -19,7 +19,7 @@ class StagedReadOnlySourceTests(unittest.TestCase):
     def test_weekly_full_sources_are_scheduled_read_only(self):
         for name, cron in (
             ("weekly-gb-full-source.yml", "0 1 * * 0"),
-            ("xi-public-full-measures.yml", "0 2 * * 0"),
+            ("xi-public-full-measures.yml", "0 2 * * *"),
         ):
             with self.subTest(name=name):
                 w=(WORKFLOWS/name).read_text()
