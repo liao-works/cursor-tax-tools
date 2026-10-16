@@ -5,6 +5,7 @@ from datetime import date
 from pathlib import Path
 
 from src.target_duty.china_trade_remedies import gb_remedies, xi_remedies, summary
+from src.target_duty.desktop_release_bundle import gb_default_rate, simple_rate, _gb_rate_options, _xi_rate_options
 
 TODAY = date(2026, 10, 16)
 
@@ -96,6 +97,54 @@ class ChinaTradeRemedyTests(unittest.TestCase):
         self.assertEqual(len(result),1)
         self.assertIn("条件",result[0]["conditions"])
         self.assertEqual(summary(result,"countervailing"),"按企业/条件适用（见详情）")
+
+    def test_standard_rate_accepts_specific_and_compound_duty_expressions(self):
+        self.assertEqual(gb_default_rate([("12.50 GBP / 100 kg", "", "", "")]), "12.50 GBP / 100 kg")
+        self.assertEqual(simple_rate([("12.50 GBP / 100 kg + 8%", "", "", "")]), "12.50 GBP / 100 kg + 8%")
+        self.assertEqual(gb_default_rate([("8%", "", "", ""), ("5%", "", "", "")]), "")
+
+    def test_gb_conditional_rate_is_preserved_as_a_rate_option(self):
+        rows=[("103","1011","8%","","","","","2026-01-01","",json.dumps({
+            "measure__sid":"1","measure__type__description":"Third country duty",
+            "measure__geographical_area__description":"ERGA OMNES"})),
+              ("105","1011","0%","C123","","authorised-use-certificate","","2026-01-01","",json.dumps({
+            "measure__sid":"2","measure__type__description":"Non preferential duty under authorised use",
+            "measure__geographical_area__description":"ERGA OMNES"}))]
+        options=_gb_rate_options(rows,TODAY)
+        self.assertEqual(len(options),2)
+        self.assertEqual(options[0]["applicability"],"default")
+        self.assertTrue(options[1]["conditional"])
+        self.assertTrue(options[1]["special_use"])
+        self.assertEqual(options[1]["additional_code"],"C123")
+
+    def test_xi_conditional_rate_resolves_linked_expression_and_condition(self):
+        doc={"included":[
+            {"type":"duty_expression","id":"d","attributes":{"base":"7.5 %"}},
+            {"type":"measure_condition","id":"c","attributes":{"description":"certificate required"}},
+            {"type":"additional_code","id":"a","attributes":{"code":"C123","description":"Authorised exporter"}},
+            {"type":"geographical_area","id":"1011","attributes":{"description":"ERGA OMNES"}},
+        ]}
+        node={"type":"measure","id":"m","relationships":{
+            "duty_expression":{"data":{"type":"duty_expression","id":"d"}},
+            "measure_conditions":{"data":[{"type":"measure_condition","id":"c"}]},
+            "additional_code":{"data":{"type":"additional_code","id":"a"}},
+            "geographical_area":{"data":[{"type":"geographical_area","id":"1011"}]},
+        }}
+        rows=[("103","1011","", "2026-01-01","",json.dumps(node))]
+        options=_xi_rate_options(rows,json.dumps(doc),TODAY)
+        self.assertEqual(options[0]["expression"],"7.5 %")
+        self.assertEqual(options[0]["additional_code"],"C123")
+        self.assertIn("certificate required",options[0]["conditions"])
+        self.assertTrue(options[0]["conditional"])
+        self.assertTrue(options[0]["china_applicable"])
+
+    def test_conditional_row_without_expression_is_still_retained(self):
+        rows=[("103","1011","","","","certificate required","","2026-01-01","",json.dumps({
+            "measure__sid":"3","measure__type__description":"Third country duty"}))]
+        options=_gb_rate_options(rows,TODAY)
+        self.assertEqual(len(options),1)
+        self.assertFalse(options[0]["expression_available"])
+        self.assertEqual(options[0]["conditions"],"certificate required")
 
     def test_desktop_schema_wires_all_four_columns_and_detail(self):
         s=(Path(__file__).resolve().parents[1]/
