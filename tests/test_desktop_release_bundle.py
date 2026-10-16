@@ -69,7 +69,7 @@ class DesktopReleaseBundleTests(unittest.TestCase):
                   json.dumps({"relationships":{}}))
         authorised=("105","1011","0%","2026-01-01",None,
                     json.dumps({"relationships":{
-                        "measure_conditions":{"data":[{"type":"measure_condition","id":"N990"}]}}))
+                        "measure_conditions":{"data":[{"type":"measure_condition","id":"N990"}]}}}))
         channel_islands=("103","1080","0%","2026-01-01",None,
                          json.dumps({"relationships":{}}))
         self.assertEqual(xi_rate([ordinary,authorised,channel_islands],day),"10%")
