@@ -1,11 +1,6 @@
 name: XI complete public chapter inventory audit (UNTRUSTED source)
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/xi-public-full-catalogue-audit.yml'
-      - 'src/target_duty/xi_catalogue.py'
-      - 'tests/test_xi_catalogue.py'
   workflow_dispatch:
 
 permissions:

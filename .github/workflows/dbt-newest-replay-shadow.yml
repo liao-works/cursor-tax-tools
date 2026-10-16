@@ -1,17 +1,6 @@
 name: Newest DBT GB replay candidate (manual, NEVER publish)
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/dbt-newest-replay-shadow.yml'
-      - 'src/target_duty/gb_full_measures.py'
-      - 'src/target_duty/gb_compact_review.py'
-      - 'src/target_duty/gb_review_diff.py'
-      - 'src/target_duty/gb_source_ledger.py'
-      - 'tests/test_gb_source_ledger.py'
-      - 'src/target_duty/dbt_version_discovery.py'
-      - 'src/target_duty/catalog.py'
-      - 'src/target_duty/build.py'
   push:
     branches: [feat/parallel-scraper]
     paths: [ops/gb-incremental-review-launch.txt]

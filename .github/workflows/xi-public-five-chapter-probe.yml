@@ -1,17 +1,7 @@
 name: XI expanded public source probe (five chapters, review only)
 
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/xi-public-five-chapter-probe.yml'
-      - 'src/target_duty/xi_catalogue.py'
-      - 'src/target_duty/xi_measure_crawl.py'
-      - 'src/target_duty/xi_acceptance.py'
-      - 'src/target_duty/xi_coverage_receipt.py'
-      - 'src/target_duty/xi_run_plan.py'
-      - 'src/target_duty/xi_source_lookup.py'
-      - 'tests/test_xi_source_lookup.py'
-
+  workflow_dispatch:
 permissions:
   contents: read
 

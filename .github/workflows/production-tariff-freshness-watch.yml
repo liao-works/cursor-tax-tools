@@ -1,10 +1,5 @@
 name: Production latest-data integrity and 48h freshness watch (READ ONLY)
 on:
-  pull_request:
-    paths:
-      - '.github/workflows/production-tariff-freshness-watch.yml'
-      - 'src/target_duty/production_freshness_watch.py'
-      - 'tests/test_production_freshness_watch.py'
   schedule:
     - cron: '0 0 * * *'
   workflow_dispatch:

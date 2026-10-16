@@ -1,27 +1,6 @@
 name: XI official chapter source canary (untrusted public shadow)
 
 on:
-  pull_request:
-    paths:
-      - 'src/target_duty/xi_catalogue.py'
-      - 'tests/test_xi_catalogue.py'
-      - 'src/target_duty/xi_measure_crawl.py'
-      - 'tests/test_xi_measure_crawl.py'
-      - 'src/target_duty/xi_drift_guard.py'
-      - 'tests/test_xi_drift_guard.py'
-      - 'src/target_duty/xi_acceptance.py'
-      - 'tests/test_xi_acceptance.py'
-      - 'src/target_duty/xi_run_plan.py'
-      - 'tests/test_xi_run_plan.py'
-      - 'src/target_duty/xi_coverage_receipt.py'
-      - 'tests/test_xi_coverage_receipt.py'
-      - 'src/target_duty/xi_checkpoint_chain.py'
-      - 'tests/test_xi_checkpoint_chain.py'
-      - 'src/target_duty/xi_archive.py'
-      - 'tests/test_xi_archive.py'
-      - 'src/target_duty/xi_origin_compare.py'
-      - 'tests/test_xi_origin_compare.py'
-      - '.github/workflows/xi-chapter-canary.yml'
   workflow_dispatch:
 
 permissions:

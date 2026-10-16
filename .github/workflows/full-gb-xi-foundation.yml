@@ -1,98 +1,13 @@
-name: Full GB and independent XI foundation tests (shadow)
+name: CI · GB/XI source and safety tests
 
 on:
+  # One offline PR suite; prevent dozens of duplicate single-topic Actions.
   pull_request:
     paths:
-      - 'src/target_duty/gb_full_measures.py'
-      - 'tests/test_gb_full_measures.py'
-      - 'src/target_duty/gb_compact_review.py'
-      - 'tests/test_gb_compact_review.py'
-      - 'src/target_duty/gb_review_diff.py'
-      - 'tests/test_gb_review_diff.py'
-      - 'src/target_duty/dbt_source_health.py'
-      - 'tests/test_dbt_source_health.py'
-      - 'src/target_duty/xi_catalogue.py'
-      - 'tests/test_xi_catalogue.py'
-      - 'src/target_duty/xi_measure_crawl.py'
-      - 'src/target_duty/xi_duty_projection.py'
-      - 'src/target_duty/xi_condition_evidence.py'
-      - 'src/target_duty/xi_live_date_canary.py'
-      - 'src/target_duty/final_release_gate.py'
-      - 'src/target_duty/legacy_publish_guard.py'
-      - 'src/target_duty/production_freshness_watch.py'
-      - 'src/target_duty/daily_official_change_watch.py'
-      - 'src/target_duty/full_source_delta_scope.py'
-      - 'src/target_duty/gb_compact_impact_queue.py'
-      - 'tests/test_gb_compact_impact_queue.py'
-      - 'src/target_duty/xi_date_impact_queue.py'
-      - 'src/target_duty/xi_targeted_delta_capture.py'
-      - 'tests/test_xi_targeted_delta_capture.py'
-      - '.github/workflows/xi-targeted-delta-refetch.yml'
-      - 'tests/test_xi_date_impact_queue.py'
-      - '.github/workflows/xi-date-impact-queue.yml'
-      - '.github/workflows/dbt-newest-replay-shadow.yml'
-      - 'tests/test_full_source_delta_scope.py'
-      - 'src/target_duty/xi_daily_baseline.py'
-      - 'tests/test_xi_daily_baseline.py'
-      - 'tests/test_daily_official_change_watch.py'
+      - 'src/target_duty/**'
+      - 'tests/**'
+      - '.github/workflows/**'
       - 'ops/xi-daily-canary-baseline-20261014.json'
-      - '.github/workflows/daily-official-source-watch.yml'
-      - '.github/workflows/weekly-gb-full-source.yml'
-      - 'tests/test_weekly_full_refresh.py'
-      - 'tests/test_production_freshness_watch.py'
-      - '.github/workflows/production-tariff-freshness-watch.yml'
-      - 'tests/test_legacy_publish_guard.py'
-      - '.github/workflows/scrape-tariff.yml'
-      - '.github/workflows/scrape-tariff-parallel.yml'
-      - '.github/workflows/scrape-tariff-parallel-improved.yml'
-      - 'tests/test_final_release_gate.py'
-      - 'tests/test_xi_live_date_canary.py'
-      - '.github/workflows/xi-live-date-canary.yml'
-      - 'tests/test_xi_condition_evidence.py'
-      - '.github/workflows/xi-condition-source-review.yml'
-      - 'src/target_duty/xi_applicability_review.py'
-      - 'tests/test_xi_applicability_review.py'
-      - '.github/workflows/xi-duty-applicability-review.yml'
-      - 'tests/test_xi_duty_projection.py'
-      - 'tests/test_xi_measure_crawl.py'
-      - 'src/target_duty/xi_drift_guard.py'
-      - 'tests/test_xi_drift_guard.py'
-      - 'src/target_duty/xi_acceptance.py'
-      - 'tests/test_xi_acceptance.py'
-      - 'src/target_duty/xi_run_plan.py'
-      - 'src/target_duty/xi_full_capture.py'
-      - 'tests/test_xi_full_capture.py'
-      - 'src/target_duty/xi_parallel_capture.py'
-      - 'tests/test_xi_parallel_capture.py'
-      - 'src/target_duty/xi_public_full_capture.py'
-      - 'tests/test_xi_public_full_capture.py'
-      - 'src/target_duty/xi_public_gap_ledger.py'
-      - 'tests/test_xi_public_gap_ledger.py'
-      - '.github/workflows/xi-public-full-measures.yml'
-      - '.github/workflows/xi-full-managed-one-shot.yml'
-      - 'src/target_duty/gb_xi_coverage_matrix.py'
-      - 'tests/test_gb_xi_coverage_matrix.py'
-      - 'tests/test_xi_run_plan.py'
-      - 'tests/test_xi_source_first_workflow.py'
-      - 'src/target_duty/xi_source_lookup.py'
-      - 'tests/test_xi_source_lookup.py'
-      - '.github/workflows/xi-public-five-chapter-probe.yml'
-      - 'src/target_duty/xi_coverage_receipt.py'
-      - 'tests/test_xi_coverage_receipt.py'
-      - 'src/target_duty/xi_checkpoint_chain.py'
-      - 'tests/test_xi_checkpoint_chain.py'
-      - 'src/target_duty/xi_archive.py'
-      - 'tests/test_xi_archive.py'
-      - 'src/target_duty/xi_s3_vault.py'
-      - 'tests/test_xi_s3_vault.py'
-      - 'src/target_duty/xi_origin_compare.py'
-      - 'tests/test_xi_origin_compare.py'
-      - 'src/target_duty/xi_merge.py'
-      - 'tests/test_xi_merge.py'
-      - 'src/target_duty/xi_frozen_catalogue.py'
-      - 'tests/test_xi_frozen_catalogue.py'
-      - '.github/workflows/xi-managed-coverage.yml'
-      - '.github/workflows/full-gb-xi-foundation.yml'
   workflow_dispatch:
 
 permissions:
@@ -183,5 +98,27 @@ jobs:
           python -m src.target_duty.legacy_publish_guard --directory .github/workflows
       - name: Four-dimension final data release readiness fail-closed injection tests
         run: python -m unittest discover -s tests -p 'test_final_release_gate.py' -v
-      - name: Existing region evidence contract regression
-        run: python -m unittest discover -s tests -p 'test_region_measures.py' -v
+      - name: Source changes, workflow guards and new XI 16-shard retry contracts
+        run: |
+          python -m unittest discover -s tests -p 'test_stage2_workflow_safety.py' -v
+          python -m unittest discover -s tests -p 'test_stage3_workflow_safety.py' -v
+          python -m unittest discover -s tests -p 'test_source_refresh_closure.py' -v
+          python -m unittest discover -s tests -p 'test_xi_canary_delta_refetch.py' -v
+          python -m unittest discover -s tests -p 'test_dbt_version_discovery.py' -v
+          python -m unittest discover -s tests -p 'test_gb_source_ledger.py' -v
+      - name: Commodity and catalogue parser contracts formerly duplicated in PR Actions
+        run: |
+          python -m unittest discover -s tests -p 'test_catalog.py' -v
+          python -m unittest discover -s tests -p 'test_gap_measures.py' -v
+          python -m unittest discover -s tests -p 'test_region_measures.py' -v
+          python -m unittest discover -s tests -p 'test_hmrc_bulk_feasibility.py' -v
+      - name: Legacy focused third-country source fixture tests
+        run: |
+          python -m pip install 'cryptography==46.0.4'
+          python -m unittest discover -s tests -p 'test_target_duty.py' -v
+          python -m unittest discover -s tests -p 'test_xi_probe.py' -v
+          python -m unittest discover -s tests -p 'test_xi_audit.py' -v
+          python -m unittest discover -s tests -p 'test_xi_review_gate.py' -v
+          python -m unittest discover -s tests -p 'test_target_reconcile.py' -v
+          python -m unittest discover -s tests -p 'test_preview_bundle.py' -v
+          python -m unittest discover -s tests -p 'test_signed_review.py' -v

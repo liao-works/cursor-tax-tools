@@ -1,19 +1,6 @@
 name: Pinned GB source and compact review validation (evidence only)
 
 on:
-  pull_request:
-    paths:
-      - 'src/target_duty/gb_full_measures.py'
-      - 'tests/test_gb_full_measures.py'
-      - 'src/target_duty/gb_compact_review.py'
-      - 'tests/test_gb_compact_review.py'
-      - 'src/target_duty/gb_review_diff.py'
-      - 'src/target_duty/gb_source_ledger.py'
-      - 'tests/test_gb_source_ledger.py'
-      - 'tests/test_gb_review_diff.py'
-      - 'src/target_duty/dbt_source_health.py'
-      - 'tests/test_dbt_source_health.py'
-      - '.github/workflows/full-gb-official-validation.yml'
   workflow_dispatch:
 
 permissions:
