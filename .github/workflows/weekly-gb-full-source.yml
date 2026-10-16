@@ -1,5 +1,10 @@
 name: Weekly GB full official source refresh and pinned replay (SHADOW ONLY)
 on:
+  # Explicit operator launch: one commit to this control file triggers BOTH full raw-source audits.
+  # Read-only: no production rate release or desktop database replacement.
+  push:
+    branches: [feat/parallel-scraper]
+    paths: ['ops/manual-full-source-run.txt']
   # Every Sunday 01:00 UTC / 09:00 Singapore; source-only, never publish.
   schedule:
     - cron: '0 1 * * 0'
