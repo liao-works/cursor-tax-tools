@@ -159,6 +159,7 @@ def _lookup_table(table, rows, headers):
             "code": _clean(row.get(code)) if code else "",
             "abbreviation": _clean(row.get(abbreviation)) if abbreviation else "",
             "description": _clean(row.get(description)) if description else "",
+            "certificate_type_id": _clean(row.get("certificate_type_id")) if "certificate_type_id" in row else "",
         }
         for key in (item["id"], item["sid"]):
             if key:
@@ -381,7 +382,13 @@ def build_condition_source(version, gb_db, output_path, work_dir=None):
             code_record = _ref(lookups["measure-condition-codes"], row.get(c_code_id) if c_code_id else "")
             action_record = _ref(lookups["measure-actions"], row.get(c_action_id) if c_action_id else "")
             cert_record = _ref(lookups["certificates"], row.get(c_cert_id) if c_cert_id else "")
-            cert_type_record = _ref(lookups["certificate-types"], row.get(c_cert_type_id) if c_cert_type_id else "")
+            cert_type_id = _clean(row.get(c_cert_type_id)) if c_cert_type_id else cert_record.get("certificate_type_id","")
+            cert_type_record = _ref(lookups["certificate-types"], cert_type_id)
+            # The official certificate code is (certificate type SID) + (certificate SID).
+            # Preserve its identifier only if both source links resolve.
+            certificate_code = _clean(row.get(c_cert_direct)) if c_cert_direct else ""
+            if not certificate_code and cert_record and cert_type_record:
+                certificate_code = _clean(cert_type_record.get("sid")) + _clean(cert_record.get("sid"))
             direct_code = _clean(row.get(c_code_direct)) if c_code_direct else ""
             direct_action = _clean(row.get(c_action_direct)) if c_action_direct else ""
             direct_cert = _clean(row.get(c_cert_direct)) if c_cert_direct else ""
@@ -397,7 +404,7 @@ def build_condition_source(version, gb_db, output_path, work_dir=None):
                 "condition": code_record.get("description", ""),
                 "action_code": direct_action or action_record.get("code", ""),
                 "action": action_record.get("description", ""),
-                "certificate_code": direct_cert or cert_record.get("code", ""),
+                "certificate_code": certificate_code,
                 "certificate_description": cert_record.get("description", ""),
                 "certificate_type_code": direct_cert_type or cert_type_record.get("code", ""),
                 "certificate_type_description": cert_type_record.get("description", ""),
@@ -414,7 +421,7 @@ def build_condition_source(version, gb_db, output_path, work_dir=None):
                 condition["unresolved_relationships"].append({"relationship":"condition_code","id":_clean(row.get(c_code_id))})
             if c_action_id and _clean(row.get(c_action_id)) and not (direct_action or action_record.get("code")):
                 condition["unresolved_relationships"].append({"relationship":"action","id":_clean(row.get(c_action_id))})
-            if c_cert_id and _clean(row.get(c_cert_id)) and not (direct_cert or cert_record.get("code")):
+            if c_cert_id and _clean(row.get(c_cert_id)) and not certificate_code:
                 condition["unresolved_relationships"].append({"relationship":"certificate","id":_clean(row.get(c_cert_id))})
             for key in (pk, sid):
                 if key:
