@@ -49,6 +49,21 @@ jobs:
           if cov["condition_rows_with_rate_expression"]==0:
               raise SystemExit("No official condition-rate expressions linked")
           PY
+      - name: Diagnose published CSV field maps without inferring company rates
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import csv,glob,json
+          from pathlib import Path
+          for path in sorted(glob.glob("gb-conditions/raw/*.csv")):
+              with open(path,encoding="utf-8-sig",newline="") as stream:
+                  reader=csv.DictReader(stream)
+                  print("OFFICIAL_TABLE_HEADER",Path(path).stem,json.dumps(reader.fieldnames))
+                  for row in reader:
+                      print("OFFICIAL_TABLE_EXAMPLE",Path(path).stem,json.dumps(row,ensure_ascii=False)[:1200])
+                      break
+          PY
       - name: Save read-only source evidence for independent review
         if: always()
         uses: actions/upload-artifact@v4
