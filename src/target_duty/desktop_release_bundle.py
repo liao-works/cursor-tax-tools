@@ -205,26 +205,124 @@ def _xi_rate_options(rows, original_body, as_of, china_groups=None, area_descrip
     document=json.loads(original_body)
     index=_xi_relation_map(document)
     options=[]
+
+    def unique_refs(refs):
+        seen=set()
+        result=[]
+        for ref in refs:
+            key=(str(ref.get("type")),str(ref.get("id")))
+            if key not in seen:
+                seen.add(key)
+                result.append(ref)
+        return result
+
+    def condition_tree(refs, stack=()):
+        result=[]
+        for ref in refs:
+            ref_type=str(ref.get("type") or "")
+            ref_id=str(ref.get("id") or "")
+            key=(ref_type,ref_id)
+            node=index.get(key)
+            if node is None:
+                result.append({"id":ref_id,"type":ref_type,"resolved":False,"description":""})
+                continue
+            attrs=node.get("attributes") or {}
+            description=_xi_text([node])
+            item={"id":ref_id,"type":ref_type,"resolved":True,
+                  "description":description,"attributes":attrs}
+            if key not in stack:
+                children=[]
+                rels=node.get("relationships") or {}
+                for name in sorted(rels):
+                    if "condition" not in name.lower():
+                        continue
+                    child_refs=_xi_refs(node,name)
+                    if child_refs:
+                        children.extend(condition_tree(child_refs,stack+(key,)))
+                if children:
+                    item["children"]=children
+            result.append(item)
+        return result
+
+    def condition_labels(items):
+        labels=[]
+        for item in items:
+            if item.get("description"):
+                labels.append(item["description"])
+            labels.extend(condition_labels(item.get("children") or []))
+        return list(dict.fromkeys(labels))
+
     for kind, geo, expression, start, end, raw in rows:
-        # The caller supplies all non-remedy measure types for China/Erga
-        # Omnes, including expired/future rows. Keep each source row visible.
+        # Retain every official non-remedy measure in China's known geographic
+        # scope, including unresolved links and every effective-date state.
         node=json.loads(raw) if isinstance(raw,str) else raw
         rel=node.get("relationships") or {}
-        linked_expr=_xi_linked(index,_xi_refs(node,"duty_expression"))
-        expr=_expression(expression)
-        if linked_expr:
-            attrs=linked_expr[0].get("attributes") or {}
-            expr=_expression(attrs.get("base") or attrs.get("verbose_duty") or expr)
-        additional=_xi_linked(index,_xi_refs(node,"additional_code"))
-        if not additional:
-            additional=_xi_linked(index,_xi_refs(node,"additional_codes"))
-        conditions=(_xi_linked(index,_xi_refs(node,"measure_conditions"))
-                    +_xi_linked(index,_xi_refs(node,"measure_condition_permutation_groups")))
-        excluded_refs=(_xi_refs(node,"excluded_countries")
-                       +_xi_refs(node,"excluded_geographical_areas"))
+
+        expression_refs=unique_refs(_xi_refs(node,"duty_expression"))
+        expression_options=[]
+        unresolved=[]
+        for ref in expression_refs:
+            ref_type=str(ref.get("type") or "")
+            ref_id=str(ref.get("id") or "")
+            linked=index.get((ref_type,ref_id))
+            if linked is None:
+                expression_options.append({"id":ref_id,"type":ref_type,
+                                           "expression":"","resolved":False})
+                unresolved.append({"relationship":"duty_expression","id":ref_id})
+                continue
+            attrs=linked.get("attributes") or {}
+            expr_value=_expression(attrs.get("base") or attrs.get("verbose_duty")
+                                   or attrs.get("formatted_duty") or attrs.get("duty_amount"))
+            expression_options.append({"id":ref_id,"type":ref_type,
+                                       "expression":expr_value,"resolved":bool(expr_value),
+                                       "attributes":attrs})
+            if not expr_value:
+                unresolved.append({"relationship":"duty_expression","id":ref_id})
+        scalar_expression=_expression(expression)
+        if len(expression_refs)>1:
+            expr=""
+            expression_resolution="multiple"
+        elif len(expression_refs)==1:
+            expr=expression_options[0]["expression"] or scalar_expression
+            expression_resolution=("resolved_single" if expression_options[0]["resolved"]
+                                   else "unresolved_link")
+        elif scalar_expression:
+            expr=scalar_expression
+            expression_resolution="source_scalar"
+            expression_options=[{"id":"","type":"source_measure_field",
+                                 "expression":scalar_expression,"resolved":True}]
+        else:
+            expr=""
+            expression_resolution="missing"
+
+        additional_refs=unique_refs(
+            _xi_refs(node,"additional_code")+_xi_refs(node,"additional_codes"))
+        additional=_xi_linked(index,additional_refs)
+        condition_refs=unique_refs(
+            _xi_refs(node,"measure_conditions")
+            +_xi_refs(node,"measure_condition_permutation_groups"))
+        conditions=_xi_linked(index,condition_refs)
+        condition_details=condition_tree(condition_refs)
+        for item in additional_refs:
+            if (str(item.get("type")),str(item.get("id"))) not in index:
+                unresolved.append({"relationship":"additional_code","id":str(item.get("id") or "")})
+        for item in condition_refs:
+            if (str(item.get("type")),str(item.get("id"))) not in index:
+                unresolved.append({"relationship":"measure_conditions","id":str(item.get("id") or "")})
+
+        excluded_refs=unique_refs(
+            _xi_refs(node,"excluded_countries")
+            +_xi_refs(node,"excluded_geographical_areas"))
         excluded=_xi_linked(index,excluded_refs)
-        geos=_xi_linked(index,_xi_refs(node,"geographical_area"))
-        type_nodes=_xi_linked(index,_xi_refs(node,"measure_type"))
+        geo_refs=unique_refs(_xi_refs(node,"geographical_area"))
+        geos=_xi_linked(index,geo_refs)
+        type_refs=unique_refs(_xi_refs(node,"measure_type"))
+        type_nodes=_xi_linked(index,type_refs)
+        for name, refs in (("geographical_area",geo_refs),("measure_type",type_refs)):
+            for ref in refs:
+                if (str(ref.get("type")),str(ref.get("id"))) not in index:
+                    unresolved.append({"relationship":name,"id":str(ref.get("id") or "")})
+
         additional_codes=[]
         for item in additional:
             attrs=item.get("attributes") or {}
@@ -234,7 +332,9 @@ def _xi_rate_options(rows, original_body, as_of, china_groups=None, area_descrip
         excluded_codes=[]
         for item in excluded:
             attrs=item.get("attributes") or {}
-            code=attrs.get("code") or attrs.get("country_code") or attrs.get("geographical_area_id") or attrs.get("id") or item.get("id")
+            code=(attrs.get("code") or attrs.get("country_code")
+                  or attrs.get("geographical_area_id") or attrs.get("area_id")
+                  or attrs.get("id") or item.get("id"))
             excluded_codes.append(_clean(code))
         linked_excluded_ids={str(x.get("id")) for x in excluded}
         unresolved_exclusion=False
@@ -243,51 +343,98 @@ def _xi_rate_options(rows, original_body, as_of, china_groups=None, area_descrip
             if ref_id in linked_excluded_ids:
                 continue
             excluded_codes.append(ref_id)
-            # Unresolved non-country IDs could be groups containing CN. Do not
-            # label the measure China-applicable until the pinned tree resolves it.
+            unresolved.append({"relationship":"excluded_geographical_area","id":ref_id})
             if (ref_id not in (area_descriptions or {})
-                    and not (len(ref_id)==2 and ref_id.isalpha())):
+                    and ref_id not in set(china_groups or ())
+                    and not (len(ref_id)==2 and ref_id.isalpha())
+                    and ref_id not in ("CN","1011")):
                 unresolved_exclusion=True
-        geo_id=_clean(geo or ((geos[0].get("attributes") or {}).get("code")
-                              or (geos[0].get("attributes") or {}).get("id") if geos else ""))
+
+        geo_options=[]
+        for ref in geo_refs:
+            ref_id=str(ref.get("id") or "")
+            linked=index.get((str(ref.get("type")),ref_id))
+            if linked is None:
+                code=ref_id
+                desc=_clean((area_descriptions or {}).get(ref_id,""))
+                resolved=bool(desc or ref_id in set(china_groups or ()) or ref_id in ("CN","1011")
+                              or (len(ref_id)==2 and ref_id.isalpha()))
+                geo_options.append({"id":ref_id,"code":code,"description":desc,"resolved":resolved})
+            else:
+                attrs=linked.get("attributes") or {}
+                code=_clean(attrs.get("code") or attrs.get("country_code")
+                            or attrs.get("geographical_area_id") or attrs.get("area_id")
+                            or attrs.get("id") or ref_id)
+                geo_options.append({"id":ref_id,"code":code,
+                                    "description":_xi_text([linked]),"resolved":True})
+        geo_id=_clean(geo or (geo_options[0]["code"] if geo_options else ""))
+        scope_ids=[item["code"] for item in geo_options if item.get("code")]
+        if geo_id and geo_id not in scope_ids:
+            scope_ids.insert(0,geo_id)
+        if not scope_ids:
+            scope_ids=[geo_id] if geo_id else []
+        excluded_string=",".join(dict.fromkeys(x for x in excluded_codes if x))
+        china_applicable=(not unresolved_exclusion and any(
+            _china_applicable(scope,excluded_string,china_groups) for scope in scope_ids))
+        condition_description="; ".join(condition_labels(condition_details))
+        if not condition_description and condition_refs:
+            condition_description="见官方措施条件（关联记录：" + ", ".join(
+                str(x.get("id") or "") for x in condition_refs) + "）"
+        additional_description=_xi_text(additional)
+        if additional_refs and not additional_description and not additional_codes:
+            additional_description="官方附加代码关联记录尚未解析"
+
         option={
             "region":"XI",
             "measure_type":str(kind),
             "measure_type_description":_xi_text(type_nodes),
             "geography":geo_id,
-            "geography_description":_xi_text(geos) or _clean((area_descriptions or {}).get(_clean(geo), "")),
+            "geography_ids":list(dict.fromkeys(scope_ids)),
+            "geography_options":geo_options,
+            "geography_description":("; ".join(dict.fromkeys(
+                x["description"] for x in geo_options if x.get("description")))
+                or _clean((area_descriptions or {}).get(geo_id,""))),
             "expression":expr,
+            "expression_options":expression_options,
+            "expression_count":len(expression_refs) if expression_refs else (1 if scalar_expression else 0),
+            "expression_resolution":expression_resolution,
             "additional_code":",".join(dict.fromkeys(additional_codes)),
-            "additional_description":_xi_text(additional),
-            "conditions":_xi_text(conditions) or ("见官方措施条件" if conditions else ""),
-            "excluded_areas":",".join(dict.fromkeys(x for x in excluded_codes if x)),
+            "additional_description":additional_description,
+            "conditions":condition_description,
+            "condition_details":condition_details,
+            "excluded_areas":excluded_string,
             "effective_start":_clean(start),
             "effective_end":_clean(end),
-            "effective_status":_effective_status(start, end, as_of),
-            "condition_ids":[_clean(x.get("id")) for x in conditions if _clean(x.get("id"))],
-            "additional_code_ids":[_clean(x.get("id")) for x in additional if _clean(x.get("id"))],
+            "effective_status":_effective_status(start,end,as_of),
+            "condition_ids":[str(x.get("id") or "") for x in condition_refs if str(x.get("id") or "")],
+            "additional_code_ids":[str(x.get("id") or "") for x in additional_refs if str(x.get("id") or "")],
             "source_id":_clean(node.get("id")),
+            "unresolved_relationships":unresolved,
             "source_relationship_ids":{
                 name:[_clean(x.get("id")) for x in _xi_refs(node,name) if _clean(x.get("id"))]
                 for name in sorted(rel)
             },
         }
-        option["expression_available"] = bool(option["expression"])
+        option["expression_available"]=any(bool(item.get("expression")) for item in expression_options)
+        option["single_expression_available"]=bool(expr) and expression_resolution!="multiple"
         option["special_use"]=option["measure_type"]=="105"
-        option["china_applicable"]=(not unresolved_exclusion and
-                                     _china_applicable(option["geography"], option["excluded_areas"], china_groups))
-        option["conditional"]=bool(option["additional_code"] or option["conditions"]
-                                    or option["special_use"])
+        option["china_applicable"]=china_applicable
+        # An unresolved condition/code/expression link must never make an
+        # apparently unconditional default; preserve and surface it for review.
+        option["conditional"]=bool(
+            additional_refs or condition_refs or option["additional_code"]
+            or option["conditions"] or option["special_use"])
+        unresolved_expression=expression_resolution in ("multiple","unresolved_link","missing")
         option["applicability"]=(
             "default" if option["measure_type"]=="103" and option["china_applicable"]
-            and not option["conditional"] else
+            and not option["conditional"] and not unresolved_expression else
             "authorised_use" if option["special_use"] else
-            "other_measure" if option["measure_type"] not in ("103", "105") else
+            "unresolved" if unresolved or unresolved_expression else
+            "other_measure" if option["measure_type"] not in ("103","105") else
             "conditional"
         )
         options.append(option)
     return options
-
 
 
 def _blank(value):
