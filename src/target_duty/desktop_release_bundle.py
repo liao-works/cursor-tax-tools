@@ -420,7 +420,8 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
     xi=_source(xi_db,region="XI")
     geo_path=Path(geo_memberships_path).resolve()
     geo_report_path=Path(geo_memberships_report_path).resolve()
-    if geo_path in input_paths or geo_report_path in input_paths or geo_path==geo_report_path:
+    if (geo_path in input_paths or geo_report_path in input_paths or geo_path==geo_report_path
+            or geo_path in (out,meta) or geo_report_path in (out,meta)):
         raise ValueError("Geographical membership evidence must be separate source files")
     geo_payload=geo_path.read_bytes()
     geo=inspect_geo_memberships(geo_payload,gb["as_of"])
