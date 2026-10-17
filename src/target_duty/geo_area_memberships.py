@@ -18,7 +18,7 @@ from pathlib import Path
 
 BASE = ("https://data.api.trade.gov.uk/v1/datasets/uk-tariff-2021-01-01/"
         "versions/{version}/tables/geo-area-memberships/data?format=csv")
-VERSION = re.compile(r"v[0-9]+(?:\\.[0-9]+)*\\Z")
+VERSION = re.compile(r"v[0-9]+(?:\.[0-9]+)*\Z")
 NULLS = {"", "#NA", "N/A", "NA", "None", "null", "NULL", "[]"}
 
 
