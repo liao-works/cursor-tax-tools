@@ -199,6 +199,10 @@ def _format_component(component):
     amount = _clean(component.get("duty_amount"))
     expression_id = _clean(component.get("duty_expression_id"))
     description = _clean(component.get("duty_expression_description"))
+    # The operator description is not a taxable amount: blank source amount
+    # must not turn into a displayable rate such as "% or amount".
+    if not amount:
+        return ""
     money = _clean(component.get("monetary_unit_code"))
     unit = _clean(component.get("measurement_unit_code"))
     qualifier = _clean(component.get("measurement_unit_qualifier_code"))
@@ -234,6 +238,8 @@ def _format_expression(components):
     rendered = []
     for index, component in enumerate(ordered):
         part = _format_component(component)
+        if not part:
+            return ""  # Partial compound charge cannot be a verified expression.
         if index and part.startswith("+ "):
             rendered.append(part)
         elif index and part.startswith("− "):
