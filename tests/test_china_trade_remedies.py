@@ -227,6 +227,8 @@ class ChinaTradeRemedyTests(unittest.TestCase):
             ("105","1011","0%","2025-01-01","2026-10-15"),
             ("106","1011","3%","2026-10-17",None),
             ("103","CN","",None,None),
+            ("142","G001","2%","2026-01-01",None),
+            ("142","US","1%","2026-01-01",None),
             ("552","CN","22%","2026-01-01",None),
         ]
         for i,(kind,geo,rate,start,end) in enumerate(rows):
@@ -234,15 +236,17 @@ class ChinaTradeRemedyTests(unittest.TestCase):
                 "measure__type__description":"official measure "+kind})
             db.execute("INSERT INTO measures VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 ("GB","0101210000",kind,geo,rate,"","","",start,end,raw,i))
-        source=_gb_rate_option_rows(db,"0101210000")
-        options=_gb_rate_options(source,TODAY)
-        self.assertEqual(len(source),4)  # 551/552 are kept in the remedy table instead.
-        self.assertEqual(len(options),4)
-        self.assertEqual([o["effective_status"] for o in options],
-                         ["active","expired","future","unknown"])
+        source=_gb_rate_option_rows(db,"0101210000",{"G001"})
+        options=_gb_rate_options(source,TODAY,{"G001"})
+        self.assertEqual(len(source),5)  # US is excluded; 551/552 are in remedy details.
+        self.assertEqual(len(options),5)
+        self.assertEqual({o["effective_status"] for o in options},
+                         {"active","expired","future","unknown"})
         self.assertEqual(options[2]["measure_type"],"106")
         self.assertEqual(options[2]["applicability"],"other_measure")
         self.assertFalse(options[3]["expression_available"])
+        self.assertEqual(options[4]["geography"],"G001")
+        self.assertTrue(options[4]["china_applicable"])
         db.close()
 
     def test_xi_rate_option_projection_keeps_all_date_states_and_other_measure_types(self):
