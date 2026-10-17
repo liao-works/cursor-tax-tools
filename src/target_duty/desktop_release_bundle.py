@@ -684,7 +684,10 @@ def load_gb_condition_source(path, gb_version):
         source = json.loads(source_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError("GB condition-component source is not valid JSON") from exc
-    if source.get("kind") != "gb-condition-components-v2":
+    # v2 = normalized join only; v3 adds the official live JSON:API recovery
+    # of blank condition amounts. Both are accepted so an artifact produced by
+    # the previous capture still publishes during rollout.
+    if source.get("kind") not in ("gb-condition-components-v2", "gb-condition-components-v3"):
         raise ValueError("Unrecognised GB condition-component source kind")
     if source.get("version") != gb_version:
         raise ValueError("GB condition-component source is not the pinned same version")
