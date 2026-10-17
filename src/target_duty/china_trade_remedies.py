@@ -53,13 +53,13 @@ def _effective_status(start: str, end: str, as_of: date) -> str:
     return "active"
 
 
-def gb_remedies(rows: list[tuple], as_of: date) -> list[dict]:
+def gb_remedies(rows: list[tuple], as_of: date, china_groups: set[str] | None = None) -> list[dict]:
     """Project every source remedy row and classify validity; summary uses active only."""
     result = []
     for kind, geo, expr, extra, conditions, excluded, start, end, raw in rows:
         if kind not in TYPES:
             continue
-        if not _eligible_geo(_value(geo), _value(excluded)):
+        if not _eligible_geo(_value(geo), _value(excluded), china_groups):
             continue
         record = json.loads(raw) if isinstance(raw, str) else raw
         if not isinstance(record, dict):
@@ -86,7 +86,7 @@ def _relationship_refs(rel: dict, name: str) -> list[dict]:
     return []
 
 
-def xi_remedies(rows: list[tuple], as_of: date, original_body: bytes) -> list[dict]:
+def xi_remedies(rows: list[tuple], as_of: date, original_body: bytes, china_groups: set[str] | None = None) -> list[dict]:
     """XI measures use JSON:API linked expressions, conditions and extra codes."""
     doc = json.loads(original_body)
     included = {(str(n.get("type")), str(n.get("id"))): n
@@ -121,7 +121,7 @@ def xi_remedies(rows: list[tuple], as_of: date, original_body: bytes) -> list[di
                 if not tokens:
                     unresolved_exclusion = True
                 excluded.update(tokens)
-        if unresolved_exclusion or not _eligible_geo(_value(geo), "|".join(excluded)):
+        if unresolved_exclusion or not _eligible_geo(_value(geo), "|".join(excluded), china_groups):
             continue
         linked_expr = _relationship_refs(rel, "duty_expression")
         if len(linked_expr) > 1:
