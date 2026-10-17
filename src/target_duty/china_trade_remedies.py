@@ -56,8 +56,18 @@ def _effective_status(start: str, end: str, as_of: date) -> str:
     return "active"
 
 
-def gb_remedies(rows, as_of:date, china_groups=None):
-    """Keep China-applicable GB trade-remedy measures and their source evidence."""
+def gb_remedies(rows, as_of:date, china_groups=None, condition_source=None):
+    """Keep China-applicable GB trade-remedy measures and their source evidence.
+
+    ``condition_source`` is the same-version official condition-component join
+    (gb_condition_components.build_condition_source output). It supplies the
+    per-company conditional duty amounts (certificate/action/expression) that
+    the expanded export omits. Measure-level blank expressions stay blank;
+    condition amounts are attached as condition_rates only.
+    """
+    rates_by_sid={}
+    if condition_source:
+        rates_by_sid=condition_source.get("condition_rates_by_measure_sid") or {}
     result=[]
     for kind,geo,expr,additional,conditions,excluded,start,end,raw in rows:
         if kind not in TYPES:
@@ -73,6 +83,27 @@ def gb_remedies(rows, as_of:date, china_groups=None):
         regulation_id=_value(record.get("measure__regulation__id"))
         regulation_url=_value(record.get("measure__regulation__url"))
         footnotes=_value(record.get("measure__footnotes"))
+        source_id=_value(record.get("measure__sid"))
+        unresolved=[]
+        condition_details=rates_by_sid.get(source_id,[]) if condition_source else []
+        if condition_text and condition_source is not None and source_id and not condition_details:
+            unresolved.append({"relationship":"gb_condition_join","id":source_id})
+        condition_rates=[]
+        for entry in condition_details:
+            if not _value(entry.get("duty_expression")):
+                continue
+            condition_rates.append({
+                "condition_id":_value(entry.get("condition_id")),
+                "group_ids":entry.get("group_ids") or [],
+                "condition_code":_value(entry.get("condition_code")),
+                "condition":_value(entry.get("condition")),
+                "action_code":_value(entry.get("action_code")),
+                "action":_value(entry.get("action")),
+                "certificate_code":_value(entry.get("certificate_code")),
+                "certificate_description":_value(entry.get("certificate_description")),
+                "expression":_value(entry.get("duty_expression")),
+                "requirement":_value(entry.get("requirement")),
+            })
         result.append({
             "region":"GB",
             "type":"anti_dumping" if kind in ("551","552") else "countervailing",
@@ -88,8 +119,8 @@ def gb_remedies(rows, as_of:date, china_groups=None):
             "additional_code_ids":[code] if code else [],
             "additional_description":desc,
             "conditions":condition_text,
-            "condition_details":[],
-            "condition_rates":[],
+            "condition_details":condition_details,
+            "condition_rates":condition_rates,
             "condition_groups":[],
             "excluded_areas":_value(excluded),
             "footnotes":footnotes,
@@ -98,9 +129,9 @@ def gb_remedies(rows, as_of:date, china_groups=None):
             "regulation_url":regulation_url,
             "legal_acts":[],
             "source_relationship_ids":{},
-            "unresolved_relationships":[],
+            "unresolved_relationships":unresolved,
             "applicability":"china_applicable",
-            "source_id":_value(record.get("measure__sid")),
+            "source_id":source_id,
             "effective_start":_value(start),
             "effective_end":_value(end),
             "effective_status":status,
