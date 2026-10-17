@@ -425,6 +425,7 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
             ) as xi_conn:
             dest.executescript(SQL)
             counts=Counter()
+            option_status_counts=Counter()
             all_codes=sorted(gb_codes|xi_codes)
             for code in all_codes:
                 if not CODE.fullmatch(code):
@@ -436,18 +437,21 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                 gb_options=[]
                 xi_options=[]
                 if code in gb_codes:
-                    source=list(gb_conn.execute("""SELECT expression,additional_code,conditions,excluded_areas
+                    source=list(gb_conn.execute("""SELECT expression,additional_code,conditions,excluded_areas,geography
                        FROM measures WHERE region='GB' AND code=?
-                        AND effective_status='active' AND measure_type = '103'
-                        AND geography='1011' ORDER BY ordinal""",(code,)))
-                    gb_rate=gb_default_rate(source)
+                        AND effective_status='active' AND measure_type='103'
+                        AND geography IN ('CN','1011') ORDER BY ordinal""",(code,)))
+                    gb_rate=gb_china_rate(source)
                     option_rows=list(gb_conn.execute("""SELECT measure_type,geography,expression,
                          additional_code,NULL,conditions,excluded_areas,
                          effective_start,effective_end,raw_json
                          FROM measures WHERE region='GB' AND code=?
-                         AND effective_status='active' AND measure_type IN ('103','105')
+                         AND geography IN ('CN','1011')
+                         AND measure_type NOT IN ('551','552','553','554')
                          ORDER BY ordinal""",(code,)))
                     gb_options=_gb_rate_options(option_rows,gb["as_of"])
+                    if len(gb_options)!=len(option_rows):
+                        raise ValueError("GB rate-option projection lost official measure rows for "+code)
                     counts["gb_mfn_103_codes"]+=bool(source)
                     counts["gb_unconditional_candidates"]+=sum(
                         _blank(r[1]) and _blank(r[2]) and _blank(r[3]) for r in source)
@@ -455,14 +459,13 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                     remedies=list(gb_conn.execute("""SELECT measure_type,geography,expression,
                          additional_code,conditions,excluded_areas,effective_start,effective_end,raw_json
                          FROM measures WHERE region='GB' AND code=?
-                         AND measure_type IN ('551','552','553','554')
-                         AND effective_status='active' ORDER BY ordinal""",(code,)))
+                         AND measure_type IN ('551','552','553','554') ORDER BY ordinal""",(code,)))
                     gb_trade=gb_remedies(remedies,gb["as_of"])
                 if code in xi_codes:
                     source=list(xi_conn.execute("""SELECT measure_type,geography_id,
                         duty_expression,effective_start,effective_end,raw_json
-                        FROM measures WHERE code=? AND measure_type = '103'
-                        ORDER BY ordinal""",(code,)))
+                        FROM measures WHERE code=? AND measure_type='103'
+                        AND geography_id IN ('CN','1011') ORDER BY ordinal""",(code,)))
                     original=xi_conn.execute(
                         "SELECT response_sha256,compressed_body FROM requests WHERE code=?",
                         (code,)).fetchone()
@@ -474,9 +477,12 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                     ni_rate=xi_rate(source,xi["as_of"],raw)
                     option_rows=list(xi_conn.execute("""SELECT measure_type,geography_id,
                         duty_expression,effective_start,effective_end,raw_json
-                        FROM measures WHERE code=? AND measure_type IN ('103','105')
+                        FROM measures WHERE code=? AND geography_id IN ('CN','1011')
+                        AND measure_type NOT IN ('551','552','553','554')
                         ORDER BY ordinal""",(code,)))
                     xi_options=_xi_rate_options(option_rows,raw,xi["as_of"])
+                    if len(xi_options)!=len(option_rows):
+                        raise ValueError("XI rate-option projection lost official measure rows for "+code)
                     counts["xi_percent"]+=bool(ni_rate)
                     trade_rows=list(xi_conn.execute("""SELECT measure_type,geography_id,
                         duty_expression,effective_start,effective_end,raw_json
@@ -497,6 +503,10 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                 counts["xi_rate_option_codes"]+=bool(xi_options)
                 counts["gb_rate_source_rows"]+=len(gb_options)
                 counts["xi_rate_source_rows"]+=len(xi_options)
+                for option in gb_options:
+                    option_status_counts["GB:"+option["effective_status"]]+=1
+                for option in xi_options:
+                    option_status_counts["XI:"+option["effective_status"]]+=1
                 counts["missing_rate_expressions"]+=sum(
                     1 for option in gb_options+xi_options if not option["expression_available"])
                 counts["conditional_rate_options"]+=sum(
@@ -540,7 +550,10 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                            "xi_rate_source_rows":counts["xi_rate_source_rows"],
                            "missing_rate_expressions":counts["missing_rate_expressions"],
                            "conditional_rate_options":counts["conditional_rate_options"],
-                           "china_applicable_rate_options":counts["china_applicable_rate_options"]},
+                           "china_applicable_rate_options":counts["china_applicable_rate_options"],
+                           "rate_option_effective_status_counts":dict(sorted(option_status_counts.items())),
+                           "gb_rate_option_projection_complete":True,
+                           "xi_rate_option_projection_complete":True},
         "source_versions":{"GB":gb["version_or_catalogue"],
                            "GB_as_of":gb["as_of"].isoformat(),
                            "XI_as_of":xi["as_of"].isoformat(),
