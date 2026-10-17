@@ -205,26 +205,124 @@ def _xi_rate_options(rows, original_body, as_of, china_groups=None, area_descrip
     document=json.loads(original_body)
     index=_xi_relation_map(document)
     options=[]
+
+    def unique_refs(refs):
+        seen=set()
+        result=[]
+        for ref in refs:
+            key=(str(ref.get("type")),str(ref.get("id")))
+            if key not in seen:
+                seen.add(key)
+                result.append(ref)
+        return result
+
+    def condition_tree(refs, stack=()):
+        result=[]
+        for ref in refs:
+            ref_type=str(ref.get("type") or "")
+            ref_id=str(ref.get("id") or "")
+            key=(ref_type,ref_id)
+            node=index.get(key)
+            if node is None:
+                result.append({"id":ref_id,"type":ref_type,"resolved":False,"description":""})
+                continue
+            attrs=node.get("attributes") or {}
+            description=_xi_text([node])
+            item={"id":ref_id,"type":ref_type,"resolved":True,
+                  "description":description,"attributes":attrs}
+            if key not in stack:
+                children=[]
+                rels=node.get("relationships") or {}
+                for name in sorted(rels):
+                    if "condition" not in name.lower():
+                        continue
+                    child_refs=_xi_refs(node,name)
+                    if child_refs:
+                        children.extend(condition_tree(child_refs,stack+(key,)))
+                if children:
+                    item["children"]=children
+            result.append(item)
+        return result
+
+    def condition_labels(items):
+        labels=[]
+        for item in items:
+            if item.get("description"):
+                labels.append(item["description"])
+            labels.extend(condition_labels(item.get("children") or []))
+        return list(dict.fromkeys(labels))
+
     for kind, geo, expression, start, end, raw in rows:
-        # The caller supplies all non-remedy measure types for China/Erga
-        # Omnes, including expired/future rows. Keep each source row visible.
+        # Retain every official non-remedy measure in China's known geographic
+        # scope, including unresolved links and every effective-date state.
         node=json.loads(raw) if isinstance(raw,str) else raw
         rel=node.get("relationships") or {}
-        linked_expr=_xi_linked(index,_xi_refs(node,"duty_expression"))
-        expr=_expression(expression)
-        if linked_expr:
-            attrs=linked_expr[0].get("attributes") or {}
-            expr=_expression(attrs.get("base") or attrs.get("verbose_duty") or expr)
-        additional=_xi_linked(index,_xi_refs(node,"additional_code"))
-        if not additional:
-            additional=_xi_linked(index,_xi_refs(node,"additional_codes"))
-        conditions=(_xi_linked(index,_xi_refs(node,"measure_conditions"))
-                    +_xi_linked(index,_xi_refs(node,"measure_condition_permutation_groups")))
-        excluded_refs=(_xi_refs(node,"excluded_countries")
-                       +_xi_refs(node,"excluded_geographical_areas"))
+
+        expression_refs=unique_refs(_xi_refs(node,"duty_expression"))
+        expression_options=[]
+        unresolved=[]
+        for ref in expression_refs:
+            ref_type=str(ref.get("type") or "")
+            ref_id=str(ref.get("id") or "")
+            linked=index.get((ref_type,ref_id))
+            if linked is None:
+                expression_options.append({"id":ref_id,"type":ref_type,
+                                           "expression":"","resolved":False})
+                unresolved.append({"relationship":"duty_expression","id":ref_id})
+                continue
+            attrs=linked.get("attributes") or {}
+            expr_value=_expression(attrs.get("base") or attrs.get("verbose_duty")
+                                   or attrs.get("formatted_duty") or attrs.get("duty_amount"))
+            expression_options.append({"id":ref_id,"type":ref_type,
+                                       "expression":expr_value,"resolved":bool(expr_value),
+                                       "attributes":attrs})
+            if not expr_value:
+                unresolved.append({"relationship":"duty_expression","id":ref_id})
+        scalar_expression=_expression(expression)
+        if len(expression_refs)>1:
+            expr=""
+            expression_resolution="multiple"
+        elif len(expression_refs)==1:
+            expr=expression_options[0]["expression"] or scalar_expression
+            expression_resolution=("resolved_single" if expression_options[0]["resolved"]
+                                   else "unresolved_link")
+        elif scalar_expression:
+            expr=scalar_expression
+            expression_resolution="source_scalar"
+            expression_options=[{"id":"","type":"source_measure_field",
+                                 "expression":scalar_expression,"resolved":True}]
+        else:
+            expr=""
+            expression_resolution="missing"
+
+        additional_refs=unique_refs(
+            _xi_refs(node,"additional_code")+_xi_refs(node,"additional_codes"))
+        additional=_xi_linked(index,additional_refs)
+        condition_refs=unique_refs(
+            _xi_refs(node,"measure_conditions")
+            +_xi_refs(node,"measure_condition_permutation_groups"))
+        conditions=_xi_linked(index,condition_refs)
+        condition_details=condition_tree(condition_refs)
+        for item in additional_refs:
+            if (str(item.get("type")),str(item.get("id"))) not in index:
+                unresolved.append({"relationship":"additional_code","id":str(item.get("id") or "")})
+        for item in condition_refs:
+            if (str(item.get("type")),str(item.get("id"))) not in index:
+                unresolved.append({"relationship":"measure_conditions","id":str(item.get("id") or "")})
+
+        excluded_refs=unique_refs(
+            _xi_refs(node,"excluded_countries")
+            +_xi_refs(node,"excluded_geographical_areas"))
         excluded=_xi_linked(index,excluded_refs)
-        geos=_xi_linked(index,_xi_refs(node,"geographical_area"))
-        type_nodes=_xi_linked(index,_xi_refs(node,"measure_type"))
+        geo_refs=unique_refs(_xi_refs(node,"geographical_area"))
+        geos=_xi_linked(index,geo_refs)
+        type_refs=unique_refs(_xi_refs(node,"measure_type"))
+        type_nodes=_xi_linked(index,type_refs)
+        for name, refs in (("geographical_area",geo_refs),("measure_type",type_refs)):
+            for ref in refs:
+                if (str(ref.get("type")),str(ref.get("id"))) not in index:
+                    unresolved.append({"relationship":name,"id":str(ref.get("id") or "")})
+
         additional_codes=[]
         for item in additional:
             attrs=item.get("attributes") or {}
@@ -234,7 +332,9 @@ def _xi_rate_options(rows, original_body, as_of, china_groups=None, area_descrip
         excluded_codes=[]
         for item in excluded:
             attrs=item.get("attributes") or {}
-            code=attrs.get("code") or attrs.get("country_code") or attrs.get("geographical_area_id") or attrs.get("id") or item.get("id")
+            code=(attrs.get("code") or attrs.get("country_code")
+                  or attrs.get("geographical_area_id") or attrs.get("area_id")
+                  or attrs.get("id") or item.get("id"))
             excluded_codes.append(_clean(code))
         linked_excluded_ids={str(x.get("id")) for x in excluded}
         unresolved_exclusion=False
@@ -243,51 +343,98 @@ def _xi_rate_options(rows, original_body, as_of, china_groups=None, area_descrip
             if ref_id in linked_excluded_ids:
                 continue
             excluded_codes.append(ref_id)
-            # Unresolved non-country IDs could be groups containing CN. Do not
-            # label the measure China-applicable until the pinned tree resolves it.
+            unresolved.append({"relationship":"excluded_geographical_area","id":ref_id})
             if (ref_id not in (area_descriptions or {})
-                    and not (len(ref_id)==2 and ref_id.isalpha())):
+                    and ref_id not in set(china_groups or ())
+                    and not (len(ref_id)==2 and ref_id.isalpha())
+                    and ref_id not in ("CN","1011")):
                 unresolved_exclusion=True
-        geo_id=_clean(geo or ((geos[0].get("attributes") or {}).get("code")
-                              or (geos[0].get("attributes") or {}).get("id") if geos else ""))
+
+        geo_options=[]
+        for ref in geo_refs:
+            ref_id=str(ref.get("id") or "")
+            linked=index.get((str(ref.get("type")),ref_id))
+            if linked is None:
+                code=ref_id
+                desc=_clean((area_descriptions or {}).get(ref_id,""))
+                resolved=bool(desc or ref_id in set(china_groups or ()) or ref_id in ("CN","1011")
+                              or (len(ref_id)==2 and ref_id.isalpha()))
+                geo_options.append({"id":ref_id,"code":code,"description":desc,"resolved":resolved})
+            else:
+                attrs=linked.get("attributes") or {}
+                code=_clean(attrs.get("code") or attrs.get("country_code")
+                            or attrs.get("geographical_area_id") or attrs.get("area_id")
+                            or attrs.get("id") or ref_id)
+                geo_options.append({"id":ref_id,"code":code,
+                                    "description":_xi_text([linked]),"resolved":True})
+        geo_id=_clean(geo or (geo_options[0]["code"] if geo_options else ""))
+        scope_ids=[item["code"] for item in geo_options if item.get("code")]
+        if geo_id and geo_id not in scope_ids:
+            scope_ids.insert(0,geo_id)
+        if not scope_ids:
+            scope_ids=[geo_id] if geo_id else []
+        excluded_string=",".join(dict.fromkeys(x for x in excluded_codes if x))
+        china_applicable=(not unresolved_exclusion and any(
+            _china_applicable(scope,excluded_string,china_groups) for scope in scope_ids))
+        condition_description="; ".join(condition_labels(condition_details))
+        if not condition_description and condition_refs:
+            condition_description="见官方措施条件（关联记录：" + ", ".join(
+                str(x.get("id") or "") for x in condition_refs) + "）"
+        additional_description=_xi_text(additional)
+        if additional_refs and not additional_description and not additional_codes:
+            additional_description="官方附加代码关联记录尚未解析"
+
         option={
             "region":"XI",
             "measure_type":str(kind),
             "measure_type_description":_xi_text(type_nodes),
             "geography":geo_id,
-            "geography_description":_xi_text(geos) or _clean((area_descriptions or {}).get(_clean(geo), "")),
+            "geography_ids":list(dict.fromkeys(scope_ids)),
+            "geography_options":geo_options,
+            "geography_description":("; ".join(dict.fromkeys(
+                x["description"] for x in geo_options if x.get("description")))
+                or _clean((area_descriptions or {}).get(geo_id,""))),
             "expression":expr,
+            "expression_options":expression_options,
+            "expression_count":len(expression_refs) if expression_refs else (1 if scalar_expression else 0),
+            "expression_resolution":expression_resolution,
             "additional_code":",".join(dict.fromkeys(additional_codes)),
-            "additional_description":_xi_text(additional),
-            "conditions":_xi_text(conditions) or ("见官方措施条件" if conditions else ""),
-            "excluded_areas":",".join(dict.fromkeys(x for x in excluded_codes if x)),
+            "additional_description":additional_description,
+            "conditions":condition_description,
+            "condition_details":condition_details,
+            "excluded_areas":excluded_string,
             "effective_start":_clean(start),
             "effective_end":_clean(end),
-            "effective_status":_effective_status(start, end, as_of),
-            "condition_ids":[_clean(x.get("id")) for x in conditions if _clean(x.get("id"))],
-            "additional_code_ids":[_clean(x.get("id")) for x in additional if _clean(x.get("id"))],
+            "effective_status":_effective_status(start,end,as_of),
+            "condition_ids":[str(x.get("id") or "") for x in condition_refs if str(x.get("id") or "")],
+            "additional_code_ids":[str(x.get("id") or "") for x in additional_refs if str(x.get("id") or "")],
             "source_id":_clean(node.get("id")),
+            "unresolved_relationships":unresolved,
             "source_relationship_ids":{
                 name:[_clean(x.get("id")) for x in _xi_refs(node,name) if _clean(x.get("id"))]
                 for name in sorted(rel)
             },
         }
-        option["expression_available"] = bool(option["expression"])
+        option["expression_available"]=any(bool(item.get("expression")) for item in expression_options)
+        option["single_expression_available"]=bool(expr) and expression_resolution!="multiple"
         option["special_use"]=option["measure_type"]=="105"
-        option["china_applicable"]=(not unresolved_exclusion and
-                                     _china_applicable(option["geography"], option["excluded_areas"], china_groups))
-        option["conditional"]=bool(option["additional_code"] or option["conditions"]
-                                    or option["special_use"])
+        option["china_applicable"]=china_applicable
+        # An unresolved condition/code/expression link must never make an
+        # apparently unconditional default; preserve and surface it for review.
+        option["conditional"]=bool(
+            additional_refs or condition_refs or option["additional_code"]
+            or option["conditions"] or option["special_use"])
+        unresolved_expression=expression_resolution in ("multiple","unresolved_link","missing")
         option["applicability"]=(
             "default" if option["measure_type"]=="103" and option["china_applicable"]
-            and not option["conditional"] else
+            and not option["conditional"] and not unresolved_expression else
             "authorised_use" if option["special_use"] else
-            "other_measure" if option["measure_type"] not in ("103", "105") else
+            "unresolved" if unresolved or unresolved_expression else
+            "other_measure" if option["measure_type"] not in ("103","105") else
             "conditional"
         )
         options.append(option)
     return options
-
 
 
 def _blank(value):
@@ -320,15 +467,22 @@ def _default_rate_gap(region, code, selected_rate, source_rows, options, china_g
                and not (_area_tokens(o.get("geography")) & {"1011"})]
         world=[o for o in unconditional if "1011" in _area_tokens(o.get("geography"))]
         selected=cn or group or world or unconditional
-        if any(not o.get("expression_available") for o in selected):
+        resolutions={o.get("expression_resolution") for o in selected}
+        if "multiple" in resolutions:
+            reason="selected_103_measure_has_multiple_duty_expressions"
+        elif "unresolved_link" in resolutions:
+            reason="selected_103_measure_has_unresolved_duty_expression"
+        elif any(not o.get("expression_available") for o in selected):
             reason="selected_103_measure_missing_expression"
         elif len({o.get("expression") for o in selected})>1:
             reason="conflicting_unconditional_103_rates_at_selected_scope"
         else:
             reason="default_rate_selection_unresolved"
     fields=("source_id","geography","geography_description","effective_status",
-            "expression","expression_available","conditional","additional_code",
-            "additional_description","conditions","excluded_areas","applicability",
+            "expression","expression_options","expression_count","expression_resolution",
+            "expression_available","conditional","additional_code","additional_code_ids",
+            "additional_description","condition_ids","conditions","condition_details",
+            "unresolved_relationships","excluded_areas","applicability",
             "measure_type_description","china_applicable")
     return {
         "region":region,
@@ -639,35 +793,24 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                 counts["xi_rate_source_rows"]+=len(xi_option_rows)
                 counts["gb_rate_projected_rows"]+=len(gb_options)
                 counts["xi_rate_projected_rows"]+=len(xi_options)
-                for region, options in (("GB", gb_options), ("XI", xi_options)):
-                    for option in options:
-                        option_status_counts[region+":"+option["effective_status"]]+=1
-                        option_status_counts[region+":type:"+str(option["measure_type"])]+=1
-                        option_status_counts[region+":conditional:"+str(bool(option["conditional"])).lower()]+=1
-                        option_status_counts[region+":expression:"+str(bool(option["expression_available"])).lower()]+=1
-                        option_status_counts[region+":china_applicable:"+str(bool(option["china_applicable"])).lower()]+=1
-                        option_status_counts[region+":applicability:"+str(option["applicability"])]+=1
+                for option in gb_options:
+                    option_status_counts["GB:"+option["effective_status"]]+=1
+                for option in xi_options:
+                    option_status_counts["XI:"+option["effective_status"]]+=1
                 counts["missing_rate_expressions"]+=sum(
                     1 for option in gb_options+xi_options if not option["expression_available"])
+                counts["multiple_duty_expression_options"]+=sum(
+                    1 for option in gb_options+xi_options
+                    if option.get("expression_resolution")=="multiple")
+                counts["unresolved_rate_options"]+=sum(
+                    1 for option in gb_options+xi_options if option.get("applicability")=="unresolved")
+                counts["unresolved_rate_option_relationships"]+=sum(
+                    len(option.get("unresolved_relationships") or [])
+                    for option in gb_options+xi_options)
                 counts["conditional_rate_options"]+=sum(
                     1 for option in gb_options+xi_options if option["conditional"])
                 counts["china_applicable_rate_options"]+=sum(
                     1 for option in gb_options+xi_options if option["china_applicable"])
-                counts["active_conditional_options"]+=sum(
-                    1 for option in gb_options+xi_options
-                    if option["effective_status"]=="active" and option["conditional"])
-                counts["active_conditional_with_expression"]+=sum(
-                    1 for option in gb_options+xi_options
-                    if option["effective_status"]=="active" and option["conditional"]
-                    and option["expression_available"])
-                counts["active_conditional_without_expression"]+=sum(
-                    1 for option in gb_options+xi_options
-                    if option["effective_status"]=="active" and option["conditional"]
-                    and not option["expression_available"])
-                counts["active_china_conditional_options"]+=sum(
-                    1 for option in gb_options+xi_options
-                    if option["effective_status"]=="active" and option["conditional"]
-                    and option["china_applicable"])
                 dest.execute("INSERT INTO tariffs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(
                     code,gb_descr.get(code) or xi_descr.get(code) or "",
                     gb_rate,
@@ -727,17 +870,13 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                            "gb_rate_option_projection_complete":counts["gb_rate_source_rows"]==counts["gb_rate_projected_rows"],
                            "xi_rate_option_projection_complete":counts["xi_rate_source_rows"]==counts["xi_rate_projected_rows"],
                            "missing_rate_expressions":counts["missing_rate_expressions"],
+                           "multiple_duty_expression_options":counts["multiple_duty_expression_options"],
+                           "unresolved_rate_options":counts["unresolved_rate_options"],
+                           "unresolved_rate_option_relationships":counts["unresolved_rate_option_relationships"],
                            "conditional_rate_options":counts["conditional_rate_options"],
-                           "active_conditional_options":counts["active_conditional_options"],
-                           "active_conditional_with_expression":counts["active_conditional_with_expression"],
-                           "active_conditional_without_expression":counts["active_conditional_without_expression"],
-                           "active_china_conditional_options":counts["active_china_conditional_options"],
                            "china_applicable_rate_options":counts["china_applicable_rate_options"],
-                           "rate_option_audit_counts":dict(sorted(option_status_counts.items())),
                            "rate_option_effective_status_counts":dict(sorted(option_status_counts.items())),
-                           "conditional_rate_policy":"All China-applicable GB/XI non-remedy measure options are retained with dates, geography, duty expression, additional codes and source conditions. Conditional options are shown separately and never silently replace the default. Automatic eligibility requires shipment/authorised-use facts not present in a commodity code alone.",
-                           "gb_rate_option_projection_complete":True,
-                           "xi_rate_option_projection_complete":True},
+                        },
         "source_versions":{"GB":gb["version_or_catalogue"],
                            "GB_as_of":gb["as_of"].isoformat(),
                            "XI_as_of":xi["as_of"].isoformat(),
@@ -753,27 +892,6 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
             "active_china_group_count":len(xi_groups),
             "active_china_group_ids":sorted(xi_groups)},
         "coverage":{"GB":len(gb_codes),"XI":len(xi_codes)},
-        "default_duty_coverage":{
-            "meaning":"Number of commodity codes with one unambiguous active China-applicable default duty expression. Includes percentage, specific and compound duties; excludes conditional/special-use rates.",
-            "GB":{"catalogue_codes":len(gb_codes),"codes_with_default_duty":counts["gb_percent"],
-                 "codes_without_default_duty":len(gb_codes)-counts["gb_percent"]},
-            "XI":{"catalogue_codes":len(xi_codes),"codes_with_default_duty":counts["xi_percent"],
-                 "codes_without_default_duty":len(xi_codes)-counts["xi_percent"]},
-        },
-        "rate_option_coverage":{
-            "GB":{"catalogue_codes_with_options":counts["gb_rate_option_codes"],
-                 "source_rows":counts["gb_rate_source_rows"],
-                 "projected_rows":counts["gb_rate_projected_rows"],
-                 "projection_complete":counts["gb_rate_source_rows"]==counts["gb_rate_projected_rows"]},
-            "XI":{"catalogue_codes_with_options":counts["xi_rate_option_codes"],
-                 "source_rows":counts["xi_rate_source_rows"],
-                 "projected_rows":counts["xi_rate_projected_rows"],
-                 "projection_complete":counts["xi_rate_source_rows"]==counts["xi_rate_projected_rows"]},
-            "conditional_options":counts["conditional_rate_options"],
-            "missing_expression_options":counts["missing_rate_expressions"],
-            "china_applicable_options":counts["china_applicable_rate_options"],
-            "effective_status_counts":dict(sorted(option_status_counts.items())),
-        },
         "default_rate_gap_audit":{
             "file":audit_path.name,
             "sha256":"sha256:"+audit_hash,
@@ -789,7 +907,7 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
         raise ValueError("Suspiciously incomplete official commodity catalogue")
     # Do not overwrite a mostly populated desktop DB with mostly blank rates
     # if the official expression layout changes unexpectedly.
-    print("Verified default-duty coverage (percentage, specific and compound expressions) plus exact source-option projection:",dict(counts))
+    print("Verified simple percentage coverage:",dict(counts))
     if counts["gb_percent"]<10_000 or counts["xi_percent"]<10_000:
         raise ValueError("Insufficient unambiguous GB/XI percentage coverage for desktop release")
     meta.write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
