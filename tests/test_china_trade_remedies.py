@@ -29,10 +29,23 @@ class ChinaTradeRemedyTests(unittest.TestCase):
             gb(geo="US"),gb(geo="1011",expr="0%",excluded="CN|CA"),
             gb(end="2026-10-15"),gb(start="2027-01-01"),
             gb(kind="103")],TODAY)
-        self.assertEqual(len(records),2)
+        self.assertEqual(len(records),4)  # active, expired and future source rows are all retained
+        self.assertEqual({r["effective_status"] for r in records},{"active","expired","future"})
         self.assertEqual(records[0]["additional_code"],"A999")
         self.assertEqual(summary(records,"anti_dumping"),"42.3%（其他企业，A999）")
         self.assertEqual(summary(records,"countervailing"),"18%")
+
+    def test_remedy_summaries_ignore_expired_future_and_unknown_rows(self):
+        rows=[
+            gb(kind="552",expr="42.3%",extra="A999",desc="Other exporters"),
+            gb(kind="552",expr="90%",extra="A999",desc="Other exporters",end="2026-10-15"),
+            gb(kind="552",expr="99%",extra="A999",desc="Other exporters",start="2027-01-01"),
+            gb(kind="552",expr="77%",extra="A999",desc="Other exporters",start=""),
+        ]
+        measures=gb_remedies(rows,TODAY)
+        self.assertEqual({x["effective_status"] for x in measures},
+                         {"active","expired","future","unknown"})
+        self.assertEqual(summary(measures,"anti_dumping"),"42.3%（其他企业，A999）")
 
     def test_competing_exporter_rates_not_mislabelled_universal(self):
         r=gb_remedies([
