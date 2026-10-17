@@ -11,6 +11,11 @@ on:
   schedule:
     - cron: '0 1 * * 0'
   workflow_dispatch:
+    inputs:
+      version_pin:
+        description: "Optional immutable DBT version to replay (e.g. v4.0.1629) while the newest release is incomplete; the pinned version must independently pass table and CSVW schema validation"
+        type: string
+        required: false
 permissions:
   contents: read
 concurrency:
@@ -32,22 +37,42 @@ jobs:
           python -m unittest discover -s tests -p 'test_geo_area_memberships.py' -v
       - name: Discover current official DBT version and required CSVW schema
         shell: bash
+        env:
+          VERSION_PIN: ${{ inputs.version_pin }}
         run: |
           set -euo pipefail
-          python -m src.target_duty.dbt_version_discovery \
-            --output gb-weekly-version-discovery.json --require-available
-          python - <<'PY'
-          import json,re
-          from pathlib import Path
-          info=json.loads(Path("gb-weekly-version-discovery.json").read_text())
-          version=info.get("newest_official_version")
-          if (info.get("state")!="ready_for_full_data_replay"
-                  or not isinstance(version,str)
-                  or not re.fullmatch(r"v[0-9]+(?:\.[0-9]+)*",version)):
-              raise SystemExit("Official DBT latest version not safe for full replay")
-          Path("gb-weekly-pin.txt").write_text(version+"\n")
-          print("PINNED OFFICIAL GB SOURCE",version)
-          PY
+          if [ -n "$VERSION_PIN" ]; then
+            python -m src.target_duty.dbt_version_discovery \
+              --pinned-version "$VERSION_PIN" \
+              --output gb-weekly-version-discovery.json --require-available
+            python - <<'PY'
+            import json,re
+            from pathlib import Path
+            info=json.loads(Path("gb-weekly-version-discovery.json").read_text())
+            version=info.get("newest_official_version")
+            if (info.get("state")!="ready_for_full_data_replay"
+                    or not isinstance(version,str)
+                    or not re.fullmatch(r"v[0-9]+(?:\.[0-9]+)*",version)):
+                raise SystemExit("Pinned official DBT version failed table/schema validation")
+            Path("gb-weekly-pin.txt").write_text(version+"\n")
+            print("PINNED OFFICIAL GB SOURCE (operator pin)",version)
+            PY
+          else
+            python -m src.target_duty.dbt_version_discovery \
+              --output gb-weekly-version-discovery.json --require-available
+            python - <<'PY'
+            import json,re
+            from pathlib import Path
+            info=json.loads(Path("gb-weekly-version-discovery.json").read_text())
+            version=info.get("newest_official_version")
+            if (info.get("state")!="ready_for_full_data_replay"
+                    or not isinstance(version,str)
+                    or not re.fullmatch(r"v[0-9]+(?:\.[0-9]+)*",version)):
+                raise SystemExit("Official DBT latest version not safe for full replay")
+            Path("gb-weekly-pin.txt").write_text(version+"\n")
+            print("PINNED OFFICIAL GB SOURCE",version)
+            PY
+          fi
           date -u +%F > gb-weekly-as-of.txt
       - name: Fetch ALL official GB declarable commodity rows at same pinned version
         shell: bash
