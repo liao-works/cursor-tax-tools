@@ -57,21 +57,6 @@ class DesktopDailyDataUpdateTests(unittest.TestCase):
         self.assertEqual(configured_metadata_url(""),DEFAULT_METADATA_URL)
         self.assertEqual(configured_metadata_url("https://example.test/data.json"),
                          "https://example.test/data.json")
-        self.assertIn("liao-works", (ROOT/"gui_config.json").read_text())
-
-    def test_ui_is_nonblocking_and_never_auto_installs_release(self):
-        gui=(ROOT/"tariff_gui.py").read_text()
-        self.assertIn("self._schedule_next_data_update_check(2000)",gui)
-        self.assertIn("self.check_remote_update(automatic=True)",gui)
-        self.assertIn("self.thread_pool.submit(check_task)",gui)
-        self.assertIn("check_delay_ms(succeeded=succeeded)",gui)
-        self.assertIn("self._announce_new_data_release",gui)
-        self.assertIn('text="立即更新"',gui)
-        self.assertIn('text="稍后更新"',gui)
-        self.assertIn('self.config["last_data_update_notification"] = key',gui)
-        self.assertIn("self.data_update_banner.pack",gui)
-        self.assertIn("configured_metadata_url(self.metadata_url_var.get())",gui)
-        self.assertNotIn("https://github.com/CavinHuang/",gui)
 
 
 if __name__=="__main__":

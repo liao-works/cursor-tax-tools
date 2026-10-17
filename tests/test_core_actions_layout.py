@@ -4,7 +4,6 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 EXPECTED = {
-    "build.yml",
     "daily-official-source-watch.yml",
     "full-gb-xi-foundation.yml",
     "gb-ni-exact-full-source-diff.yml",
@@ -20,7 +19,6 @@ class CoreActionsInventory(unittest.TestCase):
         files = {p.name for p in ROOT.iterdir() if p.is_file()}
         self.assertEqual(files, EXPECTED)
         self.assertIn("pull_request:", (ROOT / "full-gb-xi-foundation.yml").read_text())
-        self.assertNotIn("pull_request:", (ROOT / "build.yml").read_text())
 
     def test_xi_collection_and_automated_source_chain_remain(self):
         xi = (ROOT / "xi-public-full-measures.yml").read_text()
