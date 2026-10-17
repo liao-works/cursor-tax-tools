@@ -43,6 +43,7 @@ class XIGeographicalAreaTests(unittest.TestCase):
         result = inspect_payload(payload, DAY, min_areas=1)
         self.assertEqual(result["area_ids_containing_china"], ["1011", "CN", "G001", "G002"])
         self.assertEqual(result["china_applicable_group_ids"], ["1011", "G001", "G002"])
+        self.assertEqual(result["area_descriptions"]["G001"], "G001")
         self.assertEqual(result["source_sha256"], hashlib.sha256(payload).hexdigest())
         self.assertTrue(result["complete"])
 
