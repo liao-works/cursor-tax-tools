@@ -30,7 +30,7 @@ def _value(value: Any) -> str:
 
 def _eligible_geo(geo: str, excluded: str, china_groups: set[str] | None = None) -> bool:
     """Return true only for explicit CN, Erga Omnes or a verified China group."""
-    countries = {token.strip().upper() for token in re.split(r"[|,;\\s]+", excluded)
+    countries = {token.strip().upper() for token in re.split(r"[|,;\s]+", excluded)
                  if token.strip()} if excluded else set()
     groups = set(china_groups or ())
     if countries & ({"CN", "CHN", "CHINA"} | groups):
