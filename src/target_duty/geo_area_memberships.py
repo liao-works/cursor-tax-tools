@@ -20,7 +20,7 @@ from pathlib import Path
 
 BASE = ("https://data.api.trade.gov.uk/v1/datasets/uk-tariff-2021-01-01/"
         "versions/{version}/tables/geo-area-memberships/data?format=csv")
-VERSION = re.compile(r"v[0-9]+(?:\\.[0-9]+)*\\Z")
+VERSION = re.compile(r"v[0-9]+(?:\.[0-9]+)*\Z")
 NULLS = {"", "#NA", "N/A", "NA", "None", "null", "NULL", "[]"}
 
 
@@ -76,7 +76,7 @@ def _columns(fields: list[str]) -> dict[str, str]:
 
 
 def inspect_csv(payload: bytes, as_of: date) -> dict:
-    if not payload or b"\\x00" in payload:
+    if not payload or b"\x00" in payload:
         raise ValueError("Empty or binary geo-area-memberships CSV")
     reader = csv.DictReader(io.StringIO(payload.decode("utf-8-sig"), newline=""))
     fields = list(reader.fieldnames or [])
@@ -157,7 +157,7 @@ def download(version: str, as_of: date, output: str, report_path: str) -> dict:
         raise ValueError("Geo membership SHA changed after download")
     result.update({"version": version, "source_url": url,
                    "resolved_url": resolved, "bytes": size})
-    Path(report_path).write_text(json.dumps(result, ensure_ascii=False, indent=2)+"\\n",
+    Path(report_path).write_text(json.dumps(result, ensure_ascii=False, indent=2)+"\n",
                                  encoding="utf-8")
     return result
 
