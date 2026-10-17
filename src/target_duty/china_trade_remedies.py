@@ -64,7 +64,7 @@ def gb_remedies(rows, as_of:date, china_groups=None):
             continue
         if not _eligible_geo(_value(geo),_value(excluded),china_groups):
             continue
-        status=_effective(start,end,as_of)
+        status=_effective_status(start,end,as_of)
         record=json.loads(raw) if isinstance(raw,str) else (raw or {})
         expression=_value(expr)
         code=_value(additional)
@@ -126,6 +126,15 @@ def _relationship_id_map(rel):
         if ids:
             result[name]=list(dict.fromkeys(ids))
     return result
+
+
+def _relationship_refs(rel: dict, name: str) -> list[dict]:
+    entry=(rel.get(name) or {}).get("data")
+    if isinstance(entry,dict):
+        return [entry]
+    if isinstance(entry,list):
+        return [item for item in entry if isinstance(item,dict)]
+    return []
 
 
 def xi_remedies(rows, as_of:date, original_body:bytes, china_groups=None, area_descriptions=None):
@@ -373,7 +382,7 @@ def xi_remedies(rows, as_of:date, original_body:bytes, china_groups=None, area_d
             "source_id":_value(node.get("id")),
             "effective_start":_value(start),
             "effective_end":_value(end),
-            "effective_status":_effective(start,end,as_of),
+            "effective_status":_effective_status(start,end,as_of),
         })
     return result
 
