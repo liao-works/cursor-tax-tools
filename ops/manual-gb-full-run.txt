@@ -1,5 +1,4 @@
 request=latest_complete_official_gb_source
 requested_as_of=2026-10-17
-reason=geo_area_reference_join_probe_and_full_source_refresh
+reason=retry_v4.0.1629_after_same_version_geo_area_foreign_key_join_and_rate_option_audit_fixes
 production_eligible=false
-geo_area_reference_join_probe=20261017
