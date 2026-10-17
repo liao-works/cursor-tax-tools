@@ -42,6 +42,29 @@ class DesktopReleaseBundleTests(unittest.TestCase):
         self.assertEqual(gap["code"], "0101210000")
         self.assertEqual(gap["active_unconditional_103_option_count"], 2)
 
+    def test_metadata_accounts_for_active_conditional_rates_and_expressions(self):
+        from pathlib import Path
+        source=(Path(__file__).resolve().parents[1]/
+                "src"/"target_duty"/"desktop_release_bundle.py").read_text()
+        # Metadata must make conditional source coverage measurable by region,
+        # status, measure type, expression presence and China applicability.
+        for key in (
+            '"active_conditional_options"',
+            '"active_conditional_with_expression"',
+            '"active_conditional_without_expression"',
+            '"active_china_conditional_options"',
+            '"rate_option_audit_counts"',
+            '"conditional_rate_policy"',
+            '":type:"',
+            '":conditional:"',
+            '":expression:"',
+            '":china_applicable:"',
+            '":applicability:"',
+        ):
+            self.assertIn(key, source)
+        self.assertIn('gb_rate_source_rows"] != counts["gb_rate_projected_rows"]', source)
+        self.assertIn('xi_rate_source_rows"] != counts["xi_rate_projected_rows"]', source)
+
     def test_gb_unique_simple_rate(self):
         self.assertEqual(simple_rate([("6%","","","")]),"6%")
         self.assertEqual(simple_rate([("0.00 %","","","")]),"0.00 %")

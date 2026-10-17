@@ -639,16 +639,35 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                 counts["xi_rate_source_rows"]+=len(xi_option_rows)
                 counts["gb_rate_projected_rows"]+=len(gb_options)
                 counts["xi_rate_projected_rows"]+=len(xi_options)
-                for option in gb_options:
-                    option_status_counts["GB:"+option["effective_status"]]+=1
-                for option in xi_options:
-                    option_status_counts["XI:"+option["effective_status"]]+=1
+                for region, options in (("GB", gb_options), ("XI", xi_options)):
+                    for option in options:
+                        option_status_counts[region+":"+option["effective_status"]]+=1
+                        option_status_counts[region+":type:"+str(option["measure_type"])]+=1
+                        option_status_counts[region+":conditional:"+str(bool(option["conditional"])).lower()]+=1
+                        option_status_counts[region+":expression:"+str(bool(option["expression_available"])).lower()]+=1
+                        option_status_counts[region+":china_applicable:"+str(bool(option["china_applicable"])).lower()]+=1
+                        option_status_counts[region+":applicability:"+str(option["applicability"])]+=1
                 counts["missing_rate_expressions"]+=sum(
                     1 for option in gb_options+xi_options if not option["expression_available"])
                 counts["conditional_rate_options"]+=sum(
                     1 for option in gb_options+xi_options if option["conditional"])
                 counts["china_applicable_rate_options"]+=sum(
                     1 for option in gb_options+xi_options if option["china_applicable"])
+                counts["active_conditional_options"]+=sum(
+                    1 for option in gb_options+xi_options
+                    if option["effective_status"]=="active" and option["conditional"])
+                counts["active_conditional_with_expression"]+=sum(
+                    1 for option in gb_options+xi_options
+                    if option["effective_status"]=="active" and option["conditional"]
+                    and option["expression_available"])
+                counts["active_conditional_without_expression"]+=sum(
+                    1 for option in gb_options+xi_options
+                    if option["effective_status"]=="active" and option["conditional"]
+                    and not option["expression_available"])
+                counts["active_china_conditional_options"]+=sum(
+                    1 for option in gb_options+xi_options
+                    if option["effective_status"]=="active" and option["conditional"]
+                    and option["china_applicable"])
                 dest.execute("INSERT INTO tariffs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(
                     code,gb_descr.get(code) or xi_descr.get(code) or "",
                     gb_rate,
@@ -709,8 +728,14 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                            "xi_rate_option_projection_complete":counts["xi_rate_source_rows"]==counts["xi_rate_projected_rows"],
                            "missing_rate_expressions":counts["missing_rate_expressions"],
                            "conditional_rate_options":counts["conditional_rate_options"],
+                           "active_conditional_options":counts["active_conditional_options"],
+                           "active_conditional_with_expression":counts["active_conditional_with_expression"],
+                           "active_conditional_without_expression":counts["active_conditional_without_expression"],
+                           "active_china_conditional_options":counts["active_china_conditional_options"],
                            "china_applicable_rate_options":counts["china_applicable_rate_options"],
+                           "rate_option_audit_counts":dict(sorted(option_status_counts.items())),
                            "rate_option_effective_status_counts":dict(sorted(option_status_counts.items())),
+                           "conditional_rate_policy":"All China-applicable GB/XI non-remedy measure options are retained with dates, geography, duty expression, additional codes and source conditions. Conditional options are shown separately and never silently replace the default. Automatic eligibility requires shipment/authorised-use facts not present in a commodity code alone.",
                            "gb_rate_option_projection_complete":True,
                            "xi_rate_option_projection_complete":True},
         "source_versions":{"GB":gb["version_or_catalogue"],
