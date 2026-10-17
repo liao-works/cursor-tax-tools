@@ -114,7 +114,7 @@ def xi_remedies(rows: list[tuple], as_of: date, original_body: bytes) -> list[di
                 values = [attrs.get(key) for key in
                           ("code", "country_code", "geographical_area_id", "area_id", "id")]
                 tokens = {token.strip().upper() for value in values if value
-                          for token in re.split(r"[|,;\\s]+", str(value)) if token.strip()}
+                          for token in re.split(r"[|,;\s]+", str(value)) if token.strip()}
                 description = str(attrs.get("description") or attrs.get("name") or "").strip().lower()
                 if description in ("china", "people's republic of china", "people’s republic of china"):
                     tokens.add("CN")
