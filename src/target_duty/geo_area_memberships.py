@@ -65,15 +65,17 @@ def _columns(fields: list[str]) -> dict[str, str]:
          "membership__start_date", "geo_area_membership__start_date",
          "membership_starts", "starts", "effective_start_date", "start_date",
          "validity_start"),
-        lambda n: "start" in n and "date" in n and
-                  ("membership" in n or "member" in n))
+        lambda n: "start" in n and (
+                  ("date" in n and ("membership" in n or "member" in n))
+                  or n == "validity_start"))
     end = _choose(fields,
         ("membership__effective_end_date", "membership__validity_end_date",
          "membership__end_date", "geo_area_membership__end_date",
          "membership_ends", "ends", "effective_end_date", "end_date",
          "validity_end"),
-        lambda n: "end" in n and "date" in n and
-                  ("membership" in n or "member" in n))
+        lambda n: "end" in n and (
+                  ("date" in n and ("membership" in n or "member" in n))
+                  or n == "validity_end"))
     return {"group": group, "member": member, "start": start, "end": end}
 
 
