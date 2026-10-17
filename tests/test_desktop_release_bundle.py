@@ -65,6 +65,18 @@ class DesktopReleaseBundleTests(unittest.TestCase):
         self.assertIn('gb_rate_source_rows"] != counts["gb_rate_projected_rows"]', source)
         self.assertIn('xi_rate_source_rows"] != counts["xi_rate_projected_rows"]', source)
 
+    def test_metadata_separates_default_duty_and_source_option_coverage(self):
+        from pathlib import Path
+        source=(Path(__file__).resolve().parents[1]/
+                "src"/"target_duty"/"desktop_release_bundle.py").read_text()
+        self.assertIn('"default_duty_coverage"',source)
+        self.assertIn('"rate_option_coverage"',source)
+        self.assertIn('"codes_without_default_duty"',source)
+        self.assertIn('"missing_expression_options"',source)
+        self.assertIn('"projection_complete"',source)
+        self.assertIn("Includes percentage, specific and compound duties",source)
+        self.assertIn("Verified default-duty coverage",source)
+
     def test_gb_unique_simple_rate(self):
         self.assertEqual(simple_rate([("6%","","","")]),"6%")
         self.assertEqual(simple_rate([("0.00 %","","","")]),"0.00 %")
