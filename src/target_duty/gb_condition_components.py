@@ -21,6 +21,7 @@ from pathlib import Path
 BASE_URL = "https://data.api.trade.gov.uk/v1/datasets/uk-tariff-2021-01-01/versions/{version}/tables/{table}/data?format=csv&download"
 MAX_TABLE_BYTES = 512 * 1024 * 1024
 TABLES = (
+    "measures",
     "measure-conditions",
     "measure-condition-components",
     "measure-duty-expressions",
@@ -34,6 +35,7 @@ TABLES = (
     "certificate-types",
 )
 PREFIXES = {
+    "measures": ("measure", "measures"),
     "measure-conditions": ("measure_condition", "measure_conditions"),
     "measure-condition-components": ("measure_condition_component", "measure_condition_components"),
     "measure-duty-expressions": ("measure_duty_expression", "measure_duty_expressions"),
@@ -265,7 +267,7 @@ def build_condition_source(version, gb_db, output_path, work_dir=None):
 
         lookups = {}
         for table in (
-            "measure-duty-expressions", "measure-monetary-units", "measure-measurements-units",
+            "measures", "measure-duty-expressions", "measure-monetary-units", "measure-measurements-units",
             "measure-measurement-qualifiers", "measure-condition-codes", "measure-actions",
             "certificates", "certificate-types",
         ):
@@ -319,8 +321,13 @@ def build_condition_source(version, gb_db, output_path, work_dir=None):
                       required=False, label="condition SID")
         c_measure = _pick(condition_headers, ["measure_sid", "measure__sid"] +
                           [p + "__measure_sid" for p in condition_prefixes] +
-                          [p + "__measure__sid" for p in condition_prefixes],
-                          label="condition measure SID")
+                          [p + "__measure__sid" for p in condition_prefixes] +
+                          ["dependent_measure_id"],
+                          label="condition measure foreign key")
+        # The published normalized condition table exposes dependent_measure_id,
+        # which points to measures.trackedmodel_ptr_id. The measure's public
+        # SID (used in the expanded export) is resolved through this relation.
+        using_dependent_fk = c_measure == "dependent_measure_id"
         c_code_id = _pick(condition_headers, ["condition_code_id"] + [p + "__condition_code_id" for p in condition_prefixes],
                           required=False, label="condition code ID")
         c_code_direct = _pick(condition_headers, ["condition_code", "condition_code__code"] +
@@ -334,7 +341,7 @@ def build_condition_source(version, gb_db, output_path, work_dir=None):
         c_action_direct = _pick(condition_headers, ["action_code", "action__code"] +
                                 [p + "__action__code" for p in condition_prefixes],
                                 required=False, label="condition action code")
-        c_cert_id = _pick(condition_headers, ["certificate_id"] + [p + "__certificate_id" for p in condition_prefixes],
+        c_cert_id = _pick(condition_headers, ["certificate_id", "required_certificate_id"] + [p + "__certificate_id" for p in condition_prefixes],
                           required=False, label="condition certificate ID")
         c_cert_direct = _pick(condition_headers, ["certificate_code", "certificate__code"] +
                               [p + "__certificate__code" for p in condition_prefixes],
@@ -360,7 +367,13 @@ def build_condition_source(version, gb_db, output_path, work_dir=None):
         relevant_conditions = []
         unresolved_references = []
         for row in condition_rows:
-            measure_sid = _clean(row.get(c_measure))
+            measure_ref = _clean(row.get(c_measure))
+            if using_dependent_fk:
+                measure_sid = _ref(lookups["measures"], measure_ref).get("sid", "")
+                if measure_ref and not measure_sid:
+                    unresolved_references.append({"relationship":"dependent_measure_id","id":measure_ref})
+            else:
+                measure_sid = measure_ref
             if measure_sid not in relevant_sids:
                 continue
             pk = _clean(row.get(c_pk)) if c_pk else ""
@@ -428,7 +441,7 @@ def build_condition_source(version, gb_db, output_path, work_dir=None):
         p_money_direct = _pick(component_headers, ["monetary_unit__code", "monetary_unit_code"] +
                                [p + "__monetary_unit__code" for p in component_prefixes],
                                required=False, label="component monetary unit code")
-        p_measurement_id = _pick(component_headers, ["measurement_id"] + [p + "__measurement_id" for p in component_prefixes],
+        p_measurement_id = _pick(component_headers, ["measurement_id", "component_measurement_id"] + [p + "__measurement_id" for p in component_prefixes],
                                  required=False, label="component measurement ID")
         p_unit_id = _pick(component_headers, ["measurement_unit_id"] + [p + "__measurement_unit_id" for p in component_prefixes],
                           required=False, label="component measurement unit ID")
