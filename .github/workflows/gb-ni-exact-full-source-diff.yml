@@ -289,6 +289,8 @@ jobs:
             --xi-db xi/xi-public-full-merged.db \
             --xi-catalogue xi/xi-public-full-catalogue.db \
             --xi-manifest xi/xi-public-frozen-manifest.json \
+            --geo-memberships gb/gb-weekly-geo-area-memberships.csv \
+            --geo-memberships-report gb/gb-weekly-geo-area-memberships.json \
             --output-db desktop/tariffs.db \
             --output-metadata desktop/metadata.json
           python - <<'PY'
