@@ -33,9 +33,9 @@ class GeoAreaMembershipTests(unittest.TestCase):
         # Current DBT export headers use concise validity fields rather than
         # the older membership__effective_* aliases.
         payload = (
-            "trackedmodel_ptr_id,geo_group_id,member_id,validity_start,validity_end\\n"
-            "membership-1,1011,CN,2020-01-01,\\n"
-            "membership-2,G001,CN,2024-01-01,\\n"
+            "trackedmodel_ptr_id,geo_group_id,member_id,validity_start,validity_end\n"
+            "membership-1,1011,CN,2020-01-01,\n"
+            "membership-2,G001,CN,2024-01-01,\n"
         ).encode()
         result = inspect_csv(payload, date(2026, 10, 17), min_rows=1)
         self.assertEqual(result["active_china_group_ids"], ["1011", "G001"])
