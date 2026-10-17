@@ -278,6 +278,16 @@ jobs:
           name: xi-public-full-catalogue-${{ steps.source.outputs.xi_run }}
           github-token: ${{ github.token }}
           path: xi
+      - name: Capture same-as-of official XI geographical area tree for China applicability
+        if: steps.source.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          XI_AS_OF="$(python -c 'import json; print(json.load(open("xi/xi-public-frozen-manifest.json"))["as_of"])')"
+          python -m src.target_duty.xi_geographical_areas \
+            --as-of "$XI_AS_OF" \
+            --output xi/xi-geographical-areas.json \
+            --report xi/xi-geographical-areas-report.json
       - name: Build complete desktop release with source SHA/coverage and SQLite integrity checks
         if: steps.source.outputs.ready == 'true'
         run: |
@@ -291,6 +301,8 @@ jobs:
             --xi-manifest xi/xi-public-frozen-manifest.json \
             --geo-memberships gb/gb-weekly-geo-area-memberships.csv \
             --geo-memberships-report gb/gb-weekly-geo-area-memberships.json \
+            --xi-geographical-areas xi/xi-geographical-areas.json \
+            --xi-geographical-areas-report xi/xi-geographical-areas-report.json \
             --output-db desktop/tariffs.db \
             --output-metadata desktop/metadata.json
           python - <<'PY'
