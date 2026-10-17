@@ -5,3 +5,4 @@ production_eligible=false
 requested_as_of=2026-10-17
 reason=retry_after_current_geo_membership_validity_schema_fix_and_conditional_rate_audit
 production_eligible=false
+geo_area_reference_join_probe=20261017
