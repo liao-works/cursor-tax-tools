@@ -318,6 +318,7 @@ jobs:
           assert hashlib.sha256(data).hexdigest()==m["file_hash"].split(":")[1]
           assert hashlib.sha256(audit_bytes).hexdigest()==m["default_rate_gap_audit"]["sha256"].split(":")[1]
           assert audit["record_count"]==len(audit["records"])==m["default_rate_gap_audit"]["record_count"]
+          assert audit["source_versions"]==m["source_versions"]
           assert audit["record_count"]==sum(m["default_duty_coverage"][region]["codes_without_default_duty"] for region in ("GB","XI"))
           with sqlite3.connect("desktop/tariffs.db") as db:
               assert db.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
@@ -359,7 +360,7 @@ jobs:
           path=Path("desktop/metadata.json")
           metadata=json.loads(path.read_text(encoding="utf-8"))
           metadata["version"]=version
-          path.write_text(json.dumps(metadata,ensure_ascii=False,indent=2)+"\\n",encoding="utf-8")
+          path.write_text(json.dumps(metadata,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
           PY
               PREVIOUS_META_FINGERPRINT="$(python -c 'import hashlib,json,sys; d=json.load(open(sys.argv[1],encoding="utf-8")); [d.pop(k,None) for k in ("timestamp","last_modified","version")]; print(hashlib.sha256(json.dumps(d,ensure_ascii=False,sort_keys=True,separators=(",",":")).encode("utf-8")).hexdigest())' previous/metadata.json)"
               NEW_META_FINGERPRINT="$(python -c 'import hashlib,json,sys; d=json.load(open(sys.argv[1],encoding="utf-8")); [d.pop(k,None) for k in ("timestamp","last_modified","version")]; print(hashlib.sha256(json.dumps(d,ensure_ascii=False,sort_keys=True,separators=(",",":")).encode("utf-8")).hexdigest())' desktop/metadata.json)"
