@@ -88,8 +88,15 @@ def _area_tokens(value):
             if token.strip()}
 
 
+def _geography_contains_china(geography, china_groups=None):
+    """Test scope only; exclusions are retained and evaluated separately."""
+    geos=_area_tokens(geography)
+    groups=set(china_groups or ())
+    return bool(geos & {"CN","CHN","CHINA","1011"} or geos & groups)
+
+
 def _china_applicable(geography, excluded, china_groups=None):
-    """Resolve China against explicit areas and same-version active group membership."""
+    """Resolve China against explicit areas, groups and all source exclusions."""
     geos = _area_tokens(geography)
     exclusions = _area_tokens(excluded)
     groups = set(china_groups or ())
@@ -456,7 +463,9 @@ def _gb_rate_option_rows(conn, code, china_groups=None):
         AND measure_type NOT IN ('551','552','553','554')
         ORDER BY ordinal""", (code,)))
     groups=set(china_groups or ())
-    return [row for row in rows if _china_applicable(row[1], row[6], groups)]
+    # Keep rows whose geographic scope includes China even when an exclusion
+    # makes them inapplicable; the option UI and gap audit must explain why.
+    return [row for row in rows if _geography_contains_china(row[1], groups)]
 
 
 def _xi_rate_option_rows(conn, code, china_groups=None):
