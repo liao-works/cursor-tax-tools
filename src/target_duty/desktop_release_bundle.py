@@ -375,6 +375,25 @@ def xi_rate(rows, as_of:date, original_body:bytes|None=None):
     return next(iter(distinct)) if len(distinct)==1 else ""
 
 
+def _gb_rate_option_rows(conn, code):
+    """Project every CN/Erga Omnes non-remedy row, including all date states."""
+    return list(conn.execute("""SELECT measure_type,geography,expression,
+        additional_code,NULL,conditions,excluded_areas,effective_start,effective_end,raw_json
+        FROM measures WHERE region='GB' AND code=?
+        AND geography IN ('CN','1011')
+        AND measure_type NOT IN ('551','552','553','554')
+        ORDER BY ordinal""", (code,)))
+
+
+def _xi_rate_option_rows(conn, code):
+    """Project every CN/Erga Omnes non-remedy row, including all date states."""
+    return list(conn.execute("""SELECT measure_type,geography_id,duty_expression,
+        effective_start,effective_end,raw_json
+        FROM measures WHERE code=? AND geography_id IN ('CN','1011')
+        AND measure_type NOT IN ('551','552','553','554')
+        ORDER BY ordinal""", (code,)))
+
+
 def hash_file(path:Path):
     h=hashlib.sha256()
     with path.open("rb") as f:
@@ -442,13 +461,7 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                         AND effective_status='active' AND measure_type='103'
                         AND geography IN ('CN','1011') ORDER BY ordinal""",(code,)))
                     gb_rate=gb_china_rate(source)
-                    option_rows=list(gb_conn.execute("""SELECT measure_type,geography,expression,
-                         additional_code,NULL,conditions,excluded_areas,
-                         effective_start,effective_end,raw_json
-                         FROM measures WHERE region='GB' AND code=?
-                         AND geography IN ('CN','1011')
-                         AND measure_type NOT IN ('551','552','553','554')
-                         ORDER BY ordinal""",(code,)))
+                    option_rows=_gb_rate_option_rows(gb_conn,code)
                     gb_options=_gb_rate_options(option_rows,gb["as_of"])
                     if len(gb_options)!=len(option_rows):
                         raise ValueError("GB rate-option projection lost official measure rows for "+code)
@@ -475,11 +488,7 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                     if hashlib.sha256(raw).hexdigest()!=original[0]:
                         raise ValueError("XI raw response fingerprint mismatch for "+code)
                     ni_rate=xi_rate(source,xi["as_of"],raw)
-                    option_rows=list(xi_conn.execute("""SELECT measure_type,geography_id,
-                        duty_expression,effective_start,effective_end,raw_json
-                        FROM measures WHERE code=? AND geography_id IN ('CN','1011')
-                        AND measure_type NOT IN ('551','552','553','554')
-                        ORDER BY ordinal""",(code,)))
+                    option_rows=_xi_rate_option_rows(xi_conn,code)
                     xi_options=_xi_rate_options(option_rows,raw,xi["as_of"])
                     if len(xi_options)!=len(option_rows):
                         raise ValueError("XI rate-option projection lost official measure rows for "+code)
@@ -501,8 +510,10 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                 rate_options=json.dumps(gb_options+xi_options,ensure_ascii=False,separators=(",",":"))
                 counts["gb_rate_option_codes"]+=bool(gb_options)
                 counts["xi_rate_option_codes"]+=bool(xi_options)
-                counts["gb_rate_source_rows"]+=len(gb_options)
-                counts["xi_rate_source_rows"]+=len(xi_options)
+                counts["gb_rate_source_rows"]+=len(option_rows) if code in gb_codes else 0
+                counts["xi_rate_source_rows"]+=len(option_rows) if code in xi_codes else 0
+                counts["gb_rate_projected_rows"]+=len(gb_options)
+                counts["xi_rate_projected_rows"]+=len(xi_options)
                 for option in gb_options:
                     option_status_counts["GB:"+option["effective_status"]]+=1
                 for option in xi_options:
@@ -526,7 +537,11 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                 raise ValueError("Desktop SQLite integrity failed")
             if dest.execute("SELECT COUNT(*) FROM tariffs").fetchone()[0]!=len(all_codes):
                 raise ValueError("Desktop code union has holes")
-        stage.replace(out)
+        if counts["gb_rate_source_rows"] != counts["gb_rate_projected_rows"]:
+        raise ValueError("GB rate-option source/projection row counts differ")
+    if counts["xi_rate_source_rows"] != counts["xi_rate_projected_rows"]:
+        raise ValueError("XI rate-option source/projection row counts differ")
+    stage.replace(out)
     digest=hash_file(out)
     version="data-"+day.strftime("%Y%m%d")+"-"+digest[:16]
     stamp=datetime.now(timezone.utc).isoformat()
@@ -546,8 +561,12 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                            "xi_countervailing_codes":counts["xi_countervailing_codes"],
                            "gb_rate_option_codes":counts["gb_rate_option_codes"],
                            "xi_rate_option_codes":counts["xi_rate_option_codes"],
-                           "gb_rate_source_rows":counts["gb_rate_source_rows"],
-                           "xi_rate_source_rows":counts["xi_rate_source_rows"],
+                           "gb_rate_option_source_rows":counts["gb_rate_source_rows"],
+                           "gb_rate_option_projected_rows":counts["gb_rate_projected_rows"],
+                           "xi_rate_option_source_rows":counts["xi_rate_source_rows"],
+                           "xi_rate_option_projected_rows":counts["xi_rate_projected_rows"],
+                           "gb_rate_option_projection_complete":counts["gb_rate_source_rows"]==counts["gb_rate_projected_rows"],
+                           "xi_rate_option_projection_complete":counts["xi_rate_source_rows"]==counts["xi_rate_projected_rows"],
                            "missing_rate_expressions":counts["missing_rate_expressions"],
                            "conditional_rate_options":counts["conditional_rate_options"],
                            "china_applicable_rate_options":counts["china_applicable_rate_options"],
