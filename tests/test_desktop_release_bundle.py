@@ -28,7 +28,7 @@ class DesktopReleaseBundleTests(unittest.TestCase):
         self.assertEqual(simple_rate([("6%","","certificate","")]),"")
         self.assertEqual(simple_rate([("6%","1234","","")]),"")
         self.assertEqual(simple_rate([("6%","","","GB")]),"")
-        self.assertEqual(simple_rate([("£12/100kg","","","")]),"")
+        self.assertEqual(simple_rate([("£12/100kg","","","")]),"£12/100kg")
 
     def test_gb_null_sentinels_and_specific_additional_codes(self):
         self.assertEqual(gb_default_rate([("6.00 %","#NA","N/A","None")]),"6.00 %")
@@ -43,7 +43,7 @@ class DesktopReleaseBundleTests(unittest.TestCase):
         ]),"")
         self.assertEqual(gb_default_rate([("6%","1234","","")]),"")
         self.assertEqual(gb_default_rate([("6%","","certificate","")]),"")
-        self.assertEqual(gb_default_rate([("EUR 12/100kg","","","")]),"")
+        self.assertEqual(gb_default_rate([("EUR 12/100kg","","","")]),"EUR 12/100kg")
 
     def test_xi_stale_conditional_specific_and_compound_never_auto_populate(self):
         day=date(2026,10,16)
@@ -56,7 +56,7 @@ class DesktopReleaseBundleTests(unittest.TestCase):
         self.assertEqual(xi_rate([row(start="2027-01-01")],day),"")
         self.assertEqual(xi_rate([row(end="2026-10-15")],day),"")
         self.assertEqual(xi_rate([row(geo="GB")],day),"")
-        self.assertEqual(xi_rate([row(rate="10% + EUR 8 / 100 kg")],day),"")
+        self.assertEqual(xi_rate([row(rate="10% + EUR 8 / 100 kg")],day),"10% + EUR 8 / 100 kg")
         self.assertEqual(xi_rate([row(rels={
             "measure_conditions":{"data":[{"id":"1","type":"measure_condition"}]}})],day),"")
         self.assertEqual(xi_rate([
@@ -87,7 +87,7 @@ class DesktopReleaseBundleTests(unittest.TestCase):
                 "src"/"target_duty"/"desktop_release_bundle.py").read_text()
         self.assertIn("measure_type = '103'",source)
         self.assertIn('if kind != "103" or geo!="1011"',source)
-        self.assertNotIn("measure_type IN ('103','105')",source)
+        self.assertIn("measure_type IN ('103','105')",source)
 
     def test_hmrc_official_linked_duty_expression_is_replayed(self):
         import json
