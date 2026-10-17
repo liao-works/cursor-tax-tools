@@ -20,6 +20,10 @@ class GeoAreaMembershipTests(unittest.TestCase):
         self.assertIn("gb-weekly-geo-areas.csv",workflow)
         self.assertIn("gb-weekly-geo-area-descriptions.csv",workflow)
         self.assertIn("gb-weekly-geo-area-reference.json",workflow)
+        self.assertIn("--geo-areas gb-weekly-geo-areas.csv",workflow)
+        self.assertIn("--geo-area-descriptions gb-weekly-geo-area-descriptions.csv",workflow)
+        self.assertIn('geo["geo_areas_source_sha256"]',workflow)
+        self.assertIn('geo["geo_area_descriptions_source_sha256"]',workflow)
 
     def test_active_china_group_memberships_respect_dates(self):
         rows = [
