@@ -629,6 +629,7 @@ def hash_file(path:Path):
 def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
           xi_manifest:str, output_db:str, output_metadata:str,
           geo_memberships_path:str, geo_memberships_report_path:str,
+          geo_areas_path:str, geo_area_descriptions_path:str,
           xi_geographical_areas_path:str, xi_geographical_areas_report_path:str):
     input_paths=[Path(s).resolve() for s in (gb_db,gb_catalogue,xi_db,xi_catalogue,xi_manifest)]
     out=Path(output_db).resolve()
@@ -641,20 +642,29 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
     xi=_source(xi_db,region="XI")
     geo_path=Path(geo_memberships_path).resolve()
     geo_report_path=Path(geo_memberships_report_path).resolve()
+    geo_areas=Path(geo_areas_path).resolve()
+    geo_area_descriptions=Path(geo_area_descriptions_path).resolve()
     xi_geo_path=Path(xi_geographical_areas_path).resolve()
     xi_geo_report_path=Path(xi_geographical_areas_report_path).resolve()
-    evidence_paths=(geo_path,geo_report_path,xi_geo_path,xi_geo_report_path)
+    evidence_paths=(geo_path,geo_report_path,geo_areas,geo_area_descriptions,
+                    xi_geo_path,xi_geo_report_path)
     if (any(p in input_paths or p in (out,meta) for p in evidence_paths)
             or len(set(evidence_paths))!=len(evidence_paths)):
         raise ValueError("Geographical membership evidence must be separate source files")
     geo_payload=geo_path.read_bytes()
-    geo=inspect_geo_memberships(geo_payload,gb["as_of"])
+    geo_areas_payload=geo_areas.read_bytes()
+    geo_area_descriptions_payload=geo_area_descriptions.read_bytes()
+    geo=inspect_geo_memberships(geo_payload,gb["as_of"],
+        area_payload=geo_areas_payload,descriptions_payload=geo_area_descriptions_payload)
     geo_meta=json.loads(geo_report_path.read_text(encoding="utf-8"))
-    if (geo_meta.get("kind")!="dbt-official-geo-area-memberships-v1"
+    if (geo_meta.get("kind")!="dbt-official-geo-area-memberships-v2"
             or geo_meta.get("version")!=gb["version_or_catalogue"]
             or geo_meta.get("as_of")!=gb["as_of"].isoformat()
             or geo_meta.get("source_sha256")!=geo["source_sha256"]
-            or geo_meta.get("active_china_group_ids")!=geo["active_china_group_ids"]):
+            or geo_meta.get("geo_areas_source_sha256")!=geo["geo_areas_source_sha256"]
+            or geo_meta.get("geo_area_descriptions_source_sha256")!=geo["geo_area_descriptions_source_sha256"]
+            or geo_meta.get("active_china_group_ids")!=geo["active_china_group_ids"]
+            or geo_meta.get("unresolved_active_membership_count")!=geo["unresolved_active_membership_count"]):
         raise ValueError("Pinned official China geographical membership evidence mismatch")
     china_groups=set(geo["active_china_group_ids"])
     xi_geo_payload=xi_geo_path.read_bytes()
@@ -895,6 +905,11 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
         "geographical_membership_source":{
             "version":geo_meta["version"],"as_of":geo_meta["as_of"],
             "sha256":geo["source_sha256"],
+            "geo_areas_sha256":geo["geo_areas_source_sha256"],
+            "geo_area_descriptions_sha256":geo["geo_area_descriptions_source_sha256"],
+            "unresolved_active_membership_count":geo["unresolved_active_membership_count"],
+            "unresolved_active_memberships":geo["unresolved_active_memberships"],
+            "unresolved_historical_memberships":geo["unresolved_historical_memberships"],
             "active_china_group_count":len(china_groups),
             "active_china_group_ids":sorted(china_groups)},
         "xi_geographical_membership_source":{
@@ -949,14 +964,15 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
 def main():
     parser=argparse.ArgumentParser()
     for arg in ("gb-db","gb-catalogue","xi-db","xi-catalogue","xi-manifest",
-                "geo-memberships","geo-memberships-report","xi-geographical-areas",
-                "xi-geographical-areas-report","output-db","output-metadata"):
+                "geo-memberships","geo-memberships-report","geo-areas","geo-area-descriptions",
+                "xi-geographical-areas","xi-geographical-areas-report","output-db","output-metadata"):
         parser.add_argument("--"+arg,required=True)
     a=vars(parser.parse_args())
     print(json.dumps(build(a["gb_db"],a["gb_catalogue"],a["xi_db"],
                      a["xi_catalogue"],a["xi_manifest"],
                      a["output_db"],a["output_metadata"],
                      a["geo_memberships"],a["geo_memberships_report"],
+                     a["geo_areas"],a["geo_area_descriptions"],
                      a["xi_geographical_areas"],a["xi_geographical_areas_report"]),ensure_ascii=False,indent=2))
 
 if __name__=="__main__":
