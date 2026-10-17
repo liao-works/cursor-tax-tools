@@ -198,6 +198,8 @@ def inspect_csv(payload: bytes, as_of: date, *, min_rows: int = 1_000,
         if last and last < first:
             raise ValueError(f"Geo membership ends before start at row {number}")
         is_active = first <= as_of and (last is None or as_of <= last)
+        if is_active:
+            active_rows += 1
         if area_map is None:
             # Older fixture schemas contain literal area codes. Current DBT
             # numeric foreign keys must be resolved using the pinned geo-areas.
@@ -212,20 +214,18 @@ def inspect_csv(payload: bytes, as_of: date, *, min_rows: int = 1_000,
                     unresolved_active.append({"row":number,"group_id":raw_group,
                                               "group_code":group,"member_id":raw_member,
                                               "member_code":member})
+                    if member == "CN" and not group:
+                        raise ValueError("Active China membership has unresolved group foreign key")
                 else:
                     unresolved_historical += 1
-                # An unknown member FK cannot equal the official CN area ID:
-                # CN's primary key is resolved independently in the pinned map.
-                # Never infer it to be China, and never add the group to China scope.
+                # Unknown non-China member IDs are retained in the audit but
+                # are not guessed to be China. The pinned geo-areas table maps
+                # China's unique primary key to CN independently.
                 continue
         if member == "CN":
             china_rows += 1
-        if is_active:
-            active_rows += 1
-            if member == "CN":
-                if not group:
-                    raise ValueError("Active China membership has unresolved group foreign key")
-                active_groups.add(group)
+        if is_active and member == "CN":
+            active_groups.add(group)
     if total_rows < min_rows:
         raise ValueError(f"Official geographical membership table is suspiciously small: {total_rows} < {min_rows}")
     if area_map is not None and "CN" not in set(area_map.values()):
@@ -239,6 +239,7 @@ def inspect_csv(payload: bytes, as_of: date, *, min_rows: int = 1_000,
         "as_of": as_of.isoformat(),
         "row_count": total_rows,
         "active_membership_rows": active_rows,
+        "resolved_active_membership_rows": active_rows-len(unresolved_active),
         "china_membership_rows": china_rows,
         "active_china_group_count": len(active_groups),
         "active_china_group_ids": sorted(active_groups),
