@@ -219,6 +219,7 @@ class ChinaTradeRemedyTests(unittest.TestCase):
         self.assertEqual(gb_china_rate([("8%", "", "", "CHN|US", "1011")]), "")
         self.assertTrue(_china_applicable("CN", "SCN"))
         self.assertFalse(_china_applicable("1011", "US|CN"))
+        self.assertFalse(_china_applicable("1011", "G001", {"G001"}))
         self.assertTrue(_china_applicable("G001", "", {"G001"}))
         self.assertEqual(gb_china_rate([("6%", "", "", "", "G001"),
                                         ("8%", "", "", "", "1011")], {"G001"}), "6%")
@@ -301,6 +302,12 @@ class ChinaTradeRemedyTests(unittest.TestCase):
         cn_exclusion={"excluded_countries":{"data":[{"type":"geographical_area","id":"CN"}]}}
         self.assertEqual(xi_rate([row("1011","8%",rels=cn_exclusion)],day,
                                  json.dumps(doc).encode()),"")
+        group_doc={"included":[
+            {"type":"geographical_area","id":"G001","attributes":{"code":"G001","description":"China group"}}
+        ]}
+        group_exclusion={"excluded_geographical_areas":{"data":[{"type":"geographical_area","id":"G001"}]}}
+        self.assertEqual(xi_rate([row("1011","8%",rels=group_exclusion)],day,
+                                 json.dumps(group_doc).encode(),{"G001"},{"G001":"China group"}),"")
         conditional={"measure_conditions":{"data":[{"type":"measure_condition","id":"c"}]}}
         self.assertEqual(xi_rate([row("1011","8%"),row("CN","5%",rels=conditional)],day,
                                  json.dumps(doc).encode()),"8%")
