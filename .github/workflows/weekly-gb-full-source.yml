@@ -29,6 +29,7 @@ jobs:
         run: |
           python -m unittest discover -s tests -p 'test_gb_full_measures.py' -v
           python -m unittest discover -s tests -p 'test_dbt_version_discovery.py' -v
+          python -m unittest discover -s tests -p 'test_geo_area_memberships.py' -v
       - name: Discover current official DBT version and required CSVW schema
         shell: bash
         run: |
@@ -70,6 +71,15 @@ jobs:
               json.dumps(report,sort_keys=True,indent=2)+"\n")
           print(json.dumps(report,indent=2))
           PY
+      - name: Download same-version official geographical group memberships for China applicability
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.geo_area_memberships \
+            --version "$(cat gb-weekly-pin.txt)" \
+            --as-of "$(cat gb-weekly-as-of.txt)" \
+            --output gb-weekly-geo-area-memberships.csv \
+            --report gb-weekly-geo-area-memberships.json
       - name: Independently replay EVERY original GB measure into isolated review database
         shell: bash
         run: |
@@ -102,6 +112,10 @@ jobs:
               return h.hexdigest()
           assert report["version"]==meta["resolved_version"]==pin
           assert report["as_of"]==meta["as_of"]==day
+          geo=json.loads(Path("gb-weekly-geo-area-memberships.json").read_text())
+          assert geo["version"]==pin and geo["as_of"]==day
+          assert geo["source_sha256"]==sha("gb-weekly-geo-area-memberships.csv")
+          assert geo["active_china_group_count"]>0
           assert sha(source)==download["sha256"]==report["source_csv_sha256"]
           # Historical fully verified GB export had 1,123,765 source rows.
           # A >10% sudden drop is a source-regression alert requiring review,
@@ -146,6 +160,8 @@ jobs:
             gb-weekly-measures.json
             gb-weekly-version-discovery.json
             gb-weekly-source-download.json
+            gb-weekly-geo-area-memberships.csv
+            gb-weekly-geo-area-memberships.json
             gb-weekly-pin.txt
             gb-weekly-as-of.txt
           retention-days: 30

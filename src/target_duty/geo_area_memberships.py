@@ -75,7 +75,7 @@ def _columns(fields: list[str]) -> dict[str, str]:
     return {"group": group, "member": member, "start": start, "end": end}
 
 
-def inspect_csv(payload: bytes, as_of: date) -> dict:
+def inspect_csv(payload: bytes, as_of: date, *, min_rows: int = 1_000) -> dict:
     if not payload or b"\x00" in payload:
         raise ValueError("Empty or binary geo-area-memberships CSV")
     reader = csv.DictReader(io.StringIO(payload.decode("utf-8-sig"), newline=""))
@@ -110,8 +110,8 @@ def inspect_csv(payload: bytes, as_of: date) -> dict:
             active_rows += 1
             if member == "CN":
                 active_groups.add(group)
-    if total_rows < 1_000:
-        raise ValueError("Official geographical membership table is suspiciously small")
+    if total_rows < min_rows:
+        raise ValueError(f"Official geographical membership table is suspiciously small: {total_rows} < {min_rows}")
     if not active_groups:
         raise ValueError("Official membership source reports no active China groups")
     return {

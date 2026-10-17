@@ -111,6 +111,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_source_refresh_closure.py' -v
           python -m unittest discover -s tests -p 'test_xi_canary_delta_refetch.py' -v
           python -m unittest discover -s tests -p 'test_dbt_version_discovery.py' -v
+          python -m unittest discover -s tests -p 'test_geo_area_memberships.py' -v
           python -m unittest discover -s tests -p 'test_gb_source_ledger.py' -v
       - name: Commodity and catalogue parser contracts formerly duplicated in PR Actions
         run: |

@@ -420,7 +420,8 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
     xi=_source(xi_db,region="XI")
     geo_path=Path(geo_memberships_path).resolve()
     geo_report_path=Path(geo_memberships_report_path).resolve()
-    if geo_path in input_paths or geo_report_path in input_paths or geo_path==geo_report_path:
+    if (geo_path in input_paths or geo_report_path in input_paths or geo_path==geo_report_path
+            or geo_path in (out,meta) or geo_report_path in (out,meta)):
         raise ValueError("Geographical membership evidence must be separate source files")
     geo_payload=geo_path.read_bytes()
     geo=inspect_geo_memberships(geo_payload,gb["as_of"])
@@ -605,7 +606,7 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
             "active_china_group_count":len(china_groups),
             "active_china_group_ids":sorted(china_groups)},
         "coverage":{"GB":len(gb_codes),"XI":len(xi_codes)},
-        "rate_scope":"China-origin ordinary 103 duties prefer an unconditional CN-specific expression over Erga Omnes 1011; rate_options preserve every GB/XI source measure row in explicit CN/1011 geography except 551/552/553/554, across active/expired/future/unknown dates; those four trade-remedy types are retained separately with exporter codes and dates; other taxes outside this tariff measures dataset (e.g. VAT and quota balances) are not certified here",
+        "rate_scope":"China-origin ordinary 103 duties prefer unconditional CN-specific rates, then active official GB geographical groups containing CN, then Erga Omnes 1011; rate_options preserve every GB/XI non-remedy measure row whose geography is explicitly CN/1011 or (for GB) a same-version active group containing CN, across active/expired/future/unknown dates; 551/552/553/554 trade-remedy types are retained separately with exporter codes and dates; VAT, quota balances and XI group membership not proven by this GB source are not certified here",
         "download_urls":{
             "primary":"https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/tariffs.db",
             "metadata":"https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/metadata.json"},
