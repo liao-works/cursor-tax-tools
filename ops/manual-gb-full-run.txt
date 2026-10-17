@@ -1,8 +1,5 @@
 request=latest_complete_official_gb_source
 requested_as_of=2026-10-17
-reason=v4.0.1629_newest_official_pin_and_geo_membership_schema_fix
-production_eligible=false
-requested_as_of=2026-10-17
-reason=retry_after_current_geo_membership_validity_schema_fix_and_conditional_rate_audit
+reason=geo_area_reference_join_probe_and_full_source_refresh
 production_eligible=false
 geo_area_reference_join_probe=20261017
