@@ -41,6 +41,15 @@ class DesktopReleaseBundleTests(unittest.TestCase):
         self.assertEqual(gap["reason"], "conflicting_unconditional_103_rates_at_selected_scope")
         self.assertEqual(gap["code"], "0101210000")
         self.assertEqual(gap["active_unconditional_103_option_count"], 2)
+        multiple=dict(base, expression="", expression_available=True,
+                      expression_resolution="multiple", expression_count=2,
+                      expression_options=[{"expression":"7%"},{"expression":"12 GBP/100 kg"}])
+        gap=_default_rate_gap("XI","0101210000","",[multiple],[multiple])
+        self.assertEqual(gap["reason"],"selected_103_measure_has_multiple_duty_expressions")
+        self.assertEqual(gap["options"][0]["expression_options"],multiple["expression_options"])
+        unresolved=dict(base,expression_resolution="unresolved_link")
+        gap=_default_rate_gap("XI","0101210000","",[unresolved],[unresolved])
+        self.assertEqual(gap["reason"],"selected_103_measure_has_unresolved_duty_expression")
 
     def test_metadata_accounts_for_active_conditional_rates_and_expressions(self):
         from pathlib import Path
