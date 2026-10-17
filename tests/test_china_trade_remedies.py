@@ -245,10 +245,15 @@ class ChinaTradeRemedyTests(unittest.TestCase):
                 "measure__type__description":"official measure "+kind})
             db.execute("INSERT INTO measures VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 ("GB","0101210000",kind,geo,rate,"","","",start,end,raw,i))
+        # China is explicitly excluded from this Erga Omnes measure. Keep it
+        # in the option evidence but label it inapplicable instead of dropping it.
+        db.execute("INSERT INTO measures VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            ("GB","0101210000","103","1011","7%","","","CN",
+             "2026-01-01",None,json.dumps({"measure__sid":"excluded-cn"}),10))
         source=_gb_rate_option_rows(db,"0101210000",{"G001"})
         options=_gb_rate_options(source,TODAY,{"G001"})
-        self.assertEqual(len(source),5)  # US is excluded; 551/552 are in remedy details.
-        self.assertEqual(len(options),5)
+        self.assertEqual(len(source),6)  # US is excluded; remedies stay in their own table.
+        self.assertEqual(len(options),6)
         self.assertEqual({o["effective_status"] for o in options},
                          {"active","expired","future","unknown"})
         self.assertEqual(options[2]["measure_type"],"106")
@@ -256,6 +261,9 @@ class ChinaTradeRemedyTests(unittest.TestCase):
         self.assertFalse(options[3]["expression_available"])
         self.assertEqual(options[4]["geography"],"G001")
         self.assertTrue(options[4]["china_applicable"])
+        self.assertEqual(options[5]["source_id"],"excluded-cn")
+        self.assertFalse(options[5]["china_applicable"])
+        self.assertEqual(options[5]["excluded_areas"],"CN")
         db.close()
 
     def test_xi_rate_option_projection_keeps_all_date_states_and_other_measure_types(self):
