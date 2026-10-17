@@ -673,7 +673,7 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
         "by_region_reason":dict(sorted(gap_counts.items())),
         "records":gap_records,
     }
-    audit_bytes=(json.dumps(audit_doc,ensure_ascii=False,sort_keys=True,indent=2)+"\\n").encode("utf-8")
+    audit_bytes=(json.dumps(audit_doc,ensure_ascii=False,sort_keys=True,indent=2)+"\n").encode("utf-8")
     audit_hash=hashlib.sha256(audit_bytes).hexdigest()
     audit_path.write_bytes(audit_bytes)
     report={
