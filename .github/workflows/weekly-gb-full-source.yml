@@ -90,7 +90,7 @@ jobs:
                       raise SystemExit(f"Unpinned or failed official table response: {table}")
                   payload=response.read(100_000_001)
                   resolved=response.geturl()
-              if not payload or len(payload)>100_000_000 or b"\\x00" in payload:
+              if not payload or len(payload)>100_000_000 or bytes([0]) in payload:
                   raise SystemExit(f"Empty, oversized or binary official table: {table}")
               path=Path(f"gb-weekly-{table}.csv")
               path.write_bytes(payload)
@@ -110,7 +110,7 @@ jobs:
               print(f"OFFICIAL {table} HEADER:",json.dumps(header))
               print(f"OFFICIAL {table} SAMPLE:",json.dumps(samples[:3]))
           Path("gb-weekly-geo-area-reference.json").write_text(
-              json.dumps(reports,ensure_ascii=False,indent=2)+"\\n",encoding="utf-8")
+              json.dumps(reports,ensure_ascii=False,indent=2)+chr(10),encoding="utf-8")
           PY
       - name: Download same-version official geographical group memberships for China applicability
         shell: bash
