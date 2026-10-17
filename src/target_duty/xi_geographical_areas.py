@@ -23,7 +23,7 @@ def source_url(as_of: date) -> str:
     return PUBLIC_API_URL.rsplit("/commodities/", 1)[0] + "/geographical_areas?" + query
 
 
-def inspect_payload(payload: bytes, as_of: date) -> dict:
+def inspect_payload(payload: bytes, as_of: date, *, min_areas: int = 50) -> dict:
     if not payload or len(payload) > MAX_BYTES:
         raise ValueError("Empty or oversized official XI geographical-area response")
     try:
@@ -49,7 +49,7 @@ def inspect_payload(payload: bytes, as_of: date) -> dict:
             if json.dumps(previous, sort_keys=True) != json.dumps(item, sort_keys=True):
                 raise ValueError("Conflicting XI geographical-area resource IDs")
         nodes[area_id] = item
-    if len(nodes) < 50 or "CN" not in nodes or "1011" not in nodes:
+    if len(nodes) < min_areas or "CN" not in nodes or "1011" not in nodes:
         raise ValueError("XI geographical-area inventory is incomplete")
 
     memo = {}
