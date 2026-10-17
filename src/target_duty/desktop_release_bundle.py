@@ -92,9 +92,9 @@ def _china_applicable(geography, excluded, china_groups=None):
     """Resolve China against explicit areas and same-version active group membership."""
     geos = _area_tokens(geography)
     exclusions = _area_tokens(excluded)
-    if exclusions & {"CN", "CHN", "CHINA"}:
-        return False
     groups = set(china_groups or ())
+    if exclusions & ({"CN", "CHN", "CHINA"} | groups):
+        return False
     return bool(geos & {"CN", "1011"} or geos & groups)
 
 
@@ -354,7 +354,7 @@ def xi_rate(rows, as_of:date, original_body:bytes|None=None, china_groups=None):
             if not tokens:
                 unresolved_exclusion=True
             excluded_codes.update(tokens)
-        if excluded_codes & {"CN","CHN","CHINA"} or unresolved_exclusion:
+        if excluded_codes & ({"CN","CHN","CHINA"} | groups) or unresolved_exclusion:
             continue
         link=(rel.get("duty_expression") or {}).get("data")
         if isinstance(link,list) and len(link)!=1:
