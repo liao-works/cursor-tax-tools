@@ -1,4 +1,4 @@
 request=latest_complete_official_gb_source
-requested_as_of=2026-10-16
-reason=v4.0.1629_newest_official_pin
+requested_as_of=2026-10-17
+reason=v4.0.1629_newest_official_pin_and_geo_membership_schema_fix
 production_eligible=false
