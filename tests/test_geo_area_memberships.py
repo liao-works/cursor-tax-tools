@@ -11,6 +11,16 @@ class GeoAreaMembershipTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             source_url("latest")
 
+    def test_weekly_source_archives_same_version_geo_area_join_tables(self):
+        from pathlib import Path
+        workflow=(Path(__file__).resolve().parents[1]/".github"/"workflows"/
+                  "weekly-gb-full-source.yml").read_text()
+        self.assertIn('("geo-areas","geo-area-descriptions")',workflow)
+        self.assertIn('f"versions/{version}/tables/{table}/data?format=csv"',workflow)
+        self.assertIn("gb-weekly-geo-areas.csv",workflow)
+        self.assertIn("gb-weekly-geo-area-descriptions.csv",workflow)
+        self.assertIn("gb-weekly-geo-area-reference.json",workflow)
+
     def test_active_china_group_memberships_respect_dates(self):
         rows = [
             "geographical_area__id,member__id,membership__effective_start_date,membership__effective_end_date",
