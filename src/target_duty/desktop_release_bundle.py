@@ -47,6 +47,26 @@ def _expression(value):
     return _clean(value)
 
 
+def _effective_status(start, end, as_of):
+    """Classify source dates; missing/invalid dates are never assumed current."""
+    start = _clean(start)
+    end = _clean(end)
+    try:
+        if not start:
+            return "unknown"
+        first = date.fromisoformat(start[:10])
+        last = date.fromisoformat(end[:10]) if end else None
+        if last and last < first:
+            return "unknown"
+    except (TypeError, ValueError):
+        return "unknown"
+    if first > as_of:
+        return "future"
+    if last and last < as_of:
+        return "expired"
+    return "active"
+
+
 def simple_rate(rows):
     """Return one exact unconditional expression, including specific/compound duty."""
     if not rows:
@@ -78,6 +98,7 @@ def _gb_rate_options(rows, as_of):
             "excluded_areas":_clean(excluded),
             "effective_start":_clean(start),
             "effective_end":_clean(end),
+            "effective_status":_effective_status(start, end, as_of),
             "source_id":_clean(raw_obj.get("measure__sid")),
         }
         option["expression_available"] = bool(option["expression"])
@@ -172,6 +193,9 @@ def _xi_rate_options(rows, original_body, as_of):
             "excluded_areas":",".join(dict.fromkeys(x for x in excluded_codes if x)),
             "effective_start":_clean(start),
             "effective_end":_clean(end),
+            "effective_status":_effective_status(start, end, as_of),
+            "condition_ids":[_clean(x.get("id")) for x in conditions if _clean(x.get("id"))],
+            "additional_code_ids":[_clean(x.get("id")) for x in additional if _clean(x.get("id"))],
             "source_id":_clean(node.get("id")),
         }
         option["expression_available"] = bool(option["expression"])
@@ -199,17 +223,19 @@ def _blank(value):
 
 
 def gb_default_rate(rows):
-    """Select an unconditional base duty, ignoring inapplicable extra-code rows.
+    """Select one exact unconditional duty expression, not percentages only.
 
-    A different unconditional rate, or an unclear base expression, makes
-    the code ambiguous. Never publish a conditional or specific-country rate.
+    Specific and compound duties (for example GBP/kg or percentage + specific
+    duty) are valid official expressions. Conditions, additional codes,
+    exclusions, conflicting expressions or blank expressions never become a
+    default. Missing default stays blank rather than being guessed as zero.
     """
     default=[]
     for expr,additional,conditions,excluded in rows:
         if not (_blank(additional) and _blank(conditions) and _blank(excluded)):
             continue
-        expression=(expr or "").strip()
-        if not PERCENT.fullmatch(expression):
+        expression=_expression(expr)
+        if not expression:
             return ""
         default.append(expression)
     distinct=set(default)
