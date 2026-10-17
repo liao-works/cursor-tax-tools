@@ -663,6 +663,9 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
             or geo_meta.get("source_sha256")!=geo["source_sha256"]
             or geo_meta.get("geo_areas_source_sha256")!=geo["geo_areas_source_sha256"]
             or geo_meta.get("geo_area_descriptions_source_sha256")!=geo["geo_area_descriptions_source_sha256"]
+            or geo_meta.get("geo_areas_row_count")!=geo["geo_areas_row_count"]
+            or geo_meta.get("geo_area_descriptions_row_count")!=geo["geo_area_descriptions_row_count"]
+            or geo_meta.get("geo_area_descriptions_missing_description_rows")!=geo["geo_area_descriptions_missing_description_rows"]
             or geo_meta.get("active_china_group_ids")!=geo["active_china_group_ids"]
             or geo_meta.get("unresolved_active_membership_count")!=geo["unresolved_active_membership_count"]):
         raise ValueError("Pinned official China geographical membership evidence mismatch")
