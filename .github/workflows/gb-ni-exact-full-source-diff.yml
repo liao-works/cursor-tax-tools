@@ -301,7 +301,9 @@ jobs:
             --xi-manifest xi/xi-public-frozen-manifest.json \
             --geo-memberships gb/gb-weekly-geo-area-memberships.csv \
             --geo-memberships-report gb/gb-weekly-geo-area-memberships.json \
-            --geo-areas gb/gb-weekly-geo-areas.csv \\\n            --geo-area-descriptions gb/gb-weekly-geo-area-descriptions.csv \\\n            --xi-geographical-areas xi/xi-geographical-areas.json \
+            --geo-areas gb/gb-weekly-geo-areas.csv \
+            --geo-area-descriptions gb/gb-weekly-geo-area-descriptions.csv \
+            --xi-geographical-areas xi/xi-geographical-areas.json \
             --xi-geographical-areas-report xi/xi-geographical-areas-report.json \
             --output-db desktop/tariffs.db \
             --output-metadata desktop/metadata.json
