@@ -194,7 +194,7 @@ def _xi_text(nodes):
     return "; ".join(dict.fromkeys(values))
 
 
-def _xi_rate_options(rows, original_body, as_of, china_groups=None):
+def _xi_rate_options(rows, original_body, as_of, china_groups=None, area_descriptions=None):
     document=json.loads(original_body)
     index=_xi_relation_map(document)
     options=[]
@@ -239,7 +239,7 @@ def _xi_rate_options(rows, original_body, as_of, china_groups=None):
             "measure_type":str(kind),
             "measure_type_description":_xi_text(type_nodes),
             "geography":geo_id,
-            "geography_description":_xi_text(geos),
+            "geography_description":_xi_text(geos) or _clean((area_descriptions or {}).get(_clean(geo), "")),
             "expression":expr,
             "additional_code":",".join(dict.fromkeys(additional_codes)),
             "additional_description":_xi_text(additional),
@@ -529,7 +529,7 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                         raise ValueError("XI raw response fingerprint mismatch for "+code)
                     ni_rate=xi_rate(source,xi["as_of"],raw,xi_groups)
                     xi_option_rows=_xi_rate_option_rows(xi_conn,code,xi_groups)
-                    xi_options=_xi_rate_options(xi_option_rows,raw,xi["as_of"],xi_groups)
+                    xi_options=_xi_rate_options(xi_option_rows,raw,xi["as_of"],xi_groups,xi_geo["area_descriptions"])
                     if len(xi_options)!=len(xi_option_rows):
                         raise ValueError("XI rate-option projection lost official measure rows for "+code)
                     counts["xi_percent"]+=bool(ni_rate)
@@ -537,7 +537,7 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                         duty_expression,effective_start,effective_end,raw_json
                         FROM measures WHERE code=? AND measure_type IN ('551','552','553','554')
                         ORDER BY ordinal""",(code,)))
-                    ni_trade=xi_remedies(trade_rows,xi["as_of"],raw,xi_groups)
+                    ni_trade=xi_remedies(trade_rows,xi["as_of"],raw,xi_groups,xi_geo["area_descriptions"])
                 gb_antidumping=remedy_summary(gb_trade,"anti_dumping")
                 gb_countervailing=remedy_summary(gb_trade,"countervailing")
                 ni_antidumping=remedy_summary(ni_trade,"anti_dumping")
