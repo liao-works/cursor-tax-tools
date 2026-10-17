@@ -20,7 +20,7 @@ def source_url(as_of: date) -> str:
         "as_of": as_of.isoformat(),
         "filter[exclude_none]": "true",
     })
-    return PUBLIC_API_URL.rsplit("/", 1)[0] + "/geographical_areas?" + query
+    return PUBLIC_API_URL.rsplit("/commodities/", 1)[0] + "/geographical_areas?" + query
 
 
 def inspect_payload(payload: bytes, as_of: date) -> dict:
@@ -32,6 +32,9 @@ def inspect_payload(payload: bytes, as_of: date) -> dict:
         raise ValueError("Official XI geographical-area response is not valid JSON") from error
     if not isinstance(doc, dict) or not isinstance(doc.get("data"), list):
         raise ValueError("XI geographical-area response lacks the complete data list")
+    links = doc.get("links") or {}
+    if isinstance(links, dict) and links.get("next"):
+        raise ValueError("XI geographical-area inventory is paginated and incomplete")
     nodes = {}
     for item in (doc.get("data") or []) + (doc.get("included") or []):
         if not isinstance(item, dict) or item.get("type") != "geographical_area":
