@@ -312,7 +312,13 @@ jobs:
           from pathlib import Path
           m=json.loads(Path("desktop/metadata.json").read_text())
           data=Path("desktop/tariffs.db").read_bytes()
+          audit_path=Path("desktop/rate-gap-audit.json")
+          audit_bytes=audit_path.read_bytes()
+          audit=json.loads(audit_bytes)
           assert hashlib.sha256(data).hexdigest()==m["file_hash"].split(":")[1]
+          assert hashlib.sha256(audit_bytes).hexdigest()==m["default_rate_gap_audit"]["sha256"].split(":")[1]
+          assert audit["record_count"]==len(audit["records"])==m["default_rate_gap_audit"]["record_count"]
+          assert audit["record_count"]==sum(m["default_duty_coverage"][region]["codes_without_default_duty"] for region in ("GB","XI"))
           with sqlite3.connect("desktop/tariffs.db") as db:
               assert db.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
               assert db.execute("SELECT COUNT(*) FROM tariffs").fetchone()[0]==m["record_count"]
@@ -339,10 +345,35 @@ jobs:
           echo "Built source-reviewed $VERSION with $HASH"
           # Do not notify installed desktops for an unchanged SQLite content hash.
           if gh release view latest-data --json tagName >/dev/null 2>&1; then
+            mkdir -p previous
             gh release download latest-data -p metadata.json -D previous
             PREVIOUS="$(python -c 'import json;print(json.load(open("previous/metadata.json")).get("file_hash",""))')"
             if [[ "$PREVIOUS" == "$HASH" ]]; then
-              echo "::notice::Published database content unchanged, suppressing duplicate desktop notification"
+              PREVIOUS_VERSION="$(python -c 'import json;print(json.load(open("previous/metadata.json")).get("version",""))')"
+              python - "$PREVIOUS_VERSION" <<'PY'
+          import json,sys
+          from pathlib import Path
+          version=sys.argv[1]
+          if not version:
+              raise SystemExit("Existing latest-data metadata has no immutable version")
+          path=Path("desktop/metadata.json")
+          metadata=json.loads(path.read_text(encoding="utf-8"))
+          metadata["version"]=version
+          path.write_text(json.dumps(metadata,ensure_ascii=False,indent=2)+"\\n",encoding="utf-8")
+          PY
+              PREVIOUS_META_FINGERPRINT="$(python -c 'import hashlib,json,sys; d=json.load(open(sys.argv[1],encoding="utf-8")); [d.pop(k,None) for k in ("timestamp","last_modified","version")]; print(hashlib.sha256(json.dumps(d,ensure_ascii=False,sort_keys=True,separators=(",",":")).encode("utf-8")).hexdigest())' previous/metadata.json)"
+              NEW_META_FINGERPRINT="$(python -c 'import hashlib,json,sys; d=json.load(open(sys.argv[1],encoding="utf-8")); [d.pop(k,None) for k in ("timestamp","last_modified","version")]; print(hashlib.sha256(json.dumps(d,ensure_ascii=False,sort_keys=True,separators=(",",":")).encode("utf-8")).hexdigest())' desktop/metadata.json)"
+              PREVIOUS_AUDIT_HASH="missing"
+              if gh release download latest-data -p rate-gap-audit.json -D previous >/dev/null 2>&1; then
+                PREVIOUS_AUDIT_HASH="$(sha256sum previous/rate-gap-audit.json | cut -d ' ' -f1)"
+              fi
+              NEW_AUDIT_HASH="$(sha256sum desktop/rate-gap-audit.json | cut -d ' ' -f1)"
+              if [[ "$PREVIOUS_META_FINGERPRINT" != "$NEW_META_FINGERPRINT" || "$PREVIOUS_AUDIT_HASH" != "$NEW_AUDIT_HASH" ]]; then
+                gh release upload latest-data desktop/metadata.json desktop/rate-gap-audit.json --clobber
+                echo "::notice::Updated metadata and default-rate gap audit without changing SQLite; no duplicate desktop notification"
+              else
+                echo "::notice::Database bytes, source metadata, and default-rate gap audit unchanged; suppressing duplicate desktop notification"
+              fi
               exit 0
             fi
           fi
@@ -351,14 +382,14 @@ jobs:
             echo "::error::Immutable data tag already exists for a changed publish"
             exit 1
           fi
-          gh release create "$VERSION" desktop/tariffs.db desktop/metadata.json \
+          gh release create "$VERSION" desktop/tariffs.db desktop/metadata.json desktop/rate-gap-audit.json \
             --target "${GITHUB_SHA}" --title "Tariff data $VERSION" \
-            --notes "Full verified GB and XI official-source snapshot. Only unambiguous active percentage rates included."
+            --notes "Complete GB/XI source snapshot. Default fields contain only unambiguous active China-applicable type 103 duties (percentage, specific or compound); conditional/special-use options and trade remedies are preserved separately. The default-rate gap audit is attached; no blank is inferred as zero."
           if gh release view latest-data >/dev/null 2>&1; then
-            gh release upload latest-data desktop/tariffs.db desktop/metadata.json --clobber
+            gh release upload latest-data desktop/tariffs.db desktop/metadata.json desktop/rate-gap-audit.json --clobber
           else
-            gh release create latest-data desktop/tariffs.db desktop/metadata.json \
+            gh release create latest-data desktop/tariffs.db desktop/metadata.json desktop/rate-gap-audit.json \
               --target "${GITHUB_SHA}" --title "Latest desktop tariff data" \
-              --notes "Current GB/XI full-source desktop database"
+              --notes "Current GB/XI full-source desktop database. Default duties are separated from conditional measures; the full gap audit is published alongside the database."
           fi
           echo "::notice::New released data $VERSION; desktop clients will detect new SHA-256 within 24h"
