@@ -308,7 +308,7 @@ def gb_default_rate(rows):
     return next(iter(distinct)) if len(distinct)==1 else ""
 
 
-def xi_rate(rows, as_of:date, original_body:bytes|None=None, china_groups=None):
+def xi_rate(rows, as_of:date, original_body:bytes|None=None, china_groups=None, area_descriptions=None):
     """Resolve China's unconditioned 103 default, preferring a CN-specific rate.
 
     Conditional/additional-code variants remain in rate_options. An exclusion
@@ -348,9 +348,14 @@ def xi_rate(rows, as_of:date, original_body:bytes|None=None, china_groups=None):
         for ref in exclusion_refs:
             linked=related.get((str(ref.get("type")),str(ref.get("id"))))
             if linked is None:
-                tokens=_area_tokens(ref.get("id"))
+                ref_id=str(ref.get("id") or "")
+                tokens=_area_tokens(ref_id)
                 if tokens & {"CN","CHN","CHINA"}:
                     excluded_codes.add("CN")
+                elif (ref_id in (area_descriptions or {}) or
+                      ref_id in groups or
+                      (len(ref_id)==2 and ref_id.isalpha())):
+                    excluded_codes.update(tokens)
                 else:
                     unresolved_exclusion=True
                 continue
@@ -537,7 +542,7 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                     raw=decompress_checked(original[1])
                     if hashlib.sha256(raw).hexdigest()!=original[0]:
                         raise ValueError("XI raw response fingerprint mismatch for "+code)
-                    ni_rate=xi_rate(source,xi["as_of"],raw,xi_groups)
+                    ni_rate=xi_rate(source,xi["as_of"],raw,xi_groups,xi_geo["area_descriptions"])
                     xi_option_rows=_xi_rate_option_rows(xi_conn,code,xi_groups)
                     xi_options=_xi_rate_options(xi_option_rows,raw,xi["as_of"],xi_groups,xi_geo["area_descriptions"])
                     if len(xi_options)!=len(xi_option_rows):
