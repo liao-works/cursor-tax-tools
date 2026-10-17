@@ -460,15 +460,22 @@ def _default_rate_gap(region, code, selected_rate, source_rows, options, china_g
                and not (_area_tokens(o.get("geography")) & {"1011"})]
         world=[o for o in unconditional if "1011" in _area_tokens(o.get("geography"))]
         selected=cn or group or world or unconditional
-        if any(not o.get("expression_available") for o in selected):
+        resolutions={o.get("expression_resolution") for o in selected}
+        if "multiple" in resolutions:
+            reason="selected_103_measure_has_multiple_duty_expressions"
+        elif "unresolved_link" in resolutions:
+            reason="selected_103_measure_has_unresolved_duty_expression"
+        elif any(not o.get("expression_available") for o in selected):
             reason="selected_103_measure_missing_expression"
         elif len({o.get("expression") for o in selected})>1:
             reason="conflicting_unconditional_103_rates_at_selected_scope"
         else:
             reason="default_rate_selection_unresolved"
     fields=("source_id","geography","geography_description","effective_status",
-            "expression","expression_available","conditional","additional_code",
-            "additional_description","conditions","excluded_areas","applicability",
+            "expression","expression_options","expression_count","expression_resolution",
+            "expression_available","conditional","additional_code","additional_code_ids",
+            "additional_description","condition_ids","conditions","condition_details",
+            "unresolved_relationships","excluded_areas","applicability",
             "measure_type_description","china_applicable")
     return {
         "region":region,
