@@ -28,12 +28,13 @@ def _value(value: Any) -> str:
     return "" if value is None or str(value).strip() in ZERO or str(value).strip() in NA else str(value).strip()
 
 
-def _eligible_geo(geo: str, excluded: str) -> bool:
-    # Explicit China and Erga Omnes (only when China is not excluded).
-    if geo not in (CN, WORLD):
+def _eligible_geo(geo: str, excluded: str, china_groups: set[str] | None = None) -> bool:
+    """Return true only for explicit CN, Erga Omnes or a verified China group."""
+    countries = {token.strip().upper() for token in re.split(r"[|,;\\s]+", excluded)
+                 if token.strip()} if excluded else set()
+    if countries & {"CN", "CHN", "CHINA"}:
         return False
-    countries = set(re.split(r"[|,;\s]+", excluded.upper())) if excluded else set()
-    return CN not in countries
+    return geo in (CN, WORLD) or geo in set(china_groups or ())
 
 
 def _effective_status(start: str, end: str, as_of: date) -> str:
