@@ -1,7 +1,7 @@
 """Data from accepted snapshots must never invent ambiguous or stale rates."""
 import unittest
 from datetime import date
-from src.target_duty.desktop_release_bundle import simple_rate, gb_default_rate, xi_rate
+from src.target_duty.desktop_release_bundle import simple_rate, gb_default_rate, xi_rate, _default_rate_gap
 
 class DesktopReleaseBundleTests(unittest.TestCase):
     def test_production_release_job_only_runs_after_exact_diff_and_has_write_permission(self):
@@ -19,6 +19,28 @@ class DesktopReleaseBundleTests(unittest.TestCase):
         xi=(Path(__file__).resolve().parents[1]/".github"/"workflows"/"xi-public-full-measures.yml").read_text()
         self.assertIn("cron: '0 2 * * *'",xi)
         self.assertIn("max-parallel: 8",xi)
+
+    def test_every_blank_default_rate_gets_a_reasoned_gap_record(self):
+        base = {
+            "measure_type": "103", "china_applicable": True,
+            "effective_status": "active", "conditional": False,
+            "expression_available": True, "expression": "8%",
+            "geography": "CN", "source_id": "measure-1",
+        }
+        self.assertIsNone(_default_rate_gap("GB", "0101210000", "8%", [base], [base]))
+        gap = _default_rate_gap("GB", "0101210000", "", [], [])
+        self.assertEqual(gap["reason"], "no_103_source_rows")
+        conditional = dict(base, conditional=True, expression="3%")
+        gap = _default_rate_gap("GB", "0101210000", "", [conditional], [conditional])
+        self.assertEqual(gap["reason"], "active_103_requires_conditions_or_additional_code")
+        missing = dict(base, expression="", expression_available=False)
+        gap = _default_rate_gap("XI", "0101210000", "", [missing], [missing])
+        self.assertEqual(gap["reason"], "selected_103_measure_missing_expression")
+        conflict = [base, dict(base, source_id="measure-2", expression="9%")]
+        gap = _default_rate_gap("GB", "0101210000", "", conflict, conflict)
+        self.assertEqual(gap["reason"], "conflicting_unconditional_103_rates_at_selected_scope")
+        self.assertEqual(gap["code"], "0101210000")
+        self.assertEqual(gap["active_unconditional_103_option_count"], 2)
 
     def test_gb_unique_simple_rate(self):
         self.assertEqual(simple_rate([("6%","","","")]),"6%")
