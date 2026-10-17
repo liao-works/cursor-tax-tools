@@ -87,7 +87,7 @@ def _relationship_refs(rel: dict, name: str) -> list[dict]:
     return []
 
 
-def xi_remedies(rows: list[tuple], as_of: date, original_body: bytes, china_groups: set[str] | None = None) -> list[dict]:
+def xi_remedies(rows: list[tuple], as_of: date, original_body: bytes, china_groups: set[str] | None = None, area_descriptions: dict[str, str] | None = None) -> list[dict]:
     """XI measures use JSON:API linked expressions, conditions and extra codes."""
     doc = json.loads(original_body)
     included = {(str(n.get("type")), str(n.get("id"))): n
@@ -146,6 +146,7 @@ def xi_remedies(rows: list[tuple], as_of: date, original_body: bytes, china_grou
         result.append({
             "type": TYPES[kind], "measure_type": kind,
             "region": "XI", "geography": _value(geo),
+            "geography_description": str((area_descriptions or {}).get(_value(geo), "")),
             "expression": _value(expr),
             "additional_code": ",".join(sorted(set(c for c in extras if c))),
             "additional_description": "; ".join(d for d in descriptions if d),
