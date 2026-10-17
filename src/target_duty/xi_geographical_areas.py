@@ -86,6 +86,10 @@ def inspect_payload(payload: bytes, as_of: date, *, min_areas: int = 50) -> dict
         "as_of": as_of.isoformat(),
         "source": "official-HMRC-XI-Trade-Tariff-API",
         "area_resource_count": len(nodes),
+        "area_descriptions": {
+            area_id: str((node.get("attributes") or {}).get("description") or "")
+            for area_id, node in sorted(nodes.items())
+        },
         "area_ids_containing_china": china_areas,
         "china_applicable_group_ids": groups,
         "china_applicable_group_count": len(groups),
