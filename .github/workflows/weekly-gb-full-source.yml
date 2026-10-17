@@ -163,7 +163,7 @@ jobs:
           pin=Path("gb-weekly-pin.txt").read_text().strip()
           source=json.loads(Path("gb-weekly-condition-components.json").read_text(encoding="utf-8"))
           coverage=source["coverage"]
-          assert source["kind"]=="gb-condition-components-v2"
+          assert source["kind"]=="gb-condition-components-v3"
           assert source["version"]==pin
           assert coverage["missing_expected_measure_sids"]==[]
           assert coverage["signature_mismatch_measure_sids"]==0
