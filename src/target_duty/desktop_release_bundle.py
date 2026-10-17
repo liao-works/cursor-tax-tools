@@ -580,7 +580,7 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                            "XI_as_of":xi["as_of"].isoformat(),
                            "XI_catalogue_sha256":xi["version_or_catalogue"]},
         "coverage":{"GB":len(gb_codes),"XI":len(xi_codes)},
-        "rate_scope":"China-origin ordinary 103/1011 plus all active 103/105 conditional/specific-use options; GB/XI China or non-excluded Erga Omnes 551/552 anti-dumping and 553/554 countervailing; exact source conditions, additional codes, exclusions and effective dates retained in rate_options/trade_remedy_details",
+        "rate_scope":"China-origin ordinary 103 duties prefer an unconditional CN-specific expression over Erga Omnes 1011; rate_options preserve every GB/XI source measure row in explicit CN/1011 geography except 551/552/553/554, across active/expired/future/unknown dates; those four trade-remedy types are retained separately with exporter codes and dates; other taxes outside this tariff measures dataset (e.g. VAT and quota balances) are not certified here",
         "download_urls":{
             "primary":"https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/tariffs.db",
             "metadata":"https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/metadata.json"},
