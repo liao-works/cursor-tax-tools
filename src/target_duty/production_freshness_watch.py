@@ -99,7 +99,11 @@ def validate(latest: dict, metadata_bytes: bytes, db_bytes: bytes,
     now=now.astimezone(timezone.utc)
     db_day=when(assets["tariffs.db"]["updated_at"])
     meta_day=when(assets["metadata.json"]["updated_at"])
-    if abs((db_day-meta_day).total_seconds())>900:
+    # A torn pair is a fresh database published with stale metadata. The
+    # publisher's unchanged-bytes path legitimately re-uploads metadata (and
+    # the gap audit) alone while pinning the version to the existing release,
+    # so a newer metadata asset with the older database is not a tear.
+    if (db_day-meta_day).total_seconds()>900:
         raise ValueError("Database and metadata asset timestamps too far apart")
     age_hours=(now-min(db_day,meta_day)).total_seconds()/3600
     return {
