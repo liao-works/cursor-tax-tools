@@ -1,6 +1,6 @@
 region=XI
-before_run_id=38842399444
-after_run_id=38869910224
+before_run_id=38869910224
+after_run_id=38993819947
 # china_trade_remedies_551_552_553_554=20261016
 # includes_GB_XI_exporter_detail=true
 # xi_C999_other_exporter_residual_rate_fix=20261016
@@ -10,3 +10,5 @@ after_run_id=38869910224
 # xi_erga_omnes_scope_fix_and_default_rate_gap_audit=20261017
 # conditional_rate_audit=20261017
 # require metadata counts for active conditions, official expressions, and missing-expression gaps
+# republish exporter-by-exporter anti-dumping and countervailing rate rows (PR49)
+# preserve China, Erga Omnes and separately labelled Other residual exporter choices
