@@ -146,6 +146,44 @@ class ChinaTradeRemedyTests(unittest.TestCase):
         self.assertFalse(options[0]["expression_available"])
         self.assertEqual(options[0]["conditions"],"certificate required")
 
+    def test_gb_specific_and_compound_unconditional_duties_are_not_lost(self):
+        self.assertEqual(gb_default_rate([("12.50 GBP / 100 kg", "", "", "")]),
+                         "12.50 GBP / 100 kg")
+        self.assertEqual(gb_default_rate([("12.50 GBP / 100 kg + 8%", "", "", "")]),
+                         "12.50 GBP / 100 kg + 8%")
+        self.assertEqual(gb_default_rate([("12.50 GBP / 100 kg", "A123", "", "")]), "")
+        self.assertEqual(gb_default_rate([("12.50 GBP / 100 kg", "", "certificate", "")]), "")
+
+    def test_rate_options_classify_active_expired_future_and_unknown_dates(self):
+        from src.target_duty.desktop_release_bundle import _effective_status
+        self.assertEqual(_effective_status("2026-01-01", "", TODAY), "active")
+        self.assertEqual(_effective_status("2025-01-01", "2026-10-15", TODAY), "expired")
+        self.assertEqual(_effective_status("2026-10-17", "", TODAY), "future")
+        self.assertEqual(_effective_status("", "", TODAY), "unknown")
+        self.assertEqual(_effective_status("bad-date", "", TODAY), "unknown")
+
+    def test_xi_conditional_options_keep_condition_ids_and_effective_status(self):
+        from src.target_duty.desktop_release_bundle import _xi_rate_options
+        doc={"included":[
+            {"type":"duty_expression","id":"d","attributes":{"base":"7.5 %"}},
+            {"type":"measure_condition","id":"condition-7","attributes":{"description":"certificate required"}},
+            {"type":"additional_code","id":"a","attributes":{"code":"C123","description":"Authorised exporter"}},
+        ]}
+        def row(start, end=None):
+            node={"type":"measure","id":"m-"+start,"relationships":{
+                "duty_expression":{"data":{"type":"duty_expression","id":"d"}},
+                "measure_conditions":{"data":[{"type":"measure_condition","id":"condition-7"}]},
+                "additional_code":{"data":{"type":"additional_code","id":"a"}},
+            }}
+            return ("103","1011","",start,end,json.dumps(node))
+        options=_xi_rate_options([row("2026-01-01"),row("2025-01-01","2026-10-15"),
+                                  row("2026-10-17")],json.dumps(doc),TODAY)
+        self.assertEqual([x["effective_status"] for x in options],
+                         ["active","expired","future"])
+        self.assertEqual(options[0]["condition_ids"],["condition-7"])
+        self.assertEqual(options[0]["additional_code_ids"],["a"])
+        self.assertIn("certificate required",options[0]["conditions"])
+
     def test_desktop_schema_wires_all_four_columns_and_detail(self):
         s=(Path(__file__).resolve().parents[1]/
            "src"/"target_duty"/"desktop_release_bundle.py").read_text()
