@@ -753,6 +753,27 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
             "active_china_group_count":len(xi_groups),
             "active_china_group_ids":sorted(xi_groups)},
         "coverage":{"GB":len(gb_codes),"XI":len(xi_codes)},
+        "default_duty_coverage":{
+            "meaning":"Number of commodity codes with one unambiguous active China-applicable default duty expression. Includes percentage, specific and compound duties; excludes conditional/special-use rates.",
+            "GB":{"catalogue_codes":len(gb_codes),"codes_with_default_duty":counts["gb_percent"],
+                 "codes_without_default_duty":len(gb_codes)-counts["gb_percent"]},
+            "XI":{"catalogue_codes":len(xi_codes),"codes_with_default_duty":counts["xi_percent"],
+                 "codes_without_default_duty":len(xi_codes)-counts["xi_percent"]},
+        },
+        "rate_option_coverage":{
+            "GB":{"catalogue_codes_with_options":counts["gb_rate_option_codes"],
+                 "source_rows":counts["gb_rate_source_rows"],
+                 "projected_rows":counts["gb_rate_projected_rows"],
+                 "projection_complete":counts["gb_rate_source_rows"]==counts["gb_rate_projected_rows"]},
+            "XI":{"catalogue_codes_with_options":counts["xi_rate_option_codes"],
+                 "source_rows":counts["xi_rate_source_rows"],
+                 "projected_rows":counts["xi_rate_projected_rows"],
+                 "projection_complete":counts["xi_rate_source_rows"]==counts["xi_rate_projected_rows"]},
+            "conditional_options":counts["conditional_rate_options"],
+            "missing_expression_options":counts["missing_rate_expressions"],
+            "china_applicable_options":counts["china_applicable_rate_options"],
+            "effective_status_counts":dict(sorted(option_status_counts.items())),
+        },
         "default_rate_gap_audit":{
             "file":audit_path.name,
             "sha256":"sha256:"+audit_hash,
@@ -768,7 +789,7 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
         raise ValueError("Suspiciously incomplete official commodity catalogue")
     # Do not overwrite a mostly populated desktop DB with mostly blank rates
     # if the official expression layout changes unexpectedly.
-    print("Verified simple percentage coverage:",dict(counts))
+    print("Verified default-duty coverage (percentage, specific and compound expressions) plus exact source-option projection:",dict(counts))
     if counts["gb_percent"]<10_000 or counts["xi_percent"]<10_000:
         raise ValueError("Insufficient unambiguous GB/XI percentage coverage for desktop release")
     meta.write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
