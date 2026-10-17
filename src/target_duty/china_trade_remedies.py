@@ -105,6 +105,8 @@ def gb_remedies(rows, as_of:date, china_groups=None):
             "effective_end":_value(end),
             "effective_status":status,
         })
+    for item in result:
+        item["enterprise_rates"] = enterprise_rate_rows(item)
     return result
 
 
@@ -136,6 +138,119 @@ def _relationship_refs(rel: dict, name: str) -> list[dict]:
         return [item for item in entry if isinstance(item,dict)]
     return []
 
+
+
+def enterprise_rate_rows(measure: dict) -> list[dict]:
+    """Describe every official exporter/enterprise rate without assigning a tariff by guess.
+
+    A measure with one additional code can be attributed to that code. Multiple
+    codes are not cross-joined to expressions: the original source would have
+    to provide an explicit per-code relationship. Condition expressions remain
+    labelled as conditional, never a universally payable rate.
+    """
+    details = list(measure.get("additional_code_details") or [])
+    combined_code = _value(measure.get("additional_code"))
+    combined_description = _value(measure.get("additional_description"))
+    if details:
+        candidate_codes = [item for item in details if item.get("code")]
+    elif combined_code:
+        codes = [part.strip() for part in combined_code.split("|") if part.strip()]
+        descriptions = [part.strip() for part in combined_description.split("|")]
+        candidate_codes = [
+            {"code": code, "description": descriptions[i] if i < len(descriptions) else "",
+             "resolved": True, "id": code}
+            for i, code in enumerate(codes)
+        ]
+    else:
+        candidate_codes = []
+    unique_codes = {}
+    for item in candidate_codes:
+        unique_codes.setdefault(_value(item.get("code")), item)
+    candidate_codes = list(unique_codes.values())
+    company_bound = len(candidate_codes) == 1 and candidate_codes[0].get("resolved", True)
+    if len(candidate_codes) == 1:
+        entry = candidate_codes[0]
+        code = _value(entry.get("code"))
+        company = _value(entry.get("description"))
+        matched = bool(company_bound)
+    elif len(candidate_codes) > 1:
+        code = "|".join(entry["code"] for entry in candidate_codes)
+        company = "多企业附加代码，原始措施未标识每个税率的对应关系"
+        matched = False
+    elif measure.get("conditions"):
+        code, company, matched = "", "未指定企业（有条件适用）", False
+    else:
+        code, company, matched = "", "全部适用企业（All）", True
+    if not company:
+        company = "官方未提供企业名称"
+    company_lower = company.strip().lower()
+    is_other = bool(
+        code and (
+            any(token in company_lower for token in RESIDUAL)
+            or company_lower in ("other", "others", "其他", "其他企业")
+            and code.upper().endswith("999")
+        )
+    )
+    base = {
+        "region": measure.get("region", ""),
+        "type": measure.get("type", ""),
+        "measure_type": measure.get("measure_type", ""),
+        "enterprise": "其他企业（Other）" if is_other else company,
+        "enterprise_description": company,
+        "additional_code": code,
+        "additional_code_resolved": matched,
+        "other_enterprises": is_other,
+        "effective_status": measure.get("effective_status", "unknown"),
+        "applicability": measure.get("applicability", "china_applicable"),
+        "source_id": measure.get("source_id", ""),
+        "condition": "",
+        "condition_id": "",
+        "condition_code": "",
+        "certificate_code": "",
+        "certificate_description": "",
+        "action_code": "",
+        "action": "",
+        "condition_group_ids": [],
+        "condition_required": bool(measure.get("conditions")),
+    }
+    rows = []
+    for condition in measure.get("condition_rates") or []:
+        row = dict(base)
+        row.update({
+            "expression": _value(condition.get("expression")),
+            "expression_origin": "condition",
+            "condition": _value(condition.get("condition")),
+            "condition_id": _value(condition.get("condition_id")),
+            "condition_code": _value(condition.get("condition_code")),
+            "certificate_code": _value(condition.get("certificate_code")),
+            "certificate_description": _value(condition.get("certificate_description")),
+            "action_code": _value(condition.get("action_code")),
+            "action": _value(condition.get("action")),
+            "condition_group_ids": condition.get("group_ids") or [],
+            "condition_required": True,
+        })
+        rows.append(row)
+    expression = _value(measure.get("expression"))
+    # Preserve the base duty even if conditional expressions exist; these are
+    # distinct official source records and their purposes must not be confused.
+    if expression or not rows:
+        row = dict(base)
+        row.update({"expression": expression,
+                    "expression_origin": "measure" if expression else "unavailable",
+                    "condition": _value(measure.get("conditions"))})
+        rows.append(row)
+    for row in rows:
+        if row["applicability"] != "china_applicable":
+            row["selection_status"] = "unresolved_applicability"
+        elif not row["additional_code_resolved"]:
+            row["selection_status"] = "enterprise_or_condition_unresolved"
+        elif not row["expression"]:
+            row["selection_status"] = "expression_unavailable"
+        elif row["condition_required"]:
+            row["selection_status"] = "requires_condition"
+        else:
+            row["selection_status"] = "exact_official_expression"
+    return rows
 
 def xi_remedies(rows, as_of:date, original_body:bytes, china_groups=None, area_descriptions=None):
     """Preserve XI trade-remedy expressions, condition rates, and unresolved source links."""
@@ -384,6 +499,8 @@ def xi_remedies(rows, as_of:date, original_body:bytes, china_groups=None, area_d
             "effective_end":_value(end),
             "effective_status":_effective_status(start,end,as_of),
         })
+    for item in result:
+        item["enterprise_rates"] = enterprise_rate_rows(item)
     return result
 
 def summary(measures: list[dict], kind: str) -> str:

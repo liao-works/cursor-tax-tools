@@ -62,8 +62,55 @@ class ChinaTradeRemedyTests(unittest.TestCase):
         ],TODAY)
         self.assertEqual(summary(r,"anti_dumping"),"42.3%（其他企业，A999）")
         self.assertEqual(len(r),2)  # The specialist 18.1% measure remains in detail.
+        self.assertEqual(r[0]["enterprise_rates"][0]["enterprise"], "Guangdong company")
+        self.assertEqual(r[0]["enterprise_rates"][0]["additional_code"], "A785")
+        self.assertEqual(r[0]["enterprise_rates"][0]["expression"], "18.1%")
+        self.assertEqual(r[1]["enterprise_rates"][0]["enterprise"], "其他企业（Other）")
+        self.assertEqual(r[1]["enterprise_rates"][0]["expression"], "42.3%")
         r[1]["additional_description"]="Unknown producer"
         self.assertEqual(summary(r,"anti_dumping"),"按企业/条件适用（见详情）")
+
+
+    def test_company_rate_tables_preserve_anti_dumping_and_countervailing_producers(self):
+        records=gb_remedies([
+            gb(kind="552",expr="18.1%",extra="A785",desc="Company Shenzhen Ltd"),
+            gb(kind="552",expr="42.3%",extra="A999",desc="All other overseas exporters"),
+            gb(kind="554",expr="6%",extra="B123",desc="Company Shenzhen Ltd"),
+            gb(kind="554",expr="21%",extra="B999",desc="Other exporters"),
+        ], TODAY)
+        found={(r["type"],r["additional_code"]):r["enterprise_rates"][0] for r in records}
+        self.assertEqual(found["anti_dumping","A785"]["enterprise"],"Company Shenzhen Ltd")
+        self.assertEqual(found["anti_dumping","A785"]["expression"],"18.1%")
+        self.assertEqual(found["anti_dumping","A999"]["expression"],"42.3%")
+        self.assertTrue(found["anti_dumping","A999"]["other_enterprises"])
+        self.assertEqual(found["countervailing","B123"]["expression"],"6%")
+        self.assertEqual(found["countervailing","B999"]["expression"],"21%")
+        self.assertEqual({item["selection_status"] for item in found.values()},
+                         {"exact_official_expression"})
+
+    def test_multiple_additional_codes_cannot_be_auto_paired_to_a_single_rate(self):
+        from src.target_duty.china_trade_remedies import enterprise_rate_rows
+        measure={
+            "region":"XI","type":"anti_dumping","measure_type":"552",
+            "effective_status":"active","applicability":"china_applicable",
+            "expression":"13%","additional_code":"A123|B456",
+            "additional_description":"Company A|Company B","conditions":"",
+            "condition_rates":[]}
+        rows=enterprise_rate_rows(measure)
+        self.assertEqual(len(rows),1)
+        self.assertEqual(rows[0]["additional_code"],"A123|B456")
+        self.assertEqual(rows[0]["selection_status"],"enterprise_or_condition_unresolved")
+        self.assertFalse(rows[0]["additional_code_resolved"])
+
+    def test_no_covered_company_or_official_expression_is_not_fabricated(self):
+        records=gb_remedies([gb(expr="#NA",extra="B210",desc="Company B",conditions="D008")],TODAY)
+        row=records[0]["enterprise_rates"][0]
+        self.assertEqual(row["enterprise"],"Company B")
+        self.assertEqual(row["expression"],"")
+        self.assertEqual(row["selection_status"],"expression_unavailable")
+        universal=gb_remedies([gb(expr="7%",extra="",desc="")],TODAY)[0]["enterprise_rates"][0]
+        self.assertEqual(universal["enterprise"],"全部适用企业（All）")
+        self.assertEqual(universal["expression"],"7%")
 
     def test_present_measure_without_numeric_expression_is_not_zero(self):
         r=gb_remedies([gb(kind="551",expr="#NA",extra="8A92",
@@ -93,6 +140,9 @@ class ChinaTradeRemedyTests(unittest.TestCase):
         self.assertEqual(out[0]["expression"],"13.25 %")
         self.assertEqual(out[0]["additional_code"],"B999")
         self.assertEqual(summary(out,"countervailing"),"13.25 %（其他企业，B999）")
+        self.assertEqual(out[0]["enterprise_rates"][0]["enterprise"], "其他企业（Other）")
+        self.assertEqual(out[0]["enterprise_rates"][0]["additional_code"], "B999")
+        self.assertEqual(out[0]["enterprise_rates"][0]["expression"], "13.25 %")
 
     def test_xi_condition_duty_expressions_are_preserved_when_parent_expression_is_blank(self):
         doc={"included":[
@@ -135,6 +185,10 @@ class ChinaTradeRemedyTests(unittest.TestCase):
         self.assertEqual(row["additional_code"],"89ED")
         self.assertEqual(row["regulation_id"],"R0261/25")
         self.assertEqual(row["footnotes"],"CD946")
+        self.assertEqual([x["enterprise"] for x in row["enterprise_rates"]], ["EcoCeres Group", "EcoCeres Group"])
+        self.assertEqual([x["expression"] for x in row["enterprise_rates"]], ["10.00 %", "35.60 %"])
+        self.assertEqual([x["selection_status"] for x in row["enterprise_rates"]], ["requires_condition", "requires_condition"])
+        self.assertEqual(row["enterprise_rates"][0]["certificate_code"], "D008")
         self.assertEqual(summary(found,"anti_dumping"),"按企业/条件适用（见详情）")
 
     def test_xi_unresolved_exclusion_is_preserved_but_not_counted_as_a_confirmed_rate(self):
