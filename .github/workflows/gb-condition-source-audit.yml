@@ -25,7 +25,7 @@ jobs:
         with:
           run-id: 38995575082
           name: weekly-gb-full-source-38995575082
-          github-token: \${{ github.token }}
+          github-token: ${{ github.token }}
           path: gb-source
       - name: Join normalized same-version condition duty rows for ALL remedy measures
         shell: bash
@@ -53,7 +53,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gb-condition-components-review-\${{ github.run_id }}
+          name: gb-condition-components-review-${{ github.run_id }}
           path: gb-conditions/gb-condition-components.json
           if-no-files-found: warn
           retention-days: 14
