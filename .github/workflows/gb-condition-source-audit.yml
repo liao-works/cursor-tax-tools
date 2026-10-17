@@ -20,6 +20,18 @@ jobs:
           python-version: '3.11'
       - name: Run offline normalized condition-component regression tests
         run: python -m unittest discover -s tests -p 'test_gb_condition_components.py' -v
+      - name: Inspect normalized official measure-to-condition relation keys
+        shell: bash
+        run: |
+          python - <<'PY'
+          import urllib.request
+          from src.target_duty.gb_condition_components import BASE_URL
+          for table in ("measures","measures-as-defined"):
+              url=BASE_URL.format(version="v4.0.1629",table=table)
+              req=urllib.request.Request(url,headers={"User-Agent":"liao-gb-scope-audit/1.0"})
+              with urllib.request.urlopen(req,timeout=60) as response:
+                  print("OFFICIAL_MEASURE_TABLE_HEADER",table,response.readline(10000).decode("utf-8-sig").strip())
+          PY
       - name: Download independently accepted GB full-source evidence
         uses: actions/download-artifact@v4
         with:
