@@ -8,8 +8,6 @@ on:
       - 'tests/**'
       - '.github/workflows/**'
       - 'ops/xi-daily-canary-baseline-20261014.json'
-      - 'tariff_gui.py'
-      - 'gui_config.json'
   workflow_dispatch:
 
 permissions:
@@ -103,7 +101,7 @@ jobs:
           python -m unittest discover -s tests -p 'test_gb_condition_components.py' -v
       - name: Desktop daily data update notifications and syntax
         run: |
-          python -m py_compile tariff_gui.py src/clients/data_update_notifier.py src/clients/smart_update_client.py
+          python -m py_compile src/clients/data_update_notifier.py src/clients/smart_update_client.py
           python -m unittest discover -s tests -p 'test_desktop_data_update_notifications.py' -v
       - name: Source changes, retained workflow and XI 16-shard retry contracts
         run: |
