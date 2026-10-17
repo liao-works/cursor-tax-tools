@@ -29,6 +29,18 @@ class GeoAreaMembershipTests(unittest.TestCase):
         self.assertNotIn("G002", result["active_china_group_ids"])
         self.assertNotIn("G003", result["active_china_group_ids"])
 
+    def test_current_official_dbt_membership_header_schema_is_supported(self):
+        payload=(
+            "trackedmodel_ptr_id,geo_group_id,member_id,validity_start,validity_end\\n"
+            "membership-1,G001,CN,2020-01-01,\\n"
+            "membership-2,G002,US,2020-01-01,\\n"
+        ).encode()
+        result=inspect_csv(payload,date(2026,10,17),min_rows=1)
+        self.assertEqual(result["source_columns"],{
+            "group":"geo_group_id","member":"member_id",
+            "start":"validity_start","end":"validity_end"})
+        self.assertEqual(result["active_china_group_ids"],["G001"])
+
     def test_no_active_china_membership_fails_closed(self):
         payload = (
             "geographical_area__id,member__id,membership__effective_start_date,membership__effective_end_date\n"
