@@ -24,6 +24,12 @@ class GBConditionComponentsTests(unittest.TestCase):
                    "measurement_unit_code":"100 kg","measurement_unit_qualifier_code":""}
         self.assertEqual(_format_component(component),"9.50 GBP / 100 kg")
 
+    def test_empty_component_amount_is_never_a_fake_rate(self):
+        self.assertEqual(_format_component({"duty_expression_id":"1","duty_amount":"",
+                                            "duty_expression_description":"% or amount"}),"")
+        self.assertEqual(_format_expression([{"duty_expression_id":"1","duty_amount":"35.60"},
+                                             {"duty_expression_id":"4","duty_amount":""}]),"")
+
     def test_unknown_expression_operator_not_invented(self):
         component={"duty_expression_id":"999","duty_amount":"25.00",
                    "duty_expression_description":"special-duty-operator",
