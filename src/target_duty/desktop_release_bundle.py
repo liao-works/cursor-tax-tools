@@ -540,10 +540,10 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
             if dest.execute("SELECT COUNT(*) FROM tariffs").fetchone()[0]!=len(all_codes):
                 raise ValueError("Desktop code union has holes")
         if counts["gb_rate_source_rows"] != counts["gb_rate_projected_rows"]:
-        raise ValueError("GB rate-option source/projection row counts differ")
-    if counts["xi_rate_source_rows"] != counts["xi_rate_projected_rows"]:
-        raise ValueError("XI rate-option source/projection row counts differ")
-    stage.replace(out)
+            raise ValueError("GB rate-option source/projection row counts differ")
+        if counts["xi_rate_source_rows"] != counts["xi_rate_projected_rows"]:
+            raise ValueError("XI rate-option source/projection row counts differ")
+        stage.replace(out)
     digest=hash_file(out)
     version="data-"+day.strftime("%Y%m%d")+"-"+digest[:16]
     stamp=datetime.now(timezone.utc).isoformat()
