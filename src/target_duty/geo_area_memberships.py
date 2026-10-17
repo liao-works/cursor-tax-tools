@@ -143,6 +143,7 @@ def _description_report(payload: bytes, as_of: date) -> dict:
     start_col = _choose(fields,("validity_start","effective_start_date","start_date"),
                         lambda n: "start" in n and "date" in n or n=="validity_start")
     active = 0
+    missing_descriptions = 0
     for row in rows:
         start = _clean(row.get(start_col))
         if not start:
@@ -152,13 +153,18 @@ def _description_report(payload: bytes, as_of: date) -> dict:
                 active += 1
         except ValueError as error:
             raise ValueError("Invalid official geo-area description validity date") from error
-        if not _clean(row.get(id_col)) or not _clean(row.get(desc_col)):
-            raise ValueError("Official geo-area description missing area ID/description")
+        if not _clean(row.get(id_col)):
+            raise ValueError("Official geo-area description missing area ID")
+        # DBT legitimately emits #NA descriptions for some area records. They
+        # do not affect numeric FK resolution; count rather than reject them.
+        if not _clean(row.get(desc_col)):
+            missing_descriptions += 1
     return {
         "source_columns":{"area_id":id_col,"description":desc_col,"start":start_col},
         "source_header":fields,
         "row_count":len(rows),
         "active_description_rows":active,
+        "missing_description_rows":missing_descriptions,
         "source_sha256":hashlib.sha256(payload).hexdigest(),
     }
 
@@ -265,6 +271,7 @@ def inspect_csv(payload: bytes, as_of: date, *, min_rows: int = 1_000,
             "geo_area_descriptions_source_sha256":description_report["source_sha256"],
             "geo_area_descriptions_row_count":description_report["row_count"],
             "geo_area_descriptions_active_rows":description_report["active_description_rows"],
+            "geo_area_descriptions_missing_description_rows":description_report["missing_description_rows"],
             "geo_area_descriptions_source_columns":description_report["source_columns"],
             "geo_area_descriptions_source_header":description_report["source_header"],
         })

@@ -75,6 +75,7 @@ class GeoAreaMembershipTests(unittest.TestCase):
             "trackedmodel_ptr_id,sid,described_geographicalarea_id,description,validity_start\n"
             "10,11,1916,China,2020-01-01\n"
             "12,13,281,Erga Omnes,2020-01-01\n"
+            "14,15,281,#NA,2020-01-01\n"
         ).encode()
         result = inspect_csv(membership, date(2026, 10, 17), min_rows=1,
                              area_payload=areas, descriptions_payload=descriptions)
@@ -83,6 +84,7 @@ class GeoAreaMembershipTests(unittest.TestCase):
         self.assertEqual(result["geo_areas_source_sha256"], hashlib.sha256(areas).hexdigest())
         self.assertEqual(result["geo_area_descriptions_source_sha256"],
                          hashlib.sha256(descriptions).hexdigest())
+        self.assertEqual(result["geo_area_descriptions_missing_description_rows"], 1)
         self.assertEqual(result["unresolved_active_memberships"][0]["group_code"], "5051")
         self.assertEqual(result["unresolved_active_memberships"][0]["member_code"], "")
 
