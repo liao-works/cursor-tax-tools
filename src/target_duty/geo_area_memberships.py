@@ -50,26 +50,26 @@ def _choose(fields: list[str], candidates: tuple[str, ...], predicate) -> str:
 
 def _columns(fields: list[str]) -> dict[str, str]:
     group = _choose(fields,
-        ("geographical_area__id", "geo_area__id", "group__id",
+        ("geographical_area__id", "geo_area__id", "geo_group_id", "group__id",
          "geographical_area_group__id", "geo_area_group__id"),
         lambda n: (("geographical_area" in n or "geo_area" in n or "group" in n)
                    and "id" in n and "member" not in n and "parent" not in n
                    and "excluded" not in n and "sid" not in n))
     member = _choose(fields,
-        ("member__id", "member_geographical_area__id",
+        ("member__id", "member_id", "member_geographical_area__id",
          "member__geographical_area__id", "geographical_area_member__id",
          "geo_area_member__id"),
         lambda n: "member" in n and "id" in n and "sid" not in n)
     start = _choose(fields,
         ("membership__effective_start_date", "membership__validity_start_date",
          "membership__start_date", "geo_area_membership__start_date",
-         "membership_starts", "starts", "effective_start_date", "start_date"),
+         "validity_start", "membership_starts", "starts", "effective_start_date", "start_date"),
         lambda n: "start" in n and "date" in n and
                   ("membership" in n or "member" in n))
     end = _choose(fields,
         ("membership__effective_end_date", "membership__validity_end_date",
          "membership__end_date", "geo_area_membership__end_date",
-         "membership_ends", "ends", "effective_end_date", "end_date"),
+         "validity_end", "membership_ends", "ends", "effective_end_date", "end_date"),
         lambda n: "end" in n and "date" in n and
                   ("membership" in n or "member" in n))
     return {"group": group, "member": member, "start": start, "end": end}
