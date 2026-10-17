@@ -81,6 +81,44 @@ def simple_rate(rows):
     return next(iter(distinct)) if len(distinct)==1 else ""
 
 
+def _area_tokens(value):
+    return {token.strip().upper() for token in re.split(r"[|,;\\s]+", _clean(value))
+            if token.strip()}
+
+
+def _china_applicable(geography, excluded):
+    """Only classify explicit China or Erga Omnes areas as China-applicable."""
+    geos = _area_tokens(geography)
+    exclusions = _area_tokens(excluded)
+    if exclusions & {"CN", "CHN", "CHINA"}:
+        return False
+    return bool(geos & {"CN", "1011"})
+
+
+def gb_china_rate(rows):
+    """Select China's unconditioned 103 rate, preferring explicit CN over 1011.
+
+    Rows are (expression, additional code, conditions, exclusions, geography).
+    Excluding other countries does not disqualify a rate for China. Conditional
+    and additional-code variants remain options, not default rates.
+    """
+    eligible = []
+    for expression, additional, conditions, excluded, geography in rows:
+        if not _china_applicable(geography, excluded):
+            continue
+        if not _blank(additional) or not _blank(conditions):
+            continue
+        eligible.append((_clean(geography), _expression(expression)))
+    if not eligible:
+        return ""
+    china_specific = [expr for geo, expr in eligible if geo == "CN"]
+    selected = china_specific or [expr for geo, expr in eligible if geo == "1011"]
+    if not selected or any(not expr for expr in selected):
+        return ""
+    distinct = set(selected)
+    return next(iter(distinct)) if len(distinct) == 1 else ""
+
+
 def _gb_rate_options(rows, as_of):
     options=[]
     for kind, geo, expression, additional, additional_desc, conditions, excluded, start, end, raw in rows:
@@ -103,17 +141,20 @@ def _gb_rate_options(rows, as_of):
         }
         option["expression_available"] = bool(option["expression"])
         option["special_use"] = option["measure_type"] == "105"
-        option["conditional"] = bool(option["additional_code"] or option["conditions"] or option["excluded_areas"] or option["special_use"])
-        option["china_applicable"] = (
-            option["geography"] == "CN" or
-            (option["geography"] == "1011" and "CN" not in option["excluded_areas"].upper())
+        option["china_applicable"] = _china_applicable(option["geography"], option["excluded_areas"])
+        option["conditional"] = bool(
+            option["additional_code"] or option["conditions"] or option["special_use"]
         )
         option["applicability"] = (
-            "default" if option["measure_type"] == "103" and option["geography"] == "1011"
-            and not option["conditional"] else
+            "default" if option["measure_type"] == "103"
+            and option["china_applicable"] and not option["conditional"] else
             "authorised_use" if option["special_use"] else
+            "other_measure" if option["measure_type"] not in ("103", "105") else
             "conditional"
         )
+        option["quota_order_number"] = _clean(raw_obj.get("measure__quota__order_number"))
+        option["footnotes"] = _clean(raw_obj.get("measure__footnotes"))
+        option["regulation_id"] = _clean(raw_obj.get("measure__regulation__id"))
         options.append(option)
     return options
 
@@ -153,8 +194,8 @@ def _xi_rate_options(rows, original_body, as_of):
     index=_xi_relation_map(document)
     options=[]
     for kind, geo, expression, start, end, raw in rows:
-        if str(kind) not in ("103","105"):
-            continue
+        # The caller supplies all non-remedy measure types for China/Erga
+        # Omnes, including expired/future rows. Keep each source row visible.
         node=json.loads(raw) if isinstance(raw,str) else raw
         linked_expr=_xi_linked(index,_xi_refs(node,"duty_expression"))
         expr=_expression(expression)
@@ -166,7 +207,9 @@ def _xi_rate_options(rows, original_body, as_of):
             additional=_xi_linked(index,_xi_refs(node,"additional_codes"))
         conditions=(_xi_linked(index,_xi_refs(node,"measure_conditions"))
                     +_xi_linked(index,_xi_refs(node,"measure_condition_permutation_groups")))
-        excluded=_xi_linked(index,_xi_refs(node,"excluded_countries"))
+        excluded_refs=(_xi_refs(node,"excluded_countries")
+                       +_xi_refs(node,"excluded_geographical_areas"))
+        excluded=_xi_linked(index,excluded_refs)
         geos=_xi_linked(index,_xi_refs(node,"geographical_area"))
         type_nodes=_xi_linked(index,_xi_refs(node,"measure_type"))
         additional_codes=[]
@@ -178,8 +221,13 @@ def _xi_rate_options(rows, original_body, as_of):
         excluded_codes=[]
         for item in excluded:
             attrs=item.get("attributes") or {}
-            excluded_codes.append(_clean(attrs.get("code") or attrs.get("id")))
-        geo_id=_clean(geo or ((geos[0].get("attributes") or {}).get("id") if geos else ""))
+            code=attrs.get("code") or attrs.get("country_code") or attrs.get("geographical_area_id") or attrs.get("id") or item.get("id")
+            excluded_codes.append(_clean(code))
+        linked_excluded_ids={str(x.get("id")) for x in excluded}
+        excluded_codes.extend(_clean(x.get("id")) for x in excluded_refs
+                              if str(x.get("id")) not in linked_excluded_ids)
+        geo_id=_clean(geo or ((geos[0].get("attributes") or {}).get("code")
+                              or (geos[0].get("attributes") or {}).get("id") if geos else ""))
         option={
             "region":"XI",
             "measure_type":str(kind),
@@ -197,19 +245,21 @@ def _xi_rate_options(rows, original_body, as_of):
             "condition_ids":[_clean(x.get("id")) for x in conditions if _clean(x.get("id"))],
             "additional_code_ids":[_clean(x.get("id")) for x in additional if _clean(x.get("id"))],
             "source_id":_clean(node.get("id")),
+            "source_relationship_ids":{
+                name:[_clean(x.get("id")) for x in _xi_refs(node,name) if _clean(x.get("id"))]
+                for name in sorted(rel)
+            },
         }
         option["expression_available"] = bool(option["expression"])
         option["special_use"]=option["measure_type"]=="105"
+        option["china_applicable"]=_china_applicable(option["geography"], option["excluded_areas"])
         option["conditional"]=bool(option["additional_code"] or option["conditions"]
-                                    or option["excluded_areas"] or option["special_use"])
-        option["china_applicable"]=(
-            option["geography"]=="CN" or
-            (option["geography"]=="1011" and "CN" not in option["excluded_areas"].upper())
-        )
+                                    or option["special_use"])
         option["applicability"]=(
-            "default" if option["measure_type"]=="103" and option["geography"]=="1011"
+            "default" if option["measure_type"]=="103" and option["china_applicable"]
             and not option["conditional"] else
             "authorised_use" if option["special_use"] else
+            "other_measure" if option["measure_type"] not in ("103", "105") else
             "conditional"
         )
         options.append(option)
@@ -243,19 +293,17 @@ def gb_default_rate(rows):
 
 
 def xi_rate(rows, as_of:date, original_body:bytes|None=None):
-    """Use ordinary 103/1011 third-country duty, not 105 authorised-use rates.
+    """Resolve China's unconditioned 103 default, preferring a CN-specific rate.
 
-    105 can be 0% only for special authorised use; it is not a default rate
-    for Chinese-origin/general third-country imports. Never invent a rate.
+    Conditional/additional-code variants remain in rate_options. An exclusion
+    of another country does not block a Chinese import; explicit China
+    exclusions and unresolved exclusion references fail closed.
     """
-    related={}
-    if original_body is not None:
-        document=json.loads(original_body)
-        related={(str(x.get("type")),str(x.get("id"))):x
-                 for x in document.get("included",[]) if isinstance(x,dict)}
+    document=json.loads(original_body) if original_body is not None else {}
+    related=_xi_relation_map(document)
     selected=[]
     for kind, geo, expr, start, end, raw in rows:
-        if kind != "103" or geo!="1011":
+        if kind != "103" or geo not in ("CN","1011"):
             continue
         try:
             begin=date.fromisoformat(start[:10])
@@ -264,21 +312,43 @@ def xi_rate(rows, as_of:date, original_body:bytes|None=None):
             return ""
         if begin>as_of or (finish and finish<as_of):
             continue
-        node=json.loads(raw)
+        node=json.loads(raw) if isinstance(raw,str) else raw
         rel=node.get("relationships") or {}
-        has_special_scope = False
+        conditional=False
         for name in ("measure_conditions","measure_condition_permutation_groups",
-                     "excluded_countries","additional_code","additional_codes"):
-            val=(rel.get(name) or {}).get("data")
-            if isinstance(val,dict) or (isinstance(val,list) and val):
-                has_special_scope = True
+                     "additional_code","additional_codes"):
+            value=(rel.get(name) or {}).get("data")
+            if isinstance(value,dict) or (isinstance(value,list) and value):
+                conditional=True
                 break
-        if has_special_scope:
-            # A special 103 variant does not invalidate an independent ordinary
-            # 103 base measure. Never use the special variant as default.
+        if conditional:
             continue
-        # HMRC v2 frequently leaves resolved_duty_expression blank and supplies
-        # its actual expression through included duty_expression.base/verbose_duty.
+        exclusion_refs=[]
+        for name in ("excluded_countries","excluded_geographical_areas"):
+            exclusion_refs.extend(_xi_refs(node,name))
+        excluded_codes=set()
+        unresolved_exclusion=False
+        for ref in exclusion_refs:
+            linked=related.get((str(ref.get("type")),str(ref.get("id"))))
+            if linked is None:
+                tokens=_area_tokens(ref.get("id"))
+                if tokens & {"CN","CHN","CHINA"}:
+                    excluded_codes.add("CN")
+                else:
+                    unresolved_exclusion=True
+                continue
+            attrs=linked.get("attributes") or {}
+            tokens=set()
+            for key in ("code","country_code","geographical_area_id","area_id","id"):
+                tokens.update(_area_tokens(attrs.get(key)))
+            description=str(attrs.get("description") or attrs.get("name") or "").strip().lower()
+            if description in ("china","people's republic of china","people’s republic of china"):
+                tokens.add("CN")
+            if not tokens:
+                unresolved_exclusion=True
+            excluded_codes.update(tokens)
+        if excluded_codes & {"CN","CHN","CHINA"} or unresolved_exclusion:
+            continue
         link=(rel.get("duty_expression") or {}).get("data")
         if isinstance(link,list) and len(link)!=1:
             return ""
@@ -286,16 +356,23 @@ def xi_rate(rows, as_of:date, original_body:bytes|None=None):
             link=link[0]
         if isinstance(link,dict):
             duty=related.get((str(link.get("type")),str(link.get("id"))))
-            if duty is not None:
+            if duty is None:
+                expr=""
+            else:
                 attrs=duty.get("attributes") or {}
                 linked=attrs.get("base") or attrs.get("verbose_duty") or ""
                 if not isinstance(linked,str):
                     return ""
-                # Prefer the actual relationship over a potentially shortened inline summary.
-                if linked.strip():
-                    expr=linked
-        selected.append((expr,"","",""))
-    return simple_rate(selected)
+                expr=linked if linked.strip() else ""
+        selected.append((geo,_expression(expr)))
+    if not selected:
+        return ""
+    china_specific=[expr for geo,expr in selected if geo=="CN"]
+    rates=china_specific or [expr for geo,expr in selected if geo=="1011"]
+    if not rates or any(not rate for rate in rates):
+        return ""
+    distinct=set(rates)
+    return next(iter(distinct)) if len(distinct)==1 else ""
 
 
 def hash_file(path:Path):
