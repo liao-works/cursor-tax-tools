@@ -1,4 +1,4 @@
 request=latest_complete_official_gb_source
 requested_as_of=2026-10-17
-reason=retry_v4.0.1629_after_same_version_geo_area_foreign_key_join_and_rate_option_audit_fixes
+reason=retry_v4.0.1629_after_numeric_foreign_key_join_and_official_null_description_audit_fixes
 production_eligible=false
