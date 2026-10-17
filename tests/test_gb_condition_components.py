@@ -57,6 +57,41 @@ class GBConditionComponentFormattingTests(unittest.TestCase):
         self.assertEqual(_condition_signature(text), [("D008", "01"), ("", "01")])
         self.assertEqual(_condition_signature(""), [])
 
+    def test_download_table_returns_metadata_and_writes_csv(self):
+        import io
+        from src.target_duty import gb_condition_components as module
+
+        class FakeResponse:
+            headers = {"Content-Length": "42"}
+
+            def __init__(self, payload):
+                self._buffer = io.BytesIO(payload)
+
+            def geturl(self):
+                return ("https://data.api.trade.gov.uk/v1/datasets/uk-tariff-2021-01-01/"
+                        "versions/v4.0.1629/tables/certificate-types/data?format=csv&download")
+
+            def read(self, size):
+                return self._buffer.read(size)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        payload = b'"trackedmodel_ptr_id","sid"\r\n"65","D"\r\n'
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "certificate-types.csv"
+            with patch.object(module.urllib.request, "urlopen",
+                              return_value=FakeResponse(payload)):
+                meta, rows = module.download_table("v4.0.1629", "certificate-types", str(target))
+            self.assertIsNone(rows)
+            self.assertEqual(meta["row_count"], 1)
+            self.assertEqual(meta["columns"], ["trackedmodel_ptr_id", "sid"])
+            self.assertEqual(meta["sha256"], __import__("hashlib").sha256(payload).hexdigest())
+            self.assertTrue(target.exists())
+
 
 def make_gb_db(path, rows):
     db = sqlite3.connect(path)
