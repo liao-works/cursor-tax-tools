@@ -120,7 +120,10 @@ jobs:
             --version "$(cat gb-weekly-pin.txt)" \
             --as-of "$(cat gb-weekly-as-of.txt)" \
             --output gb-weekly-geo-area-memberships.csv \
-            --report gb-weekly-geo-area-memberships.json
+            --report gb-weekly-geo-area-memberships.json \\
+            --geo-areas gb-weekly-geo-areas.csv \\
+            --geo-area-descriptions gb-weekly-geo-area-descriptions.csv \\
+            --reference gb-weekly-geo-area-reference.json
       - name: Independently replay EVERY original GB measure into isolated review database
         shell: bash
         run: |
@@ -156,7 +159,11 @@ jobs:
           geo=json.loads(Path("gb-weekly-geo-area-memberships.json").read_text())
           assert geo["version"]==pin and geo["as_of"]==day
           assert geo["source_sha256"]==sha("gb-weekly-geo-area-memberships.csv")
+          refs=json.loads(Path("gb-weekly-geo-area-reference.json").read_text())
+          assert geo["geo_areas_source_sha256"]==sha("gb-weekly-geo-areas.csv")==refs["geo-areas"]["sha256"]
+          assert geo["geo_area_descriptions_source_sha256"]==sha("gb-weekly-geo-area-descriptions.csv")==refs["geo-area-descriptions"]["sha256"]
           assert geo["active_china_group_count"]>0
+          assert geo["kind"]=="dbt-official-geo-area-memberships-v2"
           assert sha(source)==download["sha256"]==report["source_csv_sha256"]
           # Historical fully verified GB export had 1,123,765 source rows.
           # A >10% sudden drop is a source-regression alert requiring review,
