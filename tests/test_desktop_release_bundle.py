@@ -85,9 +85,11 @@ class DesktopReleaseBundleTests(unittest.TestCase):
         # 105/authorised use may be displayed separately later.
         source=(Path(__file__).resolve().parents[1]/
                 "src"/"target_duty"/"desktop_release_bundle.py").read_text()
-        self.assertIn("measure_type = '103'",source)
-        self.assertIn('if kind != "103" or geo!="1011"',source)
-        self.assertIn("measure_type IN ('103','105')",source)
+        self.assertIn("measure_type='103'",source)
+        self.assertIn('if kind != "103" or geo not in ("CN","1011")',source)
+        self.assertIn("measure_type NOT IN ('551','552','553','554')",source)
+        self.assertIn("def _gb_rate_option_rows",source)
+        self.assertIn("def _xi_rate_option_rows",source)
 
     def test_hmrc_official_linked_duty_expression_is_replayed(self):
         import json
