@@ -1,8 +1,9 @@
 """Build a deterministic desktop database from two independently complete sources.
 
-Publishes only unambiguous active 103 (ordinary MFN/third-country) percent expressions.
-Other categories/conditions remain empty, never guessed as zero. Both original
-source snapshots must replay, hash-verify and cover their full active catalogue.
+Only one unambiguous active China-applicable type 103 ordinary duty expression
+(percentage, specific or compound) enters each default-rate field. Conditional/
+special-use rates and trade remedies are preserved separately, never guessed as
+zero. Both source snapshots must replay, hash-verify and cover their catalogue.
 """
 from __future__ import annotations
 import argparse
@@ -746,7 +747,8 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                     counts["gb_mfn_103_codes"]+=bool(source)
                     counts["gb_unconditional_candidates"]+=sum(
                         _blank(r[1]) and _blank(r[2]) and _blank(r[3]) for r in source)
-                    counts["gb_percent"]+=bool(gb_rate)
+                    counts["gb_default_duty_codes"]+=bool(gb_rate)
+                    counts["gb_percent_only"]+=bool(gb_rate and PERCENT.fullmatch(gb_rate))
                     if not gb_rate:
                         gap=_default_rate_gap("GB",code,gb_rate,source,gb_options,china_groups)
                         if gap:
@@ -773,7 +775,8 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                     xi_options=_xi_rate_options(xi_option_rows,raw,xi["as_of"],xi_groups,xi_geo["area_descriptions"])
                     if len(xi_options)!=len(xi_option_rows):
                         raise ValueError("XI rate-option projection lost official measure rows for "+code)
-                    counts["xi_percent"]+=bool(ni_rate)
+                    counts["xi_default_duty_codes"]+=bool(ni_rate)
+                    counts["xi_percent_only"]+=bool(ni_rate and PERCENT.fullmatch(ni_rate))
                     if not ni_rate:
                         gap=_default_rate_gap("XI",code,ni_rate,source,xi_options,xi_groups)
                         if gap:
@@ -858,6 +861,9 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
     version="data-"+day.strftime("%Y%m%d")+"-"+digest[:16]
     stamp=datetime.now(timezone.utc).isoformat()
     gap_records.sort(key=lambda item:(item["region"],item["code"]))
+    expected_gap_count = (len(gb_codes)-counts["gb_default_duty_codes"]) + (len(xi_codes)-counts["xi_default_duty_codes"])
+    if len(gap_records) != expected_gap_count:
+        raise ValueError("Not every blank default-duty field has a reasoned audit record")
     gap_counts=Counter(item["region"]+":"+item["reason"] for item in gap_records)
     audit_doc={
         "kind":"china-origin-default-rate-gap-audit-v1",
@@ -879,9 +885,11 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
         "file_hash":"sha256:"+digest,
         "file_size":out.stat().st_size,
         "record_count":len(gb_codes|xi_codes),
-        "changes_summary":{"total_updates":counts["gb_percent"]+counts["xi_percent"],
-                           "gb_available_simple_percent":counts["gb_percent"],
-                           "xi_available_simple_percent":counts["xi_percent"],
+        "changes_summary":{"total_default_duty_entries":counts["gb_default_duty_codes"]+counts["xi_default_duty_codes"],
+                           "gb_available_default_duty_codes":counts["gb_default_duty_codes"],
+                           "xi_available_default_duty_codes":counts["xi_default_duty_codes"],
+                           "gb_available_simple_percent":counts["gb_percent_only"],
+                           "xi_available_simple_percent":counts["xi_percent_only"],
                            "gb_anti_dumping_codes":counts["gb_anti_dumping_codes"],
                            "gb_countervailing_codes":counts["gb_countervailing_codes"],
                            "xi_anti_dumping_codes":counts["xi_anti_dumping_codes"],
@@ -931,10 +939,10 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
         "coverage":{"GB":len(gb_codes),"XI":len(xi_codes)},
         "default_duty_coverage":{
             "meaning":"Number of commodity codes with one unambiguous active China-applicable default duty expression. Includes percentage, specific and compound duties; excludes conditional/special-use rates.",
-            "GB":{"catalogue_codes":len(gb_codes),"codes_with_default_duty":counts["gb_percent"],
-                 "codes_without_default_duty":len(gb_codes)-counts["gb_percent"]},
-            "XI":{"catalogue_codes":len(xi_codes),"codes_with_default_duty":counts["xi_percent"],
-                 "codes_without_default_duty":len(xi_codes)-counts["xi_percent"]},
+            "GB":{"catalogue_codes":len(gb_codes),"codes_with_default_duty":counts["gb_default_duty_codes"],
+                 "codes_without_default_duty":len(gb_codes)-counts["gb_default_duty_codes"]},
+            "XI":{"catalogue_codes":len(xi_codes),"codes_with_default_duty":counts["xi_default_duty_codes"],
+                 "codes_without_default_duty":len(xi_codes)-counts["xi_default_duty_codes"]},
         },
         "rate_option_coverage":{
             "GB":{"catalogue_codes_with_options":counts["gb_rate_option_codes"],
@@ -952,6 +960,7 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
         },
         "default_rate_gap_audit":{
             "file":audit_path.name,
+            "download_url":"https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/rate-gap-audit.json",
             "sha256":"sha256:"+audit_hash,
             "record_count":len(gap_records),
             "by_region_reason":dict(sorted(gap_counts.items())),
@@ -959,14 +968,15 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
         "rate_scope":"China-origin ordinary 103 duties prefer unconditional CN-specific rates, then same-as-of official GB/XI geographical groups containing CN, then Erga Omnes 1011; rate_options preserve every GB/XI non-remedy measure row whose geography is CN, 1011 or a same-as-of verified group containing CN, across active/expired/future/unknown dates; 551/552/553/554 trade-remedy types are retained separately with exporter codes and dates; VAT and live quota balances are outside this measures dataset and are not certified here",
         "download_urls":{
             "primary":"https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/tariffs.db",
-            "metadata":"https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/metadata.json"},
+            "metadata":"https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/metadata.json",
+            "audit":"https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/rate-gap-audit.json"},
     }
     if len(gb_codes)<10_000 or len(xi_codes)<10_000:
         raise ValueError("Suspiciously incomplete official commodity catalogue")
     # Do not overwrite a mostly populated desktop DB with mostly blank rates
     # if the official expression layout changes unexpectedly.
     print("Verified default-duty coverage (percentage, specific and compound expressions) plus exact source-option projection:",dict(counts))
-    if counts["gb_percent"]<10_000 or counts["xi_percent"]<10_000:
+    if counts["gb_default_duty_codes"]<10_000 or counts["xi_default_duty_codes"]<10_000:
         raise ValueError("Insufficient unambiguous GB/XI percentage coverage for desktop release")
     meta.write_text(json.dumps(report,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
     return report
