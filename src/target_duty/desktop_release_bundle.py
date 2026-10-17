@@ -758,6 +758,9 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                          FROM measures WHERE region='GB' AND code=?
                          AND measure_type IN ('551','552','553','554') ORDER BY ordinal""",(code,)))
                     gb_trade=gb_remedies(remedies,gb["as_of"],china_groups)
+                    counts["gb_remedy_source_rows"]+=len(remedies)
+                    counts["gb_remedy_projected_rows"]+=len(gb_trade)
+                    counts["gb_remedy_blank_expression_rows"]+=sum(not item.get("expression") for item in gb_trade)
                 if code in xi_codes:
                     source=list(xi_conn.execute("""SELECT measure_type,geography_id,
                         duty_expression,effective_start,effective_end,raw_json
@@ -786,6 +789,13 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                         FROM measures WHERE code=? AND measure_type IN ('551','552','553','554')
                         ORDER BY ordinal""",(code,)))
                     ni_trade=xi_remedies(trade_rows,xi["as_of"],raw,xi_groups,xi_geo["area_descriptions"])
+                    counts["xi_remedy_source_rows"]+=len(trade_rows)
+                    counts["xi_remedy_projected_rows"]+=len(ni_trade)
+                    counts["xi_remedy_blank_expression_rows"]+=sum(not item.get("expression") for item in ni_trade)
+                    counts["xi_remedy_condition_rate_rows"]+=sum(bool(item.get("condition_rates")) for item in ni_trade)
+                    counts["xi_remedy_condition_rate_expressions"]+=sum(len(item.get("condition_rates",[])) for item in ni_trade)
+                    counts["xi_remedy_unresolved_relationships"]+=sum(len(item.get("unresolved_relationships",[])) for item in ni_trade)
+                    counts["xi_remedy_unresolved_applicability_rows"]+=sum(item.get("applicability")=="unresolved" for item in ni_trade)
                 gb_antidumping=remedy_summary(gb_trade,"anti_dumping")
                 gb_countervailing=remedy_summary(gb_trade,"countervailing")
                 ni_antidumping=remedy_summary(ni_trade,"anti_dumping")
@@ -894,6 +904,10 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                            "gb_countervailing_codes":counts["gb_countervailing_codes"],
                            "xi_anti_dumping_codes":counts["xi_anti_dumping_codes"],
                            "xi_countervailing_codes":counts["xi_countervailing_codes"],
+                           "gb_trade_remedy_source_rows":counts["gb_remedy_source_rows"],
+                           "gb_trade_remedy_projected_rows":counts["gb_remedy_projected_rows"],
+                           "xi_trade_remedy_source_rows":counts["xi_remedy_source_rows"],
+                           "xi_trade_remedy_projected_rows":counts["xi_remedy_projected_rows"],
                            "gb_rate_option_codes":counts["gb_rate_option_codes"],
                            "xi_rate_option_codes":counts["xi_rate_option_codes"],
                            "gb_rate_option_source_rows":counts["gb_rate_source_rows"],
@@ -943,6 +957,21 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                  "codes_without_default_duty":len(gb_codes)-counts["gb_default_duty_codes"]},
             "XI":{"catalogue_codes":len(xi_codes),"codes_with_default_duty":counts["xi_default_duty_codes"],
                  "codes_without_default_duty":len(xi_codes)-counts["xi_default_duty_codes"]},
+        },
+        "trade_remedy_coverage":{
+            "GB":{"source_rows_before_china_filter":counts["gb_remedy_source_rows"],
+                 "projected_china_applicable_rows":counts["gb_remedy_projected_rows"],
+                 "blank_expression_rows":counts["gb_remedy_blank_expression_rows"],
+                 "condition_rate_components_collected":False,
+                 "limitation":"The GB expanded-measures source contains condition codes but not condition-component duty amounts; a same-version official condition-component join is still required."},
+            "XI":{"source_rows_before_china_filter":counts["xi_remedy_source_rows"],
+                 "projected_china_scope_rows":counts["xi_remedy_projected_rows"],
+                 "blank_measure_expression_rows":counts["xi_remedy_blank_expression_rows"],
+                 "rows_with_condition_duty_expressions":counts["xi_remedy_condition_rate_rows"],
+                 "condition_duty_expression_count":counts["xi_remedy_condition_rate_expressions"],
+                 "unresolved_relationship_count":counts["xi_remedy_unresolved_relationships"],
+                 "unresolved_applicability_rows":counts["xi_remedy_unresolved_applicability_rows"],
+                 "condition_rate_links_preserved":True},
         },
         "rate_option_coverage":{
             "GB":{"catalogue_codes_with_options":counts["gb_rate_option_codes"],
