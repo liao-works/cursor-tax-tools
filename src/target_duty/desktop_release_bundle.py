@@ -288,6 +288,56 @@ def _blank(value):
     return value is None or str(value).strip() in NA or str(value).strip() in ("[]","{}")
 
 
+def _default_rate_gap(region, code, selected_rate, source_rows, options, china_groups=None):
+    """Explain every blank China-origin default rate without inventing a rate."""
+    if not _blank(selected_rate):
+        return None
+    all_103=[o for o in options if str(o.get("measure_type"))=="103"]
+    applicable=[o for o in all_103 if o.get("china_applicable")]
+    active=[o for o in applicable if o.get("effective_status")=="active"]
+    unconditional=[o for o in active if not o.get("conditional")]
+    groups=set(china_groups or ())
+    selected=[]
+    if not all_103:
+        reason="no_103_source_rows" if not source_rows else "no_china_applicable_103_rows"
+    elif not applicable:
+        reason="excluded_or_unresolved_china_applicability"
+    elif not active:
+        reason="no_active_103_measure_on_snapshot_date"
+    elif not unconditional:
+        reason="active_103_requires_conditions_or_additional_code"
+    else:
+        cn=[o for o in unconditional if _area_tokens(o.get("geography")) & {"CN","CHN","CHINA"}]
+        group=[o for o in unconditional
+               if (_area_tokens(o.get("geography")) & groups)
+               and not (_area_tokens(o.get("geography")) & {"1011"})]
+        world=[o for o in unconditional if "1011" in _area_tokens(o.get("geography"))]
+        selected=cn or group or world or unconditional
+        if any(not o.get("expression_available") for o in selected):
+            reason="selected_103_measure_missing_expression"
+        elif len({o.get("expression") for o in selected})>1:
+            reason="conflicting_unconditional_103_rates_at_selected_scope"
+        else:
+            reason="default_rate_selection_unresolved"
+    fields=("source_id","geography","geography_description","effective_status",
+            "expression","expression_available","conditional","additional_code",
+            "additional_description","conditions","excluded_areas","applicability",
+            "measure_type_description","china_applicable")
+    return {
+        "region":region,
+        "code":code,
+        "reason":reason,
+        "source_103_row_count":len(source_rows),
+        "china_applicable_103_option_count":len(applicable),
+        "active_103_option_count":len(active),
+        "active_conditional_103_option_count":len(active)-len(unconditional),
+        "active_unconditional_103_option_count":len(unconditional),
+        "selected_option_count":len(selected),
+        "candidate_expressions":sorted({str(o.get("expression") or "") for o in selected}),
+        "options":[{key:o.get(key) for key in fields} for o in all_103],
+    }
+
+
 def gb_default_rate(rows):
     """Select one exact unconditional duty expression, not percentages only.
 
@@ -434,8 +484,10 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
     input_paths=[Path(s).resolve() for s in (gb_db,gb_catalogue,xi_db,xi_catalogue,xi_manifest)]
     out=Path(output_db).resolve()
     meta=Path(output_metadata).resolve()
-    if out==meta or out in input_paths or meta in input_paths:
-        raise ValueError("Never overwrite input source files")
+    audit_path=meta.with_name("rate-gap-audit.json")
+    if (out==meta or out in input_paths or meta in input_paths
+            or audit_path in input_paths or audit_path in (out,meta)):
+        raise ValueError("Never overwrite input source files or collide with release outputs")
     gb=_source(gb_db,region="GB")
     xi=_source(xi_db,region="XI")
     geo_path=Path(geo_memberships_path).resolve()
@@ -500,6 +552,7 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
             dest.executescript(SQL)
             counts=Counter()
             option_status_counts=Counter()
+            gap_records=[]
             all_codes=sorted(gb_codes|xi_codes)
             for code in all_codes:
                 if not CODE.fullmatch(code):
@@ -525,6 +578,10 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                     counts["gb_unconditional_candidates"]+=sum(
                         _blank(r[1]) and _blank(r[2]) and _blank(r[3]) for r in source)
                     counts["gb_percent"]+=bool(gb_rate)
+                    if not gb_rate:
+                        gap=_default_rate_gap("GB",code,gb_rate,source,gb_options,china_groups)
+                        if gap:
+                            gap_records.append(gap)
                     remedies=list(gb_conn.execute("""SELECT measure_type,geography,expression,
                          additional_code,conditions,excluded_areas,effective_start,effective_end,raw_json
                          FROM measures WHERE region='GB' AND code=?
@@ -548,6 +605,10 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                     if len(xi_options)!=len(xi_option_rows):
                         raise ValueError("XI rate-option projection lost official measure rows for "+code)
                     counts["xi_percent"]+=bool(ni_rate)
+                    if not ni_rate:
+                        gap=_default_rate_gap("XI",code,ni_rate,source,xi_options,xi_groups)
+                        if gap:
+                            gap_records.append(gap)
                     trade_rows=list(xi_conn.execute("""SELECT measure_type,geography_id,
                         duty_expression,effective_start,effective_end,raw_json
                         FROM measures WHERE code=? AND measure_type IN ('551','552','553','554')
@@ -600,6 +661,21 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
     digest=hash_file(out)
     version="data-"+day.strftime("%Y%m%d")+"-"+digest[:16]
     stamp=datetime.now(timezone.utc).isoformat()
+    gap_records.sort(key=lambda item:(item["region"],item["code"]))
+    gap_counts=Counter(item["region"]+":"+item["reason"] for item in gap_records)
+    audit_doc={
+        "kind":"china-origin-default-rate-gap-audit-v1",
+        "as_of":day.isoformat(),
+        "source_versions":{"GB":gb["version_or_catalogue"],"GB_as_of":gb["as_of"].isoformat(),
+                           "XI_as_of":xi["as_of"].isoformat(),
+                           "XI_catalogue_sha256":xi["version_or_catalogue"]},
+        "record_count":len(gap_records),
+        "by_region_reason":dict(sorted(gap_counts.items())),
+        "records":gap_records,
+    }
+    audit_bytes=(json.dumps(audit_doc,ensure_ascii=False,sort_keys=True,indent=2)+"\\n").encode("utf-8")
+    audit_hash=hashlib.sha256(audit_bytes).hexdigest()
+    audit_path.write_bytes(audit_bytes)
     report={
         "version":version,
         "timestamp":stamp,
@@ -643,6 +719,12 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
             "active_china_group_count":len(xi_groups),
             "active_china_group_ids":sorted(xi_groups)},
         "coverage":{"GB":len(gb_codes),"XI":len(xi_codes)},
+        "default_rate_gap_audit":{
+            "file":audit_path.name,
+            "sha256":"sha256:"+audit_hash,
+            "record_count":len(gap_records),
+            "by_region_reason":dict(sorted(gap_counts.items())),
+        },
         "rate_scope":"China-origin ordinary 103 duties prefer unconditional CN-specific rates, then same-as-of official GB/XI geographical groups containing CN, then Erga Omnes 1011; rate_options preserve every GB/XI non-remedy measure row whose geography is CN, 1011 or a same-as-of verified group containing CN, across active/expired/future/unknown dates; 551/552/553/554 trade-remedy types are retained separately with exporter codes and dates; VAT and live quota balances are outside this measures dataset and are not certified here",
         "download_urls":{
             "primary":"https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/tariffs.db",
