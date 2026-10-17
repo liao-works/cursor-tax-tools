@@ -24,6 +24,7 @@ from .xi_public_full_capture import verify_public
 from .xi_acceptance import decompress_checked
 from .china_trade_remedies import gb_remedies, xi_remedies, summary as remedy_summary
 from .geo_area_memberships import inspect_csv as inspect_geo_memberships
+from .xi_geographical_areas import inspect_payload as inspect_xi_geographical_areas
 
 PERCENT=re.compile(r"^\s*(?:\d+(?:\.\d+)?|\.\d+)\s*%\s*$")
 CODE=re.compile(r"[0-9]{10}\Z")
@@ -193,7 +194,7 @@ def _xi_text(nodes):
     return "; ".join(dict.fromkeys(values))
 
 
-def _xi_rate_options(rows, original_body, as_of):
+def _xi_rate_options(rows, original_body, as_of, china_groups=None):
     document=json.loads(original_body)
     index=_xi_relation_map(document)
     options=[]
@@ -257,7 +258,7 @@ def _xi_rate_options(rows, original_body, as_of):
         }
         option["expression_available"] = bool(option["expression"])
         option["special_use"]=option["measure_type"]=="105"
-        option["china_applicable"]=_china_applicable(option["geography"], option["excluded_areas"])
+        option["china_applicable"]=_china_applicable(option["geography"], option["excluded_areas"], china_groups)
         option["conditional"]=bool(option["additional_code"] or option["conditions"]
                                     or option["special_use"])
         option["applicability"]=(
@@ -297,7 +298,7 @@ def gb_default_rate(rows):
     return next(iter(distinct)) if len(distinct)==1 else ""
 
 
-def xi_rate(rows, as_of:date, original_body:bytes|None=None):
+def xi_rate(rows, as_of:date, original_body:bytes|None=None, china_groups=None):
     """Resolve China's unconditioned 103 default, preferring a CN-specific rate.
 
     Conditional/additional-code variants remain in rate_options. An exclusion
@@ -306,9 +307,10 @@ def xi_rate(rows, as_of:date, original_body:bytes|None=None):
     """
     document=json.loads(original_body) if original_body is not None else {}
     related=_xi_relation_map(document)
+    groups=set(china_groups or ())
     selected=[]
     for kind, geo, expr, start, end, raw in rows:
-        if kind != "103" or geo not in ("CN","1011"):
+        if kind != "103" or not _china_applicable(geo, "", groups):
             continue
         try:
             begin=date.fromisoformat(start[:10])
@@ -373,7 +375,8 @@ def xi_rate(rows, as_of:date, original_body:bytes|None=None):
     if not selected:
         return ""
     china_specific=[expr for geo,expr in selected if geo=="CN"]
-    rates=china_specific or [expr for geo,expr in selected if geo=="1011"]
+    group_specific=[expr for geo,expr in selected if geo in groups and geo!="1011"]
+    rates=china_specific or group_specific or [expr for geo,expr in selected if geo=="1011"]
     if not rates or any(not rate for rate in rates):
         return ""
     distinct=set(rates)
@@ -391,13 +394,14 @@ def _gb_rate_option_rows(conn, code, china_groups=None):
     return [row for row in rows if _china_applicable(row[1], row[6], groups)]
 
 
-def _xi_rate_option_rows(conn, code):
-    """Project every CN/Erga Omnes non-remedy row, including all date states."""
-    return list(conn.execute("""SELECT measure_type,geography_id,duty_expression,
+def _xi_rate_option_rows(conn, code, china_groups=None):
+    """Project every China-applicable non-remedy row, including all date states."""
+    rows=list(conn.execute("""SELECT measure_type,geography_id,duty_expression,
         effective_start,effective_end,raw_json
-        FROM measures WHERE code=? AND geography_id IN ('CN','1011')
-        AND measure_type NOT IN ('551','552','553','554')
+        FROM measures WHERE code=? AND measure_type NOT IN ('551','552','553','554')
         ORDER BY ordinal""", (code,)))
+    groups=set(china_groups or ())
+    return [row for row in rows if _china_applicable(row[1], "", groups)]
 
 
 def hash_file(path:Path):
@@ -410,7 +414,8 @@ def hash_file(path:Path):
 
 def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
           xi_manifest:str, output_db:str, output_metadata:str,
-          geo_memberships_path:str, geo_memberships_report_path:str):
+          geo_memberships_path:str, geo_memberships_report_path:str,
+          xi_geographical_areas_path:str, xi_geographical_areas_report_path:str):
     input_paths=[Path(s).resolve() for s in (gb_db,gb_catalogue,xi_db,xi_catalogue,xi_manifest)]
     out=Path(output_db).resolve()
     meta=Path(output_metadata).resolve()
@@ -420,8 +425,11 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
     xi=_source(xi_db,region="XI")
     geo_path=Path(geo_memberships_path).resolve()
     geo_report_path=Path(geo_memberships_report_path).resolve()
-    if (geo_path in input_paths or geo_report_path in input_paths or geo_path==geo_report_path
-            or geo_path in (out,meta) or geo_report_path in (out,meta)):
+    xi_geo_path=Path(xi_geographical_areas_path).resolve()
+    xi_geo_report_path=Path(xi_geographical_areas_report_path).resolve()
+    evidence_paths=(geo_path,geo_report_path,xi_geo_path,xi_geo_report_path)
+    if (any(p in input_paths or p in (out,meta) for p in evidence_paths)
+            or len(set(evidence_paths))!=len(evidence_paths)):
         raise ValueError("Geographical membership evidence must be separate source files")
     geo_payload=geo_path.read_bytes()
     geo=inspect_geo_memberships(geo_payload,gb["as_of"])
@@ -433,6 +441,16 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
             or geo_meta.get("active_china_group_ids")!=geo["active_china_group_ids"]):
         raise ValueError("Pinned official China geographical membership evidence mismatch")
     china_groups=set(geo["active_china_group_ids"])
+    xi_geo_payload=xi_geo_path.read_bytes()
+    xi_geo=inspect_xi_geographical_areas(xi_geo_payload,xi["as_of"])
+    xi_geo_meta=json.loads(xi_geo_report_path.read_text(encoding="utf-8"))
+    if (xi_geo_meta.get("kind")!="hmrc-official-xi-geographical-area-tree-v1"
+            or xi_geo_meta.get("as_of")!=xi["as_of"].isoformat()
+            or xi_geo_meta.get("source_sha256")!=xi_geo["source_sha256"]
+            or xi_geo_meta.get("china_applicable_group_ids")!=xi_geo["china_applicable_group_ids"]
+            or xi_geo_meta.get("complete") is not True):
+        raise ValueError("Pinned official XI geographical-area membership evidence mismatch")
+    xi_groups=set(xi_geo["china_applicable_group_ids"])
     verified=verify_public(xi_catalogue,xi_manifest)
     if (gb["source_rows"]<1_000_000 or
             verified["as_of"]!=xi["as_of"].isoformat() or
@@ -496,12 +514,11 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                          additional_code,conditions,excluded_areas,effective_start,effective_end,raw_json
                          FROM measures WHERE region='GB' AND code=?
                          AND measure_type IN ('551','552','553','554') ORDER BY ordinal""",(code,)))
-                    gb_trade=gb_remedies(remedies,gb["as_of"])
+                    gb_trade=gb_remedies(remedies,gb["as_of"],china_groups)
                 if code in xi_codes:
                     source=list(xi_conn.execute("""SELECT measure_type,geography_id,
                         duty_expression,effective_start,effective_end,raw_json
-                        FROM measures WHERE code=? AND measure_type='103'
-                        AND geography_id IN ('CN','1011') ORDER BY ordinal""",(code,)))
+                        FROM measures WHERE code=? AND measure_type='103' ORDER BY ordinal""",(code,)))
                     original=xi_conn.execute(
                         "SELECT response_sha256,compressed_body FROM requests WHERE code=?",
                         (code,)).fetchone()
@@ -510,9 +527,9 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                     raw=decompress_checked(original[1])
                     if hashlib.sha256(raw).hexdigest()!=original[0]:
                         raise ValueError("XI raw response fingerprint mismatch for "+code)
-                    ni_rate=xi_rate(source,xi["as_of"],raw)
-                    xi_option_rows=_xi_rate_option_rows(xi_conn,code)
-                    xi_options=_xi_rate_options(xi_option_rows,raw,xi["as_of"])
+                    ni_rate=xi_rate(source,xi["as_of"],raw,xi_groups)
+                    xi_option_rows=_xi_rate_option_rows(xi_conn,code,xi_groups)
+                    xi_options=_xi_rate_options(xi_option_rows,raw,xi["as_of"],xi_groups)
                     if len(xi_options)!=len(xi_option_rows):
                         raise ValueError("XI rate-option projection lost official measure rows for "+code)
                     counts["xi_percent"]+=bool(ni_rate)
@@ -520,7 +537,7 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                         duty_expression,effective_start,effective_end,raw_json
                         FROM measures WHERE code=? AND measure_type IN ('551','552','553','554')
                         ORDER BY ordinal""",(code,)))
-                    ni_trade=xi_remedies(trade_rows,xi["as_of"],raw)
+                    ni_trade=xi_remedies(trade_rows,xi["as_of"],raw,xi_groups)
                 gb_antidumping=remedy_summary(gb_trade,"anti_dumping")
                 gb_countervailing=remedy_summary(gb_trade,"countervailing")
                 ni_antidumping=remedy_summary(ni_trade,"anti_dumping")
@@ -605,6 +622,11 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
             "sha256":geo["source_sha256"],
             "active_china_group_count":len(china_groups),
             "active_china_group_ids":sorted(china_groups)},
+        "xi_geographical_membership_source":{
+            "source":xi_geo["source"],"as_of":xi_geo["as_of"],
+            "sha256":xi_geo["source_sha256"],
+            "active_china_group_count":len(xi_groups),
+            "active_china_group_ids":sorted(xi_groups)},
         "coverage":{"GB":len(gb_codes),"XI":len(xi_codes)},
         "rate_scope":"China-origin ordinary 103 duties prefer unconditional CN-specific rates, then active official GB geographical groups containing CN, then Erga Omnes 1011; rate_options preserve every GB/XI non-remedy measure row whose geography is explicitly CN/1011 or (for GB) a same-version active group containing CN, across active/expired/future/unknown dates; 551/552/553/554 trade-remedy types are retained separately with exporter codes and dates; VAT, quota balances and XI group membership not proven by this GB source are not certified here",
         "download_urls":{
@@ -625,13 +647,15 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
 def main():
     parser=argparse.ArgumentParser()
     for arg in ("gb-db","gb-catalogue","xi-db","xi-catalogue","xi-manifest",
-                "geo-memberships","geo-memberships-report","output-db","output-metadata"):
+                "geo-memberships","geo-memberships-report","xi-geographical-areas",
+                "xi-geographical-areas-report","output-db","output-metadata"):
         parser.add_argument("--"+arg,required=True)
     a=vars(parser.parse_args())
     print(json.dumps(build(a["gb_db"],a["gb_catalogue"],a["xi_db"],
                      a["xi_catalogue"],a["xi_manifest"],
                      a["output_db"],a["output_metadata"],
-                     a["geo_memberships"],a["geo_memberships_report"]),ensure_ascii=False,indent=2))
+                     a["geo_memberships"],a["geo_memberships_report"],
+                     a["xi_geographical_areas"],a["xi_geographical_areas_report"]),ensure_ascii=False,indent=2))
 
 if __name__=="__main__":
     main()
