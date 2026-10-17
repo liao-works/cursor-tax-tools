@@ -235,7 +235,7 @@ class DesktopReleaseBundleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             bad = Path(temp) / "cond.json"
             bad.write_text(jsonlib.dumps({
-                "kind": "gb-condition-components-v2",
+                "kind": "gb-condition-components-v3",
                 "version": "v4.0.1599",
                 "coverage": {},
                 "condition_rates_by_measure_sid": {}}), encoding="utf-8")
@@ -251,7 +251,7 @@ class DesktopReleaseBundleTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             mismatch = Path(temp) / "mismatch.json"
             mismatch.write_text(jsonlib.dumps({
-                "kind": "gb-condition-components-v2",
+                "kind": "gb-condition-components-v3",
                 "version": "v4.0.1629",
                 "coverage": {"signature_mismatch_measure_sids": 3},
                 "condition_rates_by_measure_sid": {}}), encoding="utf-8")
@@ -260,7 +260,7 @@ class DesktopReleaseBundleTests(unittest.TestCase):
             self.assertIn("condition signature", str(ctx.exception))
             missing = Path(temp) / "missing.json"
             missing.write_text(jsonlib.dumps({
-                "kind": "gb-condition-components-v2",
+                "kind": "gb-condition-components-v3",
                 "version": "v4.0.1629",
                 "coverage": {"missing_expected_measure_sids": ["20272576"]},
                 "condition_rates_by_measure_sid": {}}), encoding="utf-8")
@@ -269,7 +269,7 @@ class DesktopReleaseBundleTests(unittest.TestCase):
             self.assertIn("20272576", str(ctx.exception))
             ok = Path(temp) / "ok.json"
             ok.write_text(jsonlib.dumps({
-                "kind": "gb-condition-components-v2",
+                "kind": "gb-condition-components-v3",
                 "version": "v4.0.1629",
                 "coverage": {"condition_entities": 2},
                 "source_tables": {"measures": {"sha256": "a" * 64}},
@@ -284,7 +284,7 @@ class DesktopReleaseBundleTests(unittest.TestCase):
                   "src" / "target_duty" / "desktop_release_bundle.py").read_text()
         self.assertIn("condition_rate_components_collected", source)
         self.assertIn("gb_condition_components_path", source)
-        self.assertIn("gb-condition-components-v2", source)
+        self.assertIn("gb-condition-components-v3", source)
         self.assertIn("signature_mismatch_measure_sids", source)
 
 

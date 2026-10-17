@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import html
 import json
 import re
 import sqlite3
@@ -294,7 +295,175 @@ def _format_expression(components):
     return " ".join(rendered).strip()
 
 
-def build_condition_source(version, gb_db, output_path, work_dir=None):
+UK_JSONAPI_URL = ("https://www.trade-tariff.service.gov.uk/uk/api/commodities/{code}"
+                  "?render_json=true")
+MAX_JSONAPI_BYTES = 8 * 1024 * 1024
+
+
+def _fetch_uk_jsonapi_commodity(code):
+    """Official live UK JSON:API commodity document (same host the XI public
+    capture uses). The DBT normalized CSV export drops zero condition amounts;
+    this endpoint preserves them, so it is the recovery source of last resort
+    for conditions the versioned tables leave blank."""
+    last_error = None
+    for attempt in range(3):
+        try:
+            request = urllib.request.Request(
+                UK_JSONAPI_URL.format(code=code),
+                headers={"Accept": "application/vnd.api+json",
+                         "User-Agent": "liao-tool-official-tariff-data/1.0"})
+            with urllib.request.urlopen(request, timeout=90) as response:
+                payload = response.read(MAX_JSONAPI_BYTES + 1)
+            if not payload or len(payload) > MAX_JSONAPI_BYTES:
+                raise ValueError(f"UK JSON:API response for {code} empty or oversized")
+            document = json.loads(payload)
+            sha = hashlib.sha256(payload).hexdigest()
+            return document, {"code": code, "sha256": sha, "bytes": len(payload)}
+        except (OSError, urllib.error.URLError, TimeoutError, ValueError) as exc:
+            last_error = exc
+            time.sleep(2 ** attempt)
+    raise RuntimeError(f"Could not fetch official UK JSON:API commodity {code}: {last_error}")
+
+
+def _jsonapi_condition_amounts(document, measure_sid):
+    """(signature -> expression) from the live JSON:API measure node."""
+    included = document.get("included") or []
+    data_nodes = document.get("data") if isinstance(document.get("data"), list) else []
+    measure = None
+    for node in list(data_nodes) + list(included):
+        if isinstance(node, dict) and node.get("type") == "measure" \
+                and str(node.get("id")) == str(measure_sid):
+            measure = node
+            break
+    if measure is None:
+        return None, "measure_not_listed"
+    conditions = []
+    rels = measure.get("relationships") or {}
+    for ref in rels.get("measure_conditions", {}).get("data") or []:
+        conditions.append(ref)
+    for group_ref in rels.get("measure_condition_permutation_groups", {}).get("data") or []:
+        group = next((n for n in included if isinstance(n, dict)
+                      and str(n.get("id")) == str(group_ref.get("id"))), None)
+        if group:
+            for ref in (group.get("relationships") or {}).get(
+                    "measure_conditions", {}).get("data") or []:
+                conditions.append(ref)
+    by_id = {str(n.get("id")): n for n in included if isinstance(n, dict)}
+    rates = {}
+    for ref in conditions:
+        node = by_id.get(str(ref.get("id")))
+        if not node:
+            continue
+        attrs = node.get("attributes") or {}
+        expr = _jsonapi_html_text(attrs.get("duty_expression"))
+        if not expr:
+            continue
+        signature = (_clean(attrs.get("document_code")),
+                     _clean(attrs.get("action_code")),
+                     _clean(attrs.get("condition_code")))
+        rates.setdefault(signature, []).append((str(node.get("id")), expr))
+    return rates, "ok"
+
+
+def _jsonapi_html_text(value):
+    if value is None:
+        return ""
+    text = html.unescape(str(value))
+    text = re.sub(r"(?i)<[^>]*>", " ", text)
+    return " ".join(text.split()).strip()
+
+
+def _recover_blank_amounts_from_jsonapi(rates_by_measure, gb_db, coverage, fetcher=None):
+    """Fill conditions whose versioned-table amounts are blank from the official
+    live JSON:API, matched strictly by (certificate, action, condition code).
+    Never overrides a normalized amount; leftovers stay blank and are counted."""
+    fetcher = fetcher or _fetch_uk_jsonapi_commodity
+    needed = {}   # msid -> [entries]
+    for msid, entries in rates_by_measure.items():
+        blanks = [e for e in entries if not e["duty_expression"]]
+        if blanks:
+            needed[msid] = blanks
+    coverage["jsonapi_entities_without_normalized_amount"] = sum(
+        len(v) for v in needed.values())
+    if not needed:
+        coverage["jsonapi_recovered_entities"] = 0
+        coverage["jsonapi_still_blank_entities"] = 0
+        return
+    codes_by_sid = {}
+    conn = sqlite3.connect(gb_db)
+    try:
+        rows = conn.execute(
+            "SELECT raw_json FROM measures "
+            "WHERE CAST(measure_type AS TEXT) IN ('551','552','553','554')")
+        for (raw,) in rows:
+            try:
+                record = json.loads(raw) if isinstance(raw, str) else (raw or {})
+            except (TypeError, json.JSONDecodeError):
+                continue
+            sid = _clean(record.get("measure__sid"))
+            code = _clean(record.get("commodity__code"))
+            if sid in needed and code:
+                codes_by_sid.setdefault(sid, set()).add(code)
+    finally:
+        conn.close()
+    fetch_codes = sorted({c for codes in codes_by_sid.values() for c in codes if c})
+    coverage["jsonapi_commodity_codes_fetched"] = 0
+    coverage["jsonapi_fetch_failures"] = 0
+    evidence = {}
+    recovered = 0
+    still_blank = 0
+    match_conflicts = 0
+    for code in fetch_codes:
+        try:
+            document, meta = fetcher(code)
+        except (RuntimeError, ValueError) as exc:
+            coverage["jsonapi_fetch_failures"] += 1
+            evidence.setdefault("_errors", []).append(
+                {"code": code, "error": str(exc)[:200]})
+            continue
+        coverage["jsonapi_commodity_codes_fetched"] += 1
+        evidence[code] = meta
+        for sid in needed:
+            if code not in codes_by_sid.get(sid, ()):
+                continue
+            rates, state = _jsonapi_condition_amounts(document, sid)
+            if rates is None:
+                evidence[code].setdefault("measures_missing", []).append(
+                    {"sid": sid, "state": state})
+                continue
+            for entry in needed[sid]:
+                if entry["duty_expression"]:
+                    continue
+                signature = (entry["certificate_code"], entry["action_code"],
+                             entry["condition_code"])
+                matches = rates.get(signature, [])
+                if len(matches) == 1:
+                    node_id, expr = matches[0]
+                    entry["duty_expression"] = expr
+                    entry["amount_source"] = "uk-jsonapi-live"
+                    entry["jsonapi_condition_node_id"] = node_id
+                    entry["resolved"] = not entry["unresolved_relationships"]
+                    recovered += 1
+                elif len(matches) > 1:
+                    match_conflicts += 1
+                else:
+                    still_blank += 1
+    for msid, entries in needed.items():
+        for entry in entries:
+            if not entry["duty_expression"] and "amount_source" not in entry:
+                entry.setdefault("amount_source", "unavailable")
+    coverage["jsonapi_recovered_entities"] = recovered
+    coverage["jsonapi_still_blank_entities"] = still_blank
+    coverage["jsonapi_signature_match_conflicts"] = match_conflicts
+    coverage["jsonapi_fetch_evidence"] = evidence
+    # Recount expressions after recovery.
+    coverage["condition_rows_with_rate_expression"] = sum(
+        bool(entry["duty_expression"])
+        for entries in rates_by_measure.values() for entry in entries)
+
+
+def build_condition_source(version, gb_db, output_path, work_dir=None,
+                           jsonapi_fallback=True, jsonapi_fetcher=None):
     relevant_sids, expected_sids, expected_signatures = _expected_measure_sids(gb_db)
     if work_dir:
         root = Path(work_dir)
@@ -609,8 +778,13 @@ def build_condition_source(version, gb_db, output_path, work_dir=None):
         found_expected = {sid for sid in rates_by_measure if sid in expected_sids}
         coverage["missing_expected_measure_sids"] = sorted(expected_sids - found_expected)
         coverage["condition_signature_mismatches"] = signature_mismatches
+
+        if jsonapi_fallback:
+            _recover_blank_amounts_from_jsonapi(
+                rates_by_measure, gb_db, coverage, fetcher=jsonapi_fetcher)
+
         source = {
-            "kind": "gb-condition-components-v2",
+            "kind": "gb-condition-components-v3",
             "version": version,
             "source_tables": source_tables,
             "coverage": coverage,
@@ -647,8 +821,12 @@ def main():
     parser.add_argument("--gb-db", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--work-dir")
+    parser.add_argument("--no-jsonapi-fallback", action="store_true",
+                        help="Skip the official live JSON:API recovery of blank "
+                             "condition amounts (offline replays only)")
     args = parser.parse_args()
-    build_condition_source(args.version, args.gb_db, args.output, args.work_dir)
+    build_condition_source(args.version, args.gb_db, args.output, args.work_dir,
+                           jsonapi_fallback=not args.no_jsonapi_fallback)
 
 
 if __name__ == "__main__":

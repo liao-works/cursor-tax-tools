@@ -212,7 +212,8 @@ class GBConditionJoinTests(unittest.TestCase):
             output = work / "audit.json"
             with patch("src.target_duty.gb_condition_components.download_table",
                        side_effect=download):
-                source = build_condition_source("v4.0.1629", str(gb_db), str(output), str(work / "in"))
+                source = build_condition_source("v4.0.1629", str(gb_db), str(output),
+                                                str(work / "in"), jsonapi_fallback=False)
             rates = source["condition_rates_by_measure_sid"]["20272576"]
             by_cert = {entry["certificate_code"]: entry for entry in rates}
             self.assertEqual(by_cert["D008"]["duty_expression"], "14.79 %")
@@ -237,7 +238,7 @@ class GBConditionJoinTests(unittest.TestCase):
             with patch("src.target_duty.gb_condition_components.download_table",
                        side_effect=download):
                 source = build_condition_source("v4.0.1629", str(gb_db), str(work / "audit.json"),
-                                                str(work / "in"))
+                                                str(work / "in"), jsonapi_fallback=False)
             rates = source["condition_rates_by_measure_sid"]["20272576"]
             self.assertTrue(rates)
             for entry in rates:
@@ -259,7 +260,7 @@ class GBConditionJoinTests(unittest.TestCase):
             with patch("src.target_duty.gb_condition_components.download_table",
                        side_effect=download):
                 source = build_condition_source("v4.0.1629", str(gb_db), str(work / "audit.json"),
-                                                str(work / "in"))
+                                                str(work / "in"), jsonapi_fallback=False)
             for entry in source["condition_rates_by_measure_sid"]["20272576"]:
                 self.assertEqual(entry["duty_expression"], "")
 
@@ -276,7 +277,7 @@ class GBConditionJoinTests(unittest.TestCase):
                        side_effect=download):
                 with self.assertRaises(ValueError) as ctx:
                     build_condition_source("v4.0.1629", str(gb_db), str(work / "audit.json"),
-                                           str(work / "in"))
+                                           str(work / "in"), jsonapi_fallback=False)
             self.assertIn("99999999", str(ctx.exception))
 
     def test_certificate_signature_mismatch_is_flagged(self):
@@ -291,12 +292,82 @@ class GBConditionJoinTests(unittest.TestCase):
             with patch("src.target_duty.gb_condition_components.download_table",
                        side_effect=download):
                 source = build_condition_source("v4.0.1629", str(gb_db), str(work / "audit.json"),
-                                                str(work / "in"))
+                                                str(work / "in"), jsonapi_fallback=False)
             coverage = source["coverage"]
             self.assertEqual(coverage["signature_mismatch_measure_sids"], 1)
             self.assertTrue(coverage["condition_signature_mismatches"][0]["measure_sid"] == "20272576")
             for entry in source["condition_rates_by_measure_sid"]["20272576"]:
                 self.assertTrue(entry.get("signature_mismatch"))
+
+    def test_blank_amounts_recovered_from_official_jsonapi(self):
+        """The normalized export drops zero amounts; the official live JSON:API
+        preserves them. The fallback fills blanks by exact certificate/action/
+        condition-code signature and never overrides a normalized amount."""
+        with tempfile.TemporaryDirectory() as temp:
+            work = Path(temp)
+            gb_rows, conditions, components, tracked, transactions = self._standard_fixtures()
+            # no components at all -> both conditions blank after the join
+            download = self._run_join(work, gb_rows, conditions, [], tracked, transactions)
+            gb_rows = [
+                ("552", "condition:A,certificate:D008,action:01|condition:A,action:01",
+                 '{"measure__sid":"20272576","commodity__code":"1516209821"}'),
+            ]
+            make_gb_db(work / "measures.db", gb_rows)
+            live_document = {"data": [], "included": [
+                {"type": "measure", "id": "20272576", "relationships": {
+                    "measure_conditions": {"data": [
+                        {"type": "measure_condition", "id": "9000001"},
+                        {"type": "measure_condition", "id": "9000002"}]}}},
+                {"type": "measure_condition", "id": "9000001", "attributes": {
+                    "condition_code": "A", "action_code": "01", "document_code": "D008",
+                    "duty_expression": "<span>0.00</span> %"}},
+                {"type": "measure_condition", "id": "9000002", "attributes": {
+                    "condition_code": "A", "action_code": "01", "document_code": None,
+                    "duty_expression": "<span>54.64</span> %"}},
+            ]}
+            fetched = []
+
+            def fake_fetcher(code):
+                fetched.append(code)
+                return live_document, {"code": code, "sha256": "e" * 64, "bytes": 123}
+
+            with patch("src.target_duty.gb_condition_components.download_table",
+                       side_effect=download):
+                source = build_condition_source(
+                    "v4.0.1629", str(work / "measures.db"), str(work / "audit.json"),
+                    str(work / "in"), jsonapi_fallback=True, jsonapi_fetcher=fake_fetcher)
+            self.assertEqual(fetched, ["1516209821"])
+            coverage = source["coverage"]
+            self.assertEqual(coverage["jsonapi_recovered_entities"], 2)
+            self.assertEqual(coverage["jsonapi_still_blank_entities"], 0)
+            self.assertEqual(coverage["condition_rows_with_rate_expression"], 2)
+            rates = {e["certificate_code"]: e
+                     for e in source["condition_rates_by_measure_sid"]["20272576"]}
+            self.assertEqual(rates["D008"]["duty_expression"], "0.00 %")
+            self.assertEqual(rates["D008"]["amount_source"], "uk-jsonapi-live")
+            self.assertEqual(rates[""]["duty_expression"], "54.64 %")
+            self.assertTrue(rates["D008"]["resolved"])
+            # A normalized amount is never overridden by the JSON:API.
+            with tempfile.TemporaryDirectory() as temp2:
+                work2 = Path(temp2)
+                gb_rows2, conditions2, components2, tracked2, transactions2 = \
+                    self._standard_fixtures()
+                download2 = self._run_join(work2, gb_rows2, conditions2, components2,
+                                           tracked2, transactions2)
+                make_gb_db(work2 / "measures.db", [
+                    ("552", "condition:A,certificate:D008,action:01|condition:A,action:01",
+                     '{"measure__sid":"20272576","commodity__code":"1516209821"}')])
+                with patch("src.target_duty.gb_condition_components.download_table",
+                           side_effect=download2):
+                    source2 = build_condition_source(
+                        "v4.0.1629", str(work2 / "measures.db"), str(work2 / "a.json"),
+                        str(work2 / "in"), jsonapi_fallback=True,
+                        jsonapi_fetcher=fake_fetcher)
+                rates2 = {e["certificate_code"]: e
+                          for e in source2["condition_rates_by_measure_sid"]["20272576"]}
+                self.assertEqual(rates2["D008"]["duty_expression"], "14.79 %")
+                self.assertNotIn("amount_source", rates2["D008"])
+                self.assertEqual(source2["coverage"]["jsonapi_recovered_entities"], 0)
 
 
 class GBRemedyConditionWiringTests(unittest.TestCase):
@@ -309,7 +380,7 @@ class GBRemedyConditionWiringTests(unittest.TestCase):
 
     def test_condition_rates_flow_into_enterprise_rows(self):
         condition_source = {
-            "kind": "gb-condition-components-v2",
+            "kind": "gb-condition-components-v3",
             "condition_rates_by_measure_sid": {
                 "20272576": [
                     {"condition_id": "CS1", "condition_code": "A", "condition": "Presentation",
@@ -345,7 +416,7 @@ class GBRemedyConditionWiringTests(unittest.TestCase):
 
     def test_measure_without_join_entry_is_marked_unresolved(self):
         records = gb_remedies([self._measure()], __import__("datetime").date(2026, 10, 17),
-                              condition_source={"kind": "gb-condition-components-v2",
+                              condition_source={"kind": "gb-condition-components-v3",
                                                 "condition_rates_by_measure_sid": {}})
         self.assertEqual(records[0]["unresolved_relationships"],
                          [{"relationship": "gb_condition_join", "id": "20272576"}])
