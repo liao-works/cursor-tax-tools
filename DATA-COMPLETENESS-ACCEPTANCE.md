@@ -178,6 +178,11 @@
 | gap 审计 | 1,613 条全部有因（v4.0.1630 下 GB no_china_applicable 359→360，官方源自身变化） |
 | 抽查（与当日官网一致） | GB 8A43: D008 14.79%/无 54.64%；XI 89ED: 10.00%/35.60%；XI 695: Y155 50.00%/无 0.00%；0101291000 默认空 |
 
+### 收尾复现性验证（同日晚间）
+
+- XI 同日独立全量重采（run 39027799612，16 分片）完成后触发重建发布（run 39036200282）：**输出与 41ac6ec1 字节完全一致**，发布器按设计抑制重复版本——同源同日重采的可复现性得到直接证明。
+- 上述抑制路径会单独更新 metadata 资产时间戳，曾使 watch 的对称时间戳配对检查误报（run 39038644405）；[#62](https://github.com/liao-works/cursor-tax-tools/pull/62) 将该检查改为方向性（仅拦"库新、元数据旧"的真撕裂）后，watch 对同一发布 **通过**（run 39039042094）。
+
 ---
 
 ## 7. 交付 PR 汇总
@@ -191,6 +196,9 @@
 | [#56](https://github.com/liao-works/cursor-tax-tools/pull/56) | 首轮验收文档 |
 | [#57](https://github.com/liao-works/cursor-tax-tools/pull/57) | XI 选项条件税率提取 + 管制措施 linked_but_empty 定性 |
 | [#58](https://github.com/liao-works/cursor-tax-tools/pull/58) / [#59](https://github.com/liao-works/cursor-tax-tools/pull/59) | GB 空白条件金额官方 JSON:API 回填（kind v3）+ weekly 断言对齐 |
+| [#60](https://github.com/liao-works/cursor-tax-tools/pull/60) | 第二轮验收文档（最终发布 41ac6ec1） |
+| [#61](https://github.com/liao-works/cursor-tax-tools/pull/61) | 56 条空白实体逐个上网核查记录（§8.1） |
+| [#62](https://github.com/liao-works/cursor-tax-tools/pull/62) | watch 接受发布器 metadata-only 刷新（方向性撕裂检查） |
 
 ---
 
