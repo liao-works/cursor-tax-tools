@@ -197,6 +197,7 @@ def _xi_rate_options(rows, original_body, as_of):
         # The caller supplies all non-remedy measure types for China/Erga
         # Omnes, including expired/future rows. Keep each source row visible.
         node=json.loads(raw) if isinstance(raw,str) else raw
+        rel=node.get("relationships") or {}
         linked_expr=_xi_linked(index,_xi_refs(node,"duty_expression"))
         expr=_expression(expression)
         if linked_expr:
