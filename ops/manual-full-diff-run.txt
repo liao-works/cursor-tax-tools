@@ -8,3 +8,5 @@ after_run_id=38869910224
 # specific_compound_duty_and_effective_status=20261017
 # xi_geographical_groups_same_as_of_20261017
 # xi_erga_omnes_scope_fix_and_default_rate_gap_audit=20261017
+# conditional_rate_audit=20261017
+# require metadata counts for active conditions, official expressions, and missing-expression gaps
