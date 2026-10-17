@@ -467,15 +467,22 @@ def _default_rate_gap(region, code, selected_rate, source_rows, options, china_g
                and not (_area_tokens(o.get("geography")) & {"1011"})]
         world=[o for o in unconditional if "1011" in _area_tokens(o.get("geography"))]
         selected=cn or group or world or unconditional
-        if any(not o.get("expression_available") for o in selected):
+        resolutions={o.get("expression_resolution") for o in selected}
+        if "multiple" in resolutions:
+            reason="selected_103_measure_has_multiple_duty_expressions"
+        elif "unresolved_link" in resolutions:
+            reason="selected_103_measure_has_unresolved_duty_expression"
+        elif any(not o.get("expression_available") for o in selected):
             reason="selected_103_measure_missing_expression"
         elif len({o.get("expression") for o in selected})>1:
             reason="conflicting_unconditional_103_rates_at_selected_scope"
         else:
             reason="default_rate_selection_unresolved"
     fields=("source_id","geography","geography_description","effective_status",
-            "expression","expression_available","conditional","additional_code",
-            "additional_description","conditions","excluded_areas","applicability",
+            "expression","expression_options","expression_count","expression_resolution",
+            "expression_available","conditional","additional_code","additional_code_ids",
+            "additional_description","condition_ids","conditions","condition_details",
+            "unresolved_relationships","excluded_areas","applicability",
             "measure_type_description","china_applicable")
     return {
         "region":region,
@@ -792,6 +799,14 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                     option_status_counts["XI:"+option["effective_status"]]+=1
                 counts["missing_rate_expressions"]+=sum(
                     1 for option in gb_options+xi_options if not option["expression_available"])
+                counts["multiple_duty_expression_options"]+=sum(
+                    1 for option in gb_options+xi_options
+                    if option.get("expression_resolution")=="multiple")
+                counts["unresolved_rate_options"]+=sum(
+                    1 for option in gb_options+xi_options if option.get("applicability")=="unresolved")
+                counts["unresolved_rate_option_relationships"]+=sum(
+                    len(option.get("unresolved_relationships") or [])
+                    for option in gb_options+xi_options)
                 counts["conditional_rate_options"]+=sum(
                     1 for option in gb_options+xi_options if option["conditional"])
                 counts["china_applicable_rate_options"]+=sum(
@@ -855,6 +870,9 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                            "gb_rate_option_projection_complete":counts["gb_rate_source_rows"]==counts["gb_rate_projected_rows"],
                            "xi_rate_option_projection_complete":counts["xi_rate_source_rows"]==counts["xi_rate_projected_rows"],
                            "missing_rate_expressions":counts["missing_rate_expressions"],
+                           "multiple_duty_expression_options":counts["multiple_duty_expression_options"],
+                           "unresolved_rate_options":counts["unresolved_rate_options"],
+                           "unresolved_rate_option_relationships":counts["unresolved_rate_option_relationships"],
                            "conditional_rate_options":counts["conditional_rate_options"],
                            "china_applicable_rate_options":counts["china_applicable_rate_options"],
                            "rate_option_effective_status_counts":dict(sorted(option_status_counts.items())),
