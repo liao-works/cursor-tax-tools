@@ -54,9 +54,9 @@ class GeoAreaMembershipTests(unittest.TestCase):
 
     def test_numeric_foreign_keys_join_to_same_version_geo_area_codes(self):
         membership = (
-            "trackedmodel_ptr_id,geo_group_id,member_id,validity_start,validity_end\\n"
-            "1,281,1916,2020-01-01,#NA\\n"
-            "2,10520770,10458331,2023-06-21,#NA\\n"
+            "trackedmodel_ptr_id,geo_group_id,member_id,validity_start,validity_end\n"
+            "1,281,1916,2020-01-01,#NA\n"
+            "2,10520770,10458331,2023-06-21,#NA\n"
         ).encode()
         area_lines = [
             "trackedmodel_ptr_id,sid,area_id,area_code,parent_id,validity_start,validity_end",
@@ -66,11 +66,11 @@ class GeoAreaMembershipTests(unittest.TestCase):
         ]
         for i in range(50):
             area_lines.append(f"{20000+i},{3000+i},X{i:03d},1,#NA,2020-01-01,#NA")
-        areas = ("\\n".join(area_lines) + "\\n").encode()
+        areas = ("\n".join(area_lines) + "\n").encode()
         descriptions = (
-            "trackedmodel_ptr_id,sid,described_geographicalarea_id,description,validity_start\\n"
-            "10,11,1916,China,2020-01-01\\n"
-            "12,13,281,Erga Omnes,2020-01-01\\n"
+            "trackedmodel_ptr_id,sid,described_geographicalarea_id,description,validity_start\n"
+            "10,11,1916,China,2020-01-01\n"
+            "12,13,281,Erga Omnes,2020-01-01\n"
         ).encode()
         result = inspect_csv(membership, date(2026, 10, 17), min_rows=1,
                              area_payload=areas, descriptions_payload=descriptions)
@@ -84,8 +84,8 @@ class GeoAreaMembershipTests(unittest.TestCase):
 
     def test_unresolved_active_group_for_known_china_member_fails_closed(self):
         membership = (
-            "trackedmodel_ptr_id,geo_group_id,member_id,validity_start,validity_end\\n"
-            "1,99999,1916,2020-01-01,#NA\\n"
+            "trackedmodel_ptr_id,geo_group_id,member_id,validity_start,validity_end\n"
+            "1,99999,1916,2020-01-01,#NA\n"
         ).encode()
         area_lines = [
             "trackedmodel_ptr_id,sid,area_id,area_code,parent_id,validity_start,validity_end",
@@ -94,7 +94,7 @@ class GeoAreaMembershipTests(unittest.TestCase):
         ]
         for i in range(50):
             area_lines.append(f"{20000+i},{3000+i},X{i:03d},1,#NA,2020-01-01,#NA")
-        areas = ("\\n".join(area_lines) + "\\n").encode()
+        areas = ("\n".join(area_lines) + "\n").encode()
         with self.assertRaisesRegex(ValueError, "unresolved group foreign key"):
             inspect_csv(membership, date(2026, 10, 17), min_rows=1, area_payload=areas)
 
