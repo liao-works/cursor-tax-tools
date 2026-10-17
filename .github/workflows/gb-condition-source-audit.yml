@@ -1,0 +1,59 @@
+name: GB remedy condition source evidence (SHADOW; NO RELEASE)
+on:
+  pull_request:
+    branches: [feat/parallel-scraper]
+    paths:
+      - src/target_duty/gb_condition_components.py
+      - tests/test_gb_condition_components.py
+      - .github/workflows/gb-condition-source-audit.yml
+permissions:
+  contents: read
+  actions: read
+jobs:
+  gb-source-join:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run offline normalized condition-component regression tests
+        run: python -m unittest discover -s tests -p 'test_gb_condition_components.py' -v
+      - name: Download independently accepted GB full-source evidence
+        uses: actions/download-artifact@v4
+        with:
+          run-id: 38995575082
+          name: weekly-gb-full-source-38995575082
+          github-token: \${{ github.token }}
+          path: gb-source
+      - name: Join normalized same-version condition duty rows for ALL remedy measures
+        shell: bash
+        run: |
+          set -euo pipefail
+          GB_PIN="$(tr -d '\r\n' < gb-source/gb-weekly-pin.txt)"
+          mkdir -p gb-conditions
+          python -m src.target_duty.gb_condition_components \
+            --version "$GB_PIN" \
+            --gb-db gb-source/gb-weekly-measures.db \
+            --output gb-conditions/gb-condition-components.json \
+            --work-dir gb-conditions/raw
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          d=json.loads(Path("gb-conditions/gb-condition-components.json").read_text())
+          cov=d["coverage"]
+          print("GB trade-remedy official condition rows:",cov)
+          if cov["missing_expected_measure_sids"]:
+              raise SystemExit("Official GB conditions still missing measure links")
+          if cov["condition_rows_with_rate_expression"]==0:
+              raise SystemExit("No official condition-rate expressions linked")
+          PY
+      - name: Save read-only source evidence for independent review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gb-condition-components-review-\${{ github.run_id }}
+          path: gb-conditions/gb-condition-components.json
+          if-no-files-found: warn
+          retention-days: 14
