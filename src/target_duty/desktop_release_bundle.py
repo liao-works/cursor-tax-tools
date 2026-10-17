@@ -82,7 +82,7 @@ def simple_rate(rows):
 
 
 def _area_tokens(value):
-    return {token.strip().upper() for token in re.split(r"[|,;\\s]+", _clean(value))
+    return {token.strip().upper() for token in re.split(r"[|,;\s]+", _clean(value))
             if token.strip()}
 
 
@@ -455,15 +455,17 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                 ni_trade=[]
                 gb_options=[]
                 xi_options=[]
+                gb_option_rows=[]
+                xi_option_rows=[]
                 if code in gb_codes:
                     source=list(gb_conn.execute("""SELECT expression,additional_code,conditions,excluded_areas,geography
                        FROM measures WHERE region='GB' AND code=?
                         AND effective_status='active' AND measure_type='103'
                         AND geography IN ('CN','1011') ORDER BY ordinal""",(code,)))
                     gb_rate=gb_china_rate(source)
-                    option_rows=_gb_rate_option_rows(gb_conn,code)
-                    gb_options=_gb_rate_options(option_rows,gb["as_of"])
-                    if len(gb_options)!=len(option_rows):
+                    gb_option_rows=_gb_rate_option_rows(gb_conn,code)
+                    gb_options=_gb_rate_options(gb_option_rows,gb["as_of"])
+                    if len(gb_options)!=len(gb_option_rows):
                         raise ValueError("GB rate-option projection lost official measure rows for "+code)
                     counts["gb_mfn_103_codes"]+=bool(source)
                     counts["gb_unconditional_candidates"]+=sum(
@@ -488,9 +490,9 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                     if hashlib.sha256(raw).hexdigest()!=original[0]:
                         raise ValueError("XI raw response fingerprint mismatch for "+code)
                     ni_rate=xi_rate(source,xi["as_of"],raw)
-                    option_rows=_xi_rate_option_rows(xi_conn,code)
-                    xi_options=_xi_rate_options(option_rows,raw,xi["as_of"])
-                    if len(xi_options)!=len(option_rows):
+                    xi_option_rows=_xi_rate_option_rows(xi_conn,code)
+                    xi_options=_xi_rate_options(xi_option_rows,raw,xi["as_of"])
+                    if len(xi_options)!=len(xi_option_rows):
                         raise ValueError("XI rate-option projection lost official measure rows for "+code)
                     counts["xi_percent"]+=bool(ni_rate)
                     trade_rows=list(xi_conn.execute("""SELECT measure_type,geography_id,
@@ -510,8 +512,8 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                 rate_options=json.dumps(gb_options+xi_options,ensure_ascii=False,separators=(",",":"))
                 counts["gb_rate_option_codes"]+=bool(gb_options)
                 counts["xi_rate_option_codes"]+=bool(xi_options)
-                counts["gb_rate_source_rows"]+=len(option_rows) if code in gb_codes else 0
-                counts["xi_rate_source_rows"]+=len(option_rows) if code in xi_codes else 0
+                counts["gb_rate_source_rows"]+=len(gb_option_rows)
+                counts["xi_rate_source_rows"]+=len(xi_option_rows)
                 counts["gb_rate_projected_rows"]+=len(gb_options)
                 counts["xi_rate_projected_rows"]+=len(xi_options)
                 for option in gb_options:
