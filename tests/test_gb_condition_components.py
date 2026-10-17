@@ -80,7 +80,7 @@ class GBConditionComponentsTests(unittest.TestCase):
                      "measure_condition__measure_sid":"20272576",
                      "measure_condition__condition_code":"A",
                      "measure_condition__action_code":"01",
-                     "measure_condition__certificate_code":"D008",
+                     "required_certificate_id":"64625",
                      "measure_condition__component_sequence_number":"1"}
                 ],
                 "measure-condition-components":[
@@ -88,6 +88,8 @@ class GBConditionComponentsTests(unittest.TestCase):
                      "measure_condition_component__duty_expression_id":"1",
                      "measure_condition_component__duty_amount":"35.60"}
                 ],
+                "certificates":[{"trackedmodel_ptr_id":"64625","sid":"008","certificate_type_id":"65"}],
+                "certificate-types":[{"trackedmodel_ptr_id":"65","sid":"D","description":"Commercial invoice"}],
                 "measure-duty-expressions":[{"measure_duty_expression__sid":"1",
                     "measure_duty_expression__code":"1","measure_duty_expression__description":"Percentage"}],
             }
