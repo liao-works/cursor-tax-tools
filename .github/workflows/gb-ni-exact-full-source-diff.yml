@@ -293,6 +293,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p desktop
+          CONDITION_ARGS=""
+          if [ -f gb/gb-weekly-condition-components.json ]; then
+            CONDITION_ARGS="--gb-condition-components gb/gb-weekly-condition-components.json"
+          fi
           python -m src.target_duty.desktop_release_bundle \
             --gb-db gb/gb-weekly-measures.db \
             --gb-catalogue gb/gb-weekly-catalogue.db \
@@ -305,6 +309,7 @@ jobs:
             --geo-area-descriptions gb/gb-weekly-geo-area-descriptions.csv \
             --xi-geographical-areas xi/xi-geographical-areas.json \
             --xi-geographical-areas-report xi/xi-geographical-areas-report.json \
+            $CONDITION_ARGS \
             --output-db desktop/tariffs.db \
             --output-metadata desktop/metadata.json
           python - <<'PY'
@@ -320,6 +325,10 @@ jobs:
           assert audit["record_count"]==len(audit["records"])==m["default_rate_gap_audit"]["record_count"]
           assert audit["source_versions"]==m["source_versions"]
           assert audit["record_count"]==sum(m["default_duty_coverage"][region]["codes_without_default_duty"] for region in ("GB","XI"))
+          if m["trade_remedy_coverage"]["GB"]["condition_rate_components_collected"]:
+              assert m["changes_summary"]["gb_remedy_condition_rate_expressions"]>0
+              assert m["trade_remedy_coverage"]["GB"]["condition_source"]["version"]\
+                     ==m["source_versions"]["GB"]
           with sqlite3.connect("desktop/tariffs.db") as db:
               assert db.execute("PRAGMA integrity_check").fetchone()[0]=="ok"
               assert db.execute("SELECT COUNT(*) FROM tariffs").fetchone()[0]==m["record_count"]

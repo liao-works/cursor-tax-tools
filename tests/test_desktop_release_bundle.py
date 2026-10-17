@@ -100,7 +100,7 @@ class DesktopReleaseBundleTests(unittest.TestCase):
         self.assertIn("Includes percentage, specific and compound duties",source)
         self.assertIn("Verified default-duty coverage",source)
         self.assertIn('"trade_remedy_coverage"',source)
-        self.assertIn('"condition_rate_components_collected":False',source)
+        self.assertIn('"condition_rate_components_collected":gb_condition_source is not None',source)
         self.assertIn('"condition_rate_links_preserved":True',source)
         self.assertIn('"total_default_duty_entries"',source)
         self.assertIn('"gb_available_default_duty_codes"',source)
@@ -226,6 +226,66 @@ class DesktopReleaseBundleTests(unittest.TestCase):
         self.assertEqual(xi_rate([("103","1011","6%",None,None,
                                    json.dumps({"relationships":{}}))],
                                  date(2026,10,16)),"")
+
+    def test_gb_condition_component_source_is_pinned_version_gated(self):
+        import json as jsonlib
+        import tempfile
+        from pathlib import Path
+        from src.target_duty.desktop_release_bundle import load_gb_condition_source
+        with tempfile.TemporaryDirectory() as temp:
+            bad = Path(temp) / "cond.json"
+            bad.write_text(jsonlib.dumps({
+                "kind": "gb-condition-components-v2",
+                "version": "v4.0.1599",
+                "coverage": {},
+                "condition_rates_by_measure_sid": {}}), encoding="utf-8")
+            with self.assertRaises(ValueError) as ctx:
+                load_gb_condition_source(str(bad), "v4.0.1629")
+            self.assertIn("pinned same version", str(ctx.exception))
+
+    def test_gb_condition_component_mismatch_and_missing_sids_fail_closed(self):
+        import json as jsonlib
+        import tempfile
+        from pathlib import Path
+        from src.target_duty.desktop_release_bundle import load_gb_condition_source
+        with tempfile.TemporaryDirectory() as temp:
+            mismatch = Path(temp) / "mismatch.json"
+            mismatch.write_text(jsonlib.dumps({
+                "kind": "gb-condition-components-v2",
+                "version": "v4.0.1629",
+                "coverage": {"signature_mismatch_measure_sids": 3},
+                "condition_rates_by_measure_sid": {}}), encoding="utf-8")
+            with self.assertRaises(ValueError) as ctx:
+                load_gb_condition_source(str(mismatch), "v4.0.1629")
+            self.assertIn("condition signature", str(ctx.exception))
+            missing = Path(temp) / "missing.json"
+            missing.write_text(jsonlib.dumps({
+                "kind": "gb-condition-components-v2",
+                "version": "v4.0.1629",
+                "coverage": {"missing_expected_measure_sids": ["20272576"]},
+                "condition_rates_by_measure_sid": {}}), encoding="utf-8")
+            with self.assertRaises(ValueError) as ctx:
+                load_gb_condition_source(str(missing), "v4.0.1629")
+            self.assertIn("20272576", str(ctx.exception))
+            ok = Path(temp) / "ok.json"
+            ok.write_text(jsonlib.dumps({
+                "kind": "gb-condition-components-v2",
+                "version": "v4.0.1629",
+                "coverage": {"condition_entities": 2},
+                "source_tables": {"measures": {"sha256": "a" * 64}},
+                "condition_rates_by_measure_sid": {}}), encoding="utf-8")
+            source, meta = load_gb_condition_source(str(ok), "v4.0.1629")
+            self.assertEqual(meta["version"], "v4.0.1629")
+            self.assertEqual(meta["source_tables_sha256"]["measures"], "a" * 64)
+
+    def test_gb_condition_source_wiring_is_present_and_fail_closed(self):
+        from pathlib import Path
+        source = (Path(__file__).resolve().parents[1] /
+                  "src" / "target_duty" / "desktop_release_bundle.py").read_text()
+        self.assertIn("condition_rate_components_collected", source)
+        self.assertIn("gb_condition_components_path", source)
+        self.assertIn("gb-condition-components-v2", source)
+        self.assertIn("signature_mismatch_measure_sids", source)
 
 
 if __name__=="__main__":

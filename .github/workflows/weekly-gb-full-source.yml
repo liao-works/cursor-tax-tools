@@ -135,6 +135,31 @@ jobs:
             --csv gb-weekly-original-measures.csv \
             --min-rows 1000000 \
             --output gb-weekly-measures.db
+      - name: Resolve official GB remedy condition-component rates at the same pinned version
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m src.target_duty.gb_condition_components \
+            --version "$(cat gb-weekly-pin.txt)" \
+            --gb-db gb-weekly-measures.db \
+            --output gb-weekly-condition-components.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          pin=Path("gb-weekly-pin.txt").read_text().strip()
+          source=json.loads(Path("gb-weekly-condition-components.json").read_text(encoding="utf-8"))
+          coverage=source["coverage"]
+          assert source["kind"]=="gb-condition-components-v2"
+          assert source["version"]==pin
+          assert coverage["missing_expected_measure_sids"]==[]
+          assert coverage["signature_mismatch_measure_sids"]==0
+          assert coverage["condition_entities"]>0
+          assert coverage["condition_entities_with_amount"]>0
+          print("GB condition components:",json.dumps({k:coverage[k] for k in (
+              "expected_measure_sids_with_conditions","condition_entities",
+              "condition_entities_with_amount","condition_entities_without_amount",
+              "amount_from_older_revision","signature_mismatch_measure_sids")},indent=2))
+          PY
       - name: Verify source SHA, all source rows, same pin/date and no payable certification
         shell: bash
         run: |
@@ -206,6 +231,7 @@ jobs:
             gb-weekly-catalogue.metadata.json
             gb-weekly-measures.db
             gb-weekly-measures.json
+            gb-weekly-condition-components.json
             gb-weekly-version-discovery.json
             gb-weekly-source-download.json
             gb-weekly-geo-area-memberships.csv

@@ -634,11 +634,39 @@ def hash_file(path:Path):
     return h.hexdigest()
 
 
+def load_gb_condition_source(path, gb_version):
+    """Load and pin-verify the same-version GB condition-component join (fail closed)."""
+    source_path = Path(path).resolve()
+    try:
+        source = json.loads(source_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError("GB condition-component source is not valid JSON") from exc
+    if source.get("kind") != "gb-condition-components-v2":
+        raise ValueError("Unrecognised GB condition-component source kind")
+    if source.get("version") != gb_version:
+        raise ValueError("GB condition-component source is not the pinned same version")
+    coverage = source.get("coverage") or {}
+    if coverage.get("missing_expected_measure_sids"):
+        raise ValueError("GB condition-component join missed remedy measure SIDs: "
+                         + ", ".join(coverage["missing_expected_measure_sids"][:20]))
+    if coverage.get("signature_mismatch_measure_sids"):
+        raise ValueError("GB condition-component join disagrees with the expanded "
+                         f"condition signature on {coverage['signature_mismatch_measure_sids']} measure SIDs")
+    meta = {
+        "version": source["version"],
+        "source_tables_sha256": {name: table["sha256"] for name, table
+                                 in (source.get("source_tables") or {}).items()},
+        "coverage": coverage,
+    }
+    return source, meta
+
+
 def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
           xi_manifest:str, output_db:str, output_metadata:str,
           geo_memberships_path:str, geo_memberships_report_path:str,
           geo_areas_path:str, geo_area_descriptions_path:str,
-          xi_geographical_areas_path:str, xi_geographical_areas_report_path:str):
+          xi_geographical_areas_path:str, xi_geographical_areas_report_path:str,
+          gb_condition_components_path:str|None=None):
     input_paths=[Path(s).resolve() for s in (gb_db,gb_catalogue,xi_db,xi_catalogue,xi_manifest)]
     out=Path(output_db).resolve()
     meta=Path(output_metadata).resolve()
@@ -688,6 +716,11 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
             or xi_geo_meta.get("complete") is not True):
         raise ValueError("Pinned official XI geographical-area membership evidence mismatch")
     xi_groups=set(xi_geo["china_applicable_group_ids"])
+    gb_condition_source=None
+    gb_condition_meta=None
+    if gb_condition_components_path:
+        gb_condition_source,gb_condition_meta=load_gb_condition_source(
+            gb_condition_components_path,gb["version_or_catalogue"])
     verified=verify_public(xi_catalogue,xi_manifest)
     if (gb["source_rows"]<1_000_000 or
             verified["as_of"]!=xi["as_of"].isoformat() or
@@ -757,10 +790,20 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                          additional_code,conditions,excluded_areas,effective_start,effective_end,raw_json
                          FROM measures WHERE region='GB' AND code=?
                          AND measure_type IN ('551','552','553','554') ORDER BY ordinal""",(code,)))
-                    gb_trade=gb_remedies(remedies,gb["as_of"],china_groups)
+                    gb_trade=gb_remedies(remedies,gb["as_of"],china_groups,condition_source=gb_condition_source)
                     counts["gb_remedy_source_rows"]+=len(remedies)
                     counts["gb_remedy_projected_rows"]+=len(gb_trade)
                     counts["gb_remedy_blank_expression_rows"]+=sum(not item.get("expression") for item in gb_trade)
+                    counts["gb_remedy_condition_rate_rows"]+=sum(bool(item.get("condition_rates")) for item in gb_trade)
+                    counts["gb_remedy_condition_rate_expressions"]+=sum(len(item.get("condition_rates",[])) for item in gb_trade)
+                    counts["gb_remedy_condition_older_revision_amounts"]+=sum(
+                        bool(detail.get("amount_from_older_revision"))
+                        for item in gb_trade for detail in item.get("condition_details",[]))
+                    counts["gb_remedy_condition_unresolved_relationships"]+=sum(
+                        len(item.get("unresolved_relationships") or []) for item in gb_trade)
+                    counts["gb_remedy_condition_missing_join_rows"]+=sum(
+                        bool(item.get("conditions")) and not item.get("condition_details")
+                        and gb_condition_source is not None for item in gb_trade)
                 if code in xi_codes:
                     source=list(xi_conn.execute("""SELECT measure_type,geography_id,
                         duty_expression,effective_start,effective_end,raw_json
@@ -906,6 +949,11 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                            "xi_countervailing_codes":counts["xi_countervailing_codes"],
                            "gb_trade_remedy_source_rows":counts["gb_remedy_source_rows"],
                            "gb_trade_remedy_projected_rows":counts["gb_remedy_projected_rows"],
+                           "gb_remedy_condition_rate_rows":counts["gb_remedy_condition_rate_rows"],
+                           "gb_remedy_condition_rate_expressions":counts["gb_remedy_condition_rate_expressions"],
+                           "gb_remedy_condition_older_revision_amounts":counts["gb_remedy_condition_older_revision_amounts"],
+                           "gb_remedy_condition_unresolved_relationships":counts["gb_remedy_condition_unresolved_relationships"],
+                           "gb_remedy_condition_missing_join_rows":counts["gb_remedy_condition_missing_join_rows"],
                            "xi_trade_remedy_source_rows":counts["xi_remedy_source_rows"],
                            "xi_trade_remedy_projected_rows":counts["xi_remedy_projected_rows"],
                            "gb_rate_option_codes":counts["gb_rate_option_codes"],
@@ -962,8 +1010,15 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
             "GB":{"source_rows_before_china_filter":counts["gb_remedy_source_rows"],
                  "projected_china_applicable_rows":counts["gb_remedy_projected_rows"],
                  "blank_expression_rows":counts["gb_remedy_blank_expression_rows"],
-                 "condition_rate_components_collected":False,
-                 "limitation":"The GB expanded-measures source contains condition codes but not condition-component duty amounts; a same-version official condition-component join is still required."},
+                 "condition_rate_components_collected":gb_condition_source is not None,
+                 "condition_rate_measures":counts["gb_remedy_condition_rate_rows"],
+                 "condition_rate_expressions":counts["gb_remedy_condition_rate_expressions"],
+                 "condition_older_revision_amounts":counts["gb_remedy_condition_older_revision_amounts"],
+                 "condition_unresolved_relationship_count":counts["gb_remedy_condition_unresolved_relationships"],
+                 "condition_missing_join_rows":counts["gb_remedy_condition_missing_join_rows"],
+                 "condition_source":gb_condition_meta,
+                 "limitation":(None if gb_condition_source is not None else
+                               "The GB expanded-measures source contains condition codes but not condition-component duty amounts; a same-version official condition-component join is still required.")},
             "XI":{"source_rows_before_china_filter":counts["xi_remedy_source_rows"],
                  "projected_china_scope_rows":counts["xi_remedy_projected_rows"],
                  "blank_measure_expression_rows":counts["xi_remedy_blank_expression_rows"],
@@ -994,7 +1049,7 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
             "record_count":len(gap_records),
             "by_region_reason":dict(sorted(gap_counts.items())),
         },
-        "rate_scope":"China-origin ordinary 103 duties prefer unconditional CN-specific rates, then same-as-of official GB/XI geographical groups containing CN, then Erga Omnes 1011; rate_options preserve every GB/XI non-remedy measure row whose geography is CN, 1011 or a same-as-of verified group containing CN, across active/expired/future/unknown dates; 551/552/553/554 trade-remedy types are retained separately with exporter codes and dates; VAT and live quota balances are outside this measures dataset and are not certified here",
+        "rate_scope":"China-origin ordinary 103 duties prefer unconditional CN-specific rates, then same-as-of official GB/XI geographical groups containing CN, then Erga Omnes 1011; rate_options preserve every GB/XI non-remedy measure row whose geography is CN, 1011 or a same-as-of verified group containing CN, across active/expired/future/unknown dates; 551/552/553/554 trade-remedy types are retained separately with exporter codes, per-company conditional duty expressions from the same-version official condition-component join (GB revision-disambiguated), and dates; VAT and live quota balances are outside this measures dataset and are not certified here",
         "download_urls":{
             "primary":"https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/tariffs.db",
             "metadata":"https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/metadata.json",
@@ -1017,13 +1072,17 @@ def main():
                 "geo-memberships","geo-memberships-report","geo-areas","geo-area-descriptions",
                 "xi-geographical-areas","xi-geographical-areas-report","output-db","output-metadata"):
         parser.add_argument("--"+arg,required=True)
+    parser.add_argument("--gb-condition-components",default=None,
+                        help="Optional same-version GB condition-component join produced by "
+                             "src.target_duty.gb_condition_components")
     a=vars(parser.parse_args())
     print(json.dumps(build(a["gb_db"],a["gb_catalogue"],a["xi_db"],
                      a["xi_catalogue"],a["xi_manifest"],
                      a["output_db"],a["output_metadata"],
                      a["geo_memberships"],a["geo_memberships_report"],
                      a["geo_areas"],a["geo_area_descriptions"],
-                     a["xi_geographical_areas"],a["xi_geographical_areas_report"]),ensure_ascii=False,indent=2))
+                     a["xi_geographical_areas"],a["xi_geographical_areas_report"],
+                     gb_condition_components_path=a.get("gb_condition_components")),ensure_ascii=False,indent=2))
 
 if __name__=="__main__":
     main()
