@@ -230,8 +230,17 @@ def _xi_rate_options(rows, original_body, as_of, china_groups=None, area_descrip
             code=attrs.get("code") or attrs.get("country_code") or attrs.get("geographical_area_id") or attrs.get("id") or item.get("id")
             excluded_codes.append(_clean(code))
         linked_excluded_ids={str(x.get("id")) for x in excluded}
-        excluded_codes.extend(_clean(x.get("id")) for x in excluded_refs
-                              if str(x.get("id")) not in linked_excluded_ids)
+        unresolved_exclusion=False
+        for ref in excluded_refs:
+            ref_id=_clean(ref.get("id"))
+            if ref_id in linked_excluded_ids:
+                continue
+            excluded_codes.append(ref_id)
+            # Unresolved non-country IDs could be groups containing CN. Do not
+            # label the measure China-applicable until the pinned tree resolves it.
+            if (ref_id not in (area_descriptions or {})
+                    and not (len(ref_id)==2 and ref_id.isalpha())):
+                unresolved_exclusion=True
         geo_id=_clean(geo or ((geos[0].get("attributes") or {}).get("code")
                               or (geos[0].get("attributes") or {}).get("id") if geos else ""))
         option={
@@ -258,7 +267,8 @@ def _xi_rate_options(rows, original_body, as_of, china_groups=None, area_descrip
         }
         option["expression_available"] = bool(option["expression"])
         option["special_use"]=option["measure_type"]=="105"
-        option["china_applicable"]=_china_applicable(option["geography"], option["excluded_areas"], china_groups)
+        option["china_applicable"]=(not unresolved_exclusion and
+                                     _china_applicable(option["geography"], option["excluded_areas"], china_groups))
         option["conditional"]=bool(option["additional_code"] or option["conditions"]
                                     or option["special_use"])
         option["applicability"]=(
