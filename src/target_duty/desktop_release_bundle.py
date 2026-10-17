@@ -8,6 +8,7 @@ zero. Both source snapshots must replay, hash-verify and cover their catalogue.
 from __future__ import annotations
 import argparse
 import hashlib
+import html
 import json
 import re
 import sqlite3
@@ -202,6 +203,15 @@ def _xi_text(nodes):
     return "; ".join(dict.fromkeys(values))
 
 
+def _xi_html_text(value):
+    """Plain text of an official HTML duty expression (e.g. '<span>50.00</span> %')."""
+    if value is None:
+        return ""
+    text=html.unescape(str(value))
+    text=re.sub(r"(?i)<[^>]*>"," ",text)
+    return " ".join(text.split()).strip()
+
+
 def _xi_rate_options(rows, original_body, as_of, china_groups=None, area_descriptions=None):
     document=json.loads(original_body)
     index=_xi_relation_map(document)
@@ -249,6 +259,29 @@ def _xi_rate_options(rows, original_body, as_of, china_groups=None, area_descrip
             labels.extend(condition_labels(item.get("children") or []))
         return list(dict.fromkeys(labels))
 
+    def condition_rate_rows(items):
+        """Per-condition official duty expressions (control measures carry their
+        conditional amounts on measure_conditions, not on the measure itself)."""
+        rates=[]
+        for item in items:
+            attrs=item.get("attributes") or {}
+            expr=_expression(_xi_html_text(attrs.get("duty_expression")))
+            if expr:
+                rates.append({
+                    "condition_id":item.get("id",""),
+                    "group_ids":item.get("group_ids",[]),
+                    "condition_code":_clean(attrs.get("condition_code")),
+                    "condition":_clean(item.get("description")),
+                    "action_code":_clean(attrs.get("action_code")),
+                    "action":_clean(attrs.get("action")),
+                    "certificate_code":_clean(attrs.get("document_code") or attrs.get("certificate_code")),
+                    "certificate_description":_clean(attrs.get("certificate_description")),
+                    "expression":expr,
+                    "requirement":_clean(attrs.get("requirement")),
+                })
+            rates.extend(condition_rate_rows(item.get("children") or []))
+        return rates
+
     for kind, geo, expression, start, end, raw in rows:
         node=json.loads(raw) if isinstance(raw,str) else raw
         rel=node.get("relationships") or {}
@@ -271,8 +304,9 @@ def _xi_rate_options(rows, original_body, as_of, china_groups=None, area_descrip
             expression_options.append({"id":ref_id,"type":ref_type,
                                        "expression":expr_value,"resolved":bool(expr_value),
                                        "attributes":attrs})
-            if not expr_value:
-                unresolved.append({"relationship":"duty_expression","id":ref_id})
+            # A linked-but-empty duty expression is the official state of
+            # control measures (prohibitions, CITES, statistics): there is no
+            # duty to resolve, which is distinct from a broken link.
         scalar_expression=_expression(expression)
         if len(expression_refs)>1:
             expr=""
@@ -280,7 +314,7 @@ def _xi_rate_options(rows, original_body, as_of, china_groups=None, area_descrip
         elif len(expression_refs)==1:
             expr=expression_options[0]["expression"] or scalar_expression
             expression_resolution=("resolved_single" if expression_options[0]["resolved"]
-                                   else "unresolved_link")
+                                   else "linked_but_empty")
         elif scalar_expression:
             expr=scalar_expression
             expression_resolution="source_scalar"
@@ -397,6 +431,7 @@ def _xi_rate_options(rows, original_body, as_of, china_groups=None, area_descrip
             "additional_description":additional_description,
             "conditions":condition_description,
             "condition_details":condition_details,
+            "condition_rates":condition_rate_rows(condition_details),
             "excluded_areas":excluded_string,
             "effective_start":_clean(start),
             "effective_end":_clean(end),
@@ -417,7 +452,15 @@ def _xi_rate_options(rows, original_body, as_of, china_groups=None, area_descrip
         option["conditional"]=bool(
             additional_refs or condition_refs or option["additional_code"]
             or option["conditions"] or option["special_use"])
-        unresolved_expression=expression_resolution in ("multiple","unresolved_link","missing")
+        # A linked-but-empty measure expression is the official state of control
+        # measures (no duty exists). On a type-103 duty row it still means the
+        # payable amount is unknown — unless the measure's own conditions carry
+        # the official conditional amounts, in which case they are resolvable.
+        has_condition_rates=bool(option["condition_rates"])
+        unresolved_expression=(expression_resolution in ("multiple","unresolved_link","missing")
+                               or (expression_resolution=="linked_but_empty"
+                                   and option["measure_type"]=="103"
+                                   and not has_condition_rates))
         option["applicability"]=(
             "default" if option["measure_type"]=="103" and option["china_applicable"]
             and not option["conditional"] and not unresolved_expression else
@@ -476,7 +519,7 @@ def _default_rate_gap(region, code, selected_rate, source_rows, options, china_g
             "expression","expression_options","expression_count","expression_resolution",
             "expression_available","conditional","additional_code","additional_code_ids",
             "additional_description","condition_ids","conditions","condition_details",
-            "unresolved_relationships","excluded_areas","applicability",
+            "condition_rates","unresolved_relationships","excluded_areas","applicability",
             "measure_type_description","china_applicable")
     return {
         "region":region,
@@ -870,6 +913,14 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                     if option.get("expression_resolution")=="multiple")
                 counts["unresolved_rate_options"]+=sum(
                     1 for option in gb_options+xi_options if option.get("applicability")=="unresolved")
+                counts["xi_option_condition_rate_options"]+=sum(
+                    bool(o.get("condition_rates")) for o in xi_options)
+                counts["xi_option_condition_rate_expressions"]+=sum(
+                    len(o.get("condition_rates") or []) for o in xi_options)
+                counts["xi_control_options_without_duty_expression"]+=sum(
+                    1 for o in xi_options
+                    if o.get("expression_resolution")=="linked_but_empty"
+                    and not o.get("expression_available"))
                 counts["unresolved_rate_option_relationships"]+=sum(
                     len(option.get("unresolved_relationships") or [])
                     for option in gb_options+xi_options)
@@ -968,6 +1019,9 @@ def build(gb_db:str, gb_catalogue:str, xi_db:str, xi_catalogue:str,
                            "multiple_duty_expression_options":counts["multiple_duty_expression_options"],
                            "unresolved_rate_options":counts["unresolved_rate_options"],
                            "unresolved_rate_option_relationships":counts["unresolved_rate_option_relationships"],
+                           "xi_option_condition_rate_options":counts["xi_option_condition_rate_options"],
+                           "xi_option_condition_rate_expressions":counts["xi_option_condition_rate_expressions"],
+                           "xi_control_options_without_duty_expression":counts["xi_control_options_without_duty_expression"],
                            "conditional_rate_options":counts["conditional_rate_options"],
                            "active_conditional_options":counts["active_conditional_options"],
                            "active_conditional_with_expression":counts["active_conditional_with_expression"],
