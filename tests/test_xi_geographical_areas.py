@@ -42,10 +42,21 @@ class XIGeographicalAreaTests(unittest.TestCase):
         payload = json.dumps(doc).encode()
         result = inspect_payload(payload, DAY, min_areas=1)
         self.assertEqual(result["area_ids_containing_china"], ["1011", "CN", "G001", "G002"])
-        self.assertEqual(result["china_applicable_group_ids"], ["1011", "G001", "G002"])
+        self.assertEqual(result["china_applicable_group_ids"], ["G001", "G002"])
+        self.assertEqual(result["erga_omnes_area_id"], "1011")
         self.assertEqual(result["area_descriptions"]["G001"], "G001")
         self.assertEqual(result["source_sha256"], hashlib.sha256(payload).hexdigest())
         self.assertTrue(result["complete"])
+
+    def test_erga_omnes_is_required_but_not_a_cn_membership_edge(self):
+        # HMRC may expose 1011 as an area without listing every country as a
+        # contained-area child. Erga Omnes is handled as a legal scope fallback.
+        payload=json.dumps({"data":[area("1011"),area("G001",("CN",))],
+                            "included":[area("CN")]}).encode()
+        result=inspect_payload(payload,DAY,min_areas=1)
+        self.assertEqual(result["erga_omnes_area_id"],"1011")
+        self.assertEqual(result["china_applicable_group_ids"],["G001"])
+        self.assertNotIn("1011",result["china_applicable_group_ids"])
 
     def test_unresolved_member_and_cycles_fail_closed(self):
         missing = {"data": [area("1011", ("CN",)), area("G001", ("UNKNOWN",))],
