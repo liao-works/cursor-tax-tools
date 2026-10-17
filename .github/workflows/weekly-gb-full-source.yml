@@ -71,6 +71,47 @@ jobs:
               json.dumps(report,sort_keys=True,indent=2)+"\n")
           print(json.dumps(report,indent=2))
           PY
+      - name: Download same-version official geo-area reference tables for numeric membership joins
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv,hashlib,json,urllib.request
+          from pathlib import Path
+          version=Path("gb-weekly-pin.txt").read_text().strip()
+          reports={}
+          for table in ("geo-areas","geo-area-descriptions"):
+              url=(f"https://data.api.trade.gov.uk/v1/datasets/uk-tariff-2021-01-01/"
+                   f"versions/{version}/tables/{table}/data?format=csv")
+              request=urllib.request.Request(url,headers={
+                  "Accept":"text/csv","User-Agent":"liao-gb-geo-reference-audit/1.0"})
+              with urllib.request.urlopen(request,timeout=120) as response:
+                  if response.status!=200 or f"/versions/{version}/" not in response.geturl():
+                      raise SystemExit(f"Unpinned or failed official table response: {table}")
+                  payload=response.read(100_000_001)
+                  resolved=response.geturl()
+              if not payload or len(payload)>100_000_000 or b"\\x00" in payload:
+                  raise SystemExit(f"Empty, oversized or binary official table: {table}")
+              path=Path(f"gb-weekly-{table}.csv")
+              path.write_bytes(payload)
+              reader=csv.reader(payload.decode("utf-8-sig").splitlines())
+              header=next(reader,None)
+              if not header or len(header)!=len(set(header)):
+                  raise SystemExit(f"Invalid official {table} CSV header")
+              samples=[]
+              for row in reader:
+                  samples.append(row)
+                  if len(samples)>=5:
+                      break
+              reports[table]={
+                  "version":version,"source_url":url,"resolved_url":resolved,
+                  "bytes":len(payload),"sha256":hashlib.sha256(payload).hexdigest(),
+                  "header":header,"sample_rows":samples}
+              print(f"OFFICIAL {table} HEADER:",json.dumps(header))
+              print(f"OFFICIAL {table} SAMPLE:",json.dumps(samples[:3]))
+          Path("gb-weekly-geo-area-reference.json").write_text(
+              json.dumps(reports,ensure_ascii=False,indent=2)+"\\n",encoding="utf-8")
+          PY
       - name: Download same-version official geographical group memberships for China applicability
         shell: bash
         run: |
@@ -162,6 +203,9 @@ jobs:
             gb-weekly-source-download.json
             gb-weekly-geo-area-memberships.csv
             gb-weekly-geo-area-memberships.json
+            gb-weekly-geo-areas.csv
+            gb-weekly-geo-area-descriptions.csv
+            gb-weekly-geo-area-reference.json
             gb-weekly-pin.txt
             gb-weekly-as-of.txt
           retention-days: 30
