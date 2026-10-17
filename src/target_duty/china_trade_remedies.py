@@ -107,8 +107,13 @@ def xi_remedies(rows: list[tuple], as_of: date, original_body: bytes, china_grou
             for r in _relationship_refs(rel, name):
                 ref = included.get((str(r.get("type")), str(r.get("id"))))
                 if ref is None:
-                    if str(r.get("id", "")).upper() in ("CN", "CHN", "CHINA"):
+                    ref_id = str(r.get("id", ""))
+                    if ref_id.upper() in ("CN", "CHN", "CHINA"):
                         excluded.add("CN")
+                    elif (ref_id in (area_descriptions or {})
+                          or ref_id in set(china_groups or ())
+                          or (len(ref_id) == 2 and ref_id.isalpha())):
+                        excluded.add(ref_id)
                     else:
                         unresolved_exclusion = True
                     continue
