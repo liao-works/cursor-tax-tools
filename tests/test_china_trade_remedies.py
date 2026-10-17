@@ -211,6 +211,10 @@ class ChinaTradeRemedyTests(unittest.TestCase):
         self.assertEqual(gb_china_rate([("8%", "", "", "CHN|US", "1011")]), "")
         self.assertTrue(_china_applicable("CN", "SCN"))
         self.assertFalse(_china_applicable("1011", "US|CN"))
+        self.assertTrue(_china_applicable("G001", "", {"G001"}))
+        self.assertEqual(gb_china_rate([("6%", "", "", "", "G001"),
+                                        ("8%", "", "", "", "1011")], {"G001"}), "6%")
+        self.assertEqual(gb_china_rate([("8%", "", "", "", "1011")], set()), "8%")
 
     def test_gb_rate_option_projection_keeps_all_date_states_and_other_measure_types(self):
         db=sqlite3.connect(":memory:")
