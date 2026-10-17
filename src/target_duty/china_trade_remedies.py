@@ -28,12 +28,14 @@ def _value(value: Any) -> str:
     return "" if value is None or str(value).strip() in ZERO or str(value).strip() in NA else str(value).strip()
 
 
-def _eligible_geo(geo: str, excluded: str) -> bool:
-    # Explicit China and Erga Omnes (only when China is not excluded).
-    if geo not in (CN, WORLD):
+def _eligible_geo(geo: str, excluded: str, china_groups: set[str] | None = None) -> bool:
+    """Return true only for explicit CN, Erga Omnes or a verified China group."""
+    countries = {token.strip().upper() for token in re.split(r"[|,;\s]+", excluded)
+                 if token.strip()} if excluded else set()
+    groups = set(china_groups or ())
+    if countries & ({"CN", "CHN", "CHINA"} | groups):
         return False
-    countries = set(re.split(r"[|,;\s]+", excluded.upper())) if excluded else set()
-    return CN not in countries
+    return geo in (CN, WORLD) or geo in groups
 
 
 def _effective_status(start: str, end: str, as_of: date) -> str:
@@ -53,13 +55,13 @@ def _effective_status(start: str, end: str, as_of: date) -> str:
     return "active"
 
 
-def gb_remedies(rows: list[tuple], as_of: date) -> list[dict]:
+def gb_remedies(rows: list[tuple], as_of: date, china_groups: set[str] | None = None) -> list[dict]:
     """Project every source remedy row and classify validity; summary uses active only."""
     result = []
     for kind, geo, expr, extra, conditions, excluded, start, end, raw in rows:
         if kind not in TYPES:
             continue
-        if not _eligible_geo(_value(geo), _value(excluded)):
+        if not _eligible_geo(_value(geo), _value(excluded), china_groups):
             continue
         record = json.loads(raw) if isinstance(raw, str) else raw
         if not isinstance(record, dict):
@@ -86,7 +88,7 @@ def _relationship_refs(rel: dict, name: str) -> list[dict]:
     return []
 
 
-def xi_remedies(rows: list[tuple], as_of: date, original_body: bytes) -> list[dict]:
+def xi_remedies(rows: list[tuple], as_of: date, original_body: bytes, china_groups: set[str] | None = None, area_descriptions: dict[str, str] | None = None) -> list[dict]:
     """XI measures use JSON:API linked expressions, conditions and extra codes."""
     doc = json.loads(original_body)
     included = {(str(n.get("type")), str(n.get("id"))): n
@@ -105,8 +107,13 @@ def xi_remedies(rows: list[tuple], as_of: date, original_body: bytes) -> list[di
             for r in _relationship_refs(rel, name):
                 ref = included.get((str(r.get("type")), str(r.get("id"))))
                 if ref is None:
-                    if str(r.get("id", "")).upper() in ("CN", "CHN", "CHINA"):
+                    ref_id = str(r.get("id", ""))
+                    if ref_id.upper() in ("CN", "CHN", "CHINA"):
                         excluded.add("CN")
+                    elif (ref_id in (area_descriptions or {})
+                          or ref_id in set(china_groups or ())
+                          or (len(ref_id) == 2 and ref_id.isalpha())):
+                        excluded.add(ref_id)
                     else:
                         unresolved_exclusion = True
                     continue
@@ -121,7 +128,7 @@ def xi_remedies(rows: list[tuple], as_of: date, original_body: bytes) -> list[di
                 if not tokens:
                     unresolved_exclusion = True
                 excluded.update(tokens)
-        if unresolved_exclusion or not _eligible_geo(_value(geo), "|".join(excluded)):
+        if unresolved_exclusion or not _eligible_geo(_value(geo), "|".join(excluded), china_groups):
             continue
         linked_expr = _relationship_refs(rel, "duty_expression")
         if len(linked_expr) > 1:
@@ -145,6 +152,7 @@ def xi_remedies(rows: list[tuple], as_of: date, original_body: bytes) -> list[di
         result.append({
             "type": TYPES[kind], "measure_type": kind,
             "region": "XI", "geography": _value(geo),
+            "geography_description": str((area_descriptions or {}).get(_value(geo), "")),
             "expression": _value(expr),
             "additional_code": ",".join(sorted(set(c for c in extras if c))),
             "additional_description": "; ".join(d for d in descriptions if d),

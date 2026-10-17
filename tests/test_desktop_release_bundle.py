@@ -86,7 +86,8 @@ class DesktopReleaseBundleTests(unittest.TestCase):
         source=(Path(__file__).resolve().parents[1]/
                 "src"/"target_duty"/"desktop_release_bundle.py").read_text()
         self.assertIn("measure_type='103'",source)
-        self.assertIn('if kind != "103" or geo not in ("CN","1011")',source)
+        self.assertIn('if kind != "103" or not _china_applicable(geo, "", groups)',source)
+        self.assertIn("xi_geographical_areas_report_path",source)
         self.assertIn("measure_type NOT IN ('551','552','553','554')",source)
         self.assertIn("def _gb_rate_option_rows",source)
         self.assertIn("def _xi_rate_option_rows",source)
