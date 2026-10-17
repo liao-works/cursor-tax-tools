@@ -4,9 +4,10 @@
 
 - 数据仓库：https://github.com/liao-works/cursor-tax-tools（集成分支 `feat/parallel-scraper`）
 - 应用仓库：https://github.com/liao-works/liao-tools（`master`）
-- **正式发布数据：[`data-20261017-243467fc824dca54`](https://github.com/liao-works/cursor-tax-tools/releases/tag/data-20261017-243467fc824dca54)**（[`latest-data`](https://github.com/liao-works/cursor-tax-tools/releases/tag/latest-data) 同字节）
-  - `tariffs.db` 496,603,136 字节，SHA-256 `243467fc824dca54f4edcb0f3148a0e4e`（metadata 内全量一致），SQLite `integrity_check=ok`，16,744 个官方可申报商品编码
-  - 官方源版本：GB DBT `v4.0.1629`（as_of 2026-10-17）、XI 公共源 as_of 2026-10-17
+- **最终正式发布数据：[`data-20261017-41ac6ec18264d24f`](https://github.com/liao-works/cursor-tax-tools/releases/tag/data-20261017-41ac6ec18264d24f)**（[`latest-data`](https://github.com/liao-works/cursor-tax-tools/releases/tag/latest-data) 同字节；首轮发布 `data-20261017-243467fc824dca54` 经深检后由两轮修复迭代取代，全部版本化 tag 可回溯）
+  - 501,174,272 字节，SHA-256 与 metadata 一致，SQLite `integrity_check=ok`，16,744 个官方可申报商品编码
+  - 官方源版本：GB DBT `v4.0.1630`（as_of 2026-10-17）、XI 公共源 as_of 2026-10-17
+  - 完整指标见 §6
 - 桌面客户端：**v0.0.18**（含大文件下载修复 PR #31）
 
 ---
@@ -131,30 +132,79 @@
 
 ---
 
-## 5. CI / 构建 / 发布链路
+## 5. 第二轮深化检验与采集（2026-10-17 下午）
 
-| 环节 | 状态 |
+对首轮发布继续做完整性深检，发现并修复两类真实缺口：
+
+### 5.1 XI 选项 24,528 条 "unresolved" 全量定性（PR [#57](https://github.com/liao-works/cursor-tax-tools/pull/57)）
+
+拆解首轮发布的 24,528 条 `unresolved` rate options（全部 XI、全部 `duty_expression` 未解析）后，对照官方 XI JSON:API 确认为两种不同官方状态：
+
+- **管制类措施**（有机产品 750 / 附加 695 / 废弃物 755 / REACH 761 / F-气体 724 / CITES 710 / 统计 566 等 4.5 万行）：官方 duty_expression 记录存在但为空——**本来就没有关税**。现在标记为 `linked_but_empty`（applicability=other_measure），不再误标 unresolved；type 103 无任何可解析金额时仍保持 unresolved。
+- **695 类附加关税**：真实条件税率挂在 `measure_conditions` 上（实证：`0101210000` 措施 `4171349` = 凭证 Y155 → **50.00%**，无凭证 → **0.00%**）。选项投影现在提取 `condition_rates`（表达式+凭证+要求），与救济投影同构。
+
+正式效果（见 §6 最终发布）：`unresolved_rate_options` **24,528 → 0**；XI 选项条件税率 **3,749 项 / 7,620 条表达式**；`xi_control_options_without_duty_expression=24,553`（如实的"管制措施无税率"计数）。
+
+### 5.2 GB 无金额条件的官方 JSON:API 回填（PR [#58](https://github.com/liao-works/cursor-tax-tools/pull/58)、[#59](https://github.com/liao-works/cursor-tax-tools/pull/59)）
+
+官网显示 0.00% 而 DBT 正规化 CSV 导出**丢弃零值金额**（实证：`7208260000` 措施 `20229086` 官网 D008→0.00%/无→0.00%，版本化表中无金额；与 C490 D017 同模式）。官方同主机 JSON:API（`uk/api/commodities/{code}`，XI 公共采集已在 CI 使用同主机）保留真实金额。条件源构建新增受控回填：
+
+- 仅对"选定修订无金额"的空白实体回填；严格 (凭证,行动,条件代码) 签名唯一匹配；**绝不覆盖正规化金额**；每次抓取 SHA-256 入证据；剩余空白显式计数。
+- 本地全量真实回放（195 个受影响编码全部抓取）：**1,447 → 恢复 1,391（96.1%）**，仍空白 56，签名冲突 0，抓取失败 0；混合来源验证（20286181 保留 normalized 48.5%，同时回填缺失的 D008 0.00%）。
+- 条件源 kind 升级 v3；发布器兼容 v2/v3（滚动发布安全）。
+
+### 5.3 源版本推进
+
+官方发布窗口结束后，GB 采集已从 `v4.0.1629` 推进到 **`v4.0.1630`**（无 pin 正常发现路径，`ready_for_full_data_replay`），XI 同日全量重采排队中（其完成后将再触发一次发布，属常规日更）。
+
+---
+
+## 6. 最终发布（本节取代 §0 的版本号）
+
+**最新正式发布：[`data-20261017-41ac6ec18264d24f`](https://github.com/liao-works/cursor-tax-tools/releases/tag/data-20261017-41ac6ec18264d24f)**（`latest-data` 同字节）
+
+- 501,174,272 字节，SHA-256 与 metadata 一致，SQLite integrity ok，16,744 编码；GB 源 `v4.0.1630`（as_of 2026-10-17）、XI as_of 2026-10-17。
+- 生产 freshness watch（run 39032256790）✅。
+
+| 指标 | 数值 |
 | --- | --- |
-| PR CI（`evidence-contract`，离线回归套件） | #51/#52/#53/#54/#55 全绿 |
-| GB 全量采集（pin `v4.0.1629`，run [39019310698](https://github.com/liao-works/cursor-tax-tools/actions/runs/39019310698)） | 成功（含条件组件步骤与断言） |
-| 精确 diff + 发布（run [39019486886](https://github.com/liao-works/cursor-tax-tools/actions/runs/39019486886)） | exact-code-diff ✅ → publish-desktop-data ✅ |
-| 新数据发布 | [data-20261017-243467fc824dca54](https://github.com/liao-works/cursor-tax-tools/releases/tag/data-20261017-243467fc824dca54) + `latest-data` |
-| 生产 freshness watch（run 39020783070） | ✅（修复 #55 后） |
-| 客户端 v0.0.18 构建 + Release | https://github.com/liao-works/liao-tools/releases/tag/v0.0.18 |
-| Windows 实机下载/安装/查询验收 | 见 §4（本机完成） |
+| `unresolved_rate_options` | **0**（首轮 24,528） |
+| XI 选项条件税率 | 3,749 项 / 7,620 条表达式 |
+| 管制措施无税率（如实计数） | 24,553 |
+| GB 条件税率行 / 表达式（中国适用投影） | 6,838 / 16,022（首轮 6,593/14,861） |
+| GB 条件表达式总数（含回填） | 17,673（正规化 16,282 + JSON:API 回填 1,391） |
+| JSON:API 回填 | 恢复 1,391 / 仍空白 56 / 冲突 0 / 失败 0 / 抓取 195 编码 |
+| GB / XI 默认关税编码 | 16,197 / 15,663（**与首轮完全一致——条件金额零泄漏**） |
+| gap 审计 | 1,613 条全部有因（v4.0.1630 下 GB no_china_applicable 359→360，官方源自身变化） |
+| 抽查（与当日官网一致） | GB 8A43: D008 14.79%/无 54.64%；XI 89ED: 10.00%/35.60%；XI 695: Y155 50.00%/无 0.00%；0101291000 默认空 |
 
 ---
 
-## 6. 剩余缺口（如实声明）
+## 7. 交付 PR 汇总
 
-1. **官方导出缺金额的条件组件**：1,447 个 GB 条件实体（及 C490 D017 这类单条）在官方正规化导出中无金额（官网个别渲染为 0.00%，如 D017）。数据侧保持空白+计数+原因，不伪造 0%；数量与样本随发布 metadata 可复核。
-2. **`20272576` 等措施的官方最新修订清空了金额**：数据保留"最后一个含金额的官方状态"（与官网当日显示一致），并带 `amount_from_older_revision` 审计标记；若官方后续补齐/再次变更金额，每周全量会自动跟随。
+| PR | 内容 |
+| --- | --- |
+| [#51](https://github.com/liao-works/cursor-tax-tools/pull/51) | GB 条件组件生产化（同版本 join + 版本消歧 + 管线接入） |
+| [#52](https://github.com/liao-works/cursor-tax-tools/pull/52) / [#53](https://github.com/liao-works/cursor-tax-tools/pull/53) | 操作员 version_pin 通道 + heredoc 修复 |
+| [#54](https://github.com/liao-works/cursor-tax-tools/pull/54) | download_table 真实路径修复 |
+| [#55](https://github.com/liao-works/cursor-tax-tools/pull/55) | freshness watch 60MB→1GiB 上限修复 |
+| [#56](https://github.com/liao-works/cursor-tax-tools/pull/56) | 首轮验收文档 |
+| [#57](https://github.com/liao-works/cursor-tax-tools/pull/57) | XI 选项条件税率提取 + 管制措施 linked_but_empty 定性 |
+| [#58](https://github.com/liao-works/cursor-tax-tools/pull/58) / [#59](https://github.com/liao-works/cursor-tax-tools/pull/59) | GB 空白条件金额官方 JSON:API 回填（kind v3）+ weekly 断言对齐 |
+
+---
+
+## 8. 剩余缺口（如实声明）
+
+1. **GB 条件仍空白的 56 个实体**（0.3%）：JSON:API 亦无可匹配金额（或签名不唯一），保持空白+计数+`jsonapi_still_blank_entities` 显式披露。
+2. **`20272576` 等措施的官方最新修订清空了金额**：数据保留"最后一个含金额的官方状态"（与官网当日显示一致），带 `amount_from_older_revision` 审计标记；官方变更后每周全量自动跟随。
 3. **措施数据集范围之外**：VAT、关税配额实时余额不在 DBT measures 数据集内，metadata `rate_scope` 已声明不在此认证范围。
-4. XI "Other"（`8999`/`C999` 等）与 GB 残余档已按"官方其他企业档位"呈现，不冒充全体企业税率；企业多条件税率均分列。
+4. XI "Other"（`8999`/`C999` 等）与 GB 残余档按"官方其他企业档位"呈现，不冒充全体企业税率；企业多条件税率均分列。
+5. GB 条件源回填使用官方**实时** JSON:API（该数据无版本钉扎，与 XI 公共采集同性质），以 as_of+证据哈希约束；每周全量重采保证时效一致性。
 
 ---
 
-## 7. 复现方式
+## 9. 复现方式
 
 ```bash
 # 条件组件 join（与 weekly workflow 相同命令）
