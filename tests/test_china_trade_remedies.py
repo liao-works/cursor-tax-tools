@@ -450,6 +450,85 @@ class ChinaTradeRemedyTests(unittest.TestCase):
         self.assertEqual(options[2]["applicability"],"other_measure")
         db.close()
 
+    def test_xi_control_measure_linked_but_empty_is_not_unresolved(self):
+        """CITES/organic/REACH controls have no duty: linked-but-empty is official."""
+        measure={"type":"measure","id":"m1","relationships":{
+            "duty_expression":{"data":{"type":"duty_expression","id":"m1-duty_expression"}}}}
+        body={"included":[
+            measure,
+            {"type":"duty_expression","id":"m1-duty_expression",
+             "attributes":{"base":"","formatted_base":"","verbose_duty":""}},
+        ]}
+        row=("710","1011","","2026-01-01",None,json.dumps(measure))
+        (option,)=_xi_rate_options([row],json.dumps(body),TODAY)
+        self.assertEqual(option["expression_resolution"],"linked_but_empty")
+        self.assertEqual(option["applicability"],"other_measure")
+        self.assertEqual(option["unresolved_relationships"],[])
+
+    def test_xi_control_measure_conditions_carry_the_official_amounts(self):
+        """695-type additional duties hold 50%/0% on measure_conditions."""
+        measure={"type":"measure","id":"4171349","relationships":{
+            "duty_expression":{"data":{"type":"duty_expression","id":"4171349-duty_expression"}},
+            "measure_conditions":{"data":[
+                {"type":"measure_condition","id":"2395198"},
+                {"type":"measure_condition","id":"2395199"}]}}}
+        body={"included":[
+            measure,
+            {"type":"duty_expression","id":"4171349-duty_expression",
+             "attributes":{"base":"","formatted_base":"","verbose_duty":""}},
+            {"type":"measure_condition","id":"2395198","attributes":{
+                "condition_code":"B","action_code":"01",
+                "duty_expression":"<span>50.00</span> %",
+                "requirement":"Particular provisions: Products exported directly or indirectly from the Russian",
+                "document_code":"Y049","certificate_description":"Russian-origin evidence"}},
+            {"type":"measure_condition","id":"2395199","attributes":{
+                "condition_code":"B","action_code":"01",
+                "duty_expression":"<span>0.00</span> %","requirement":"None"}},
+        ]}
+        row=("695","1011","","2026-01-01",None,json.dumps(measure))
+        (option,)=_xi_rate_options([row],json.dumps(body),TODAY)
+        self.assertEqual(option["expression"],"")
+        self.assertEqual(option["expression_resolution"],"linked_but_empty")
+        self.assertEqual(option["applicability"],"other_measure")
+        self.assertEqual(option["unresolved_relationships"],[])
+        rates={r["condition_id"]:r for r in option["condition_rates"]}
+        self.assertEqual(rates["2395198"]["expression"],"50.00 %")
+        self.assertEqual(rates["2395198"]["certificate_code"],"Y049")
+        self.assertEqual(rates["2395199"]["expression"],"0.00 %")
+
+    def test_xi_103_with_linked_but_empty_measure_expression_stays_unresolved(self):
+        """An unconditional third-country duty row without any amount is unresolved."""
+        measure={"type":"measure","id":"m1","relationships":{
+            "duty_expression":{"data":{"type":"duty_expression","id":"m1-duty_expression"}}}}
+        body={"included":[
+            measure,
+            {"type":"duty_expression","id":"m1-duty_expression",
+             "attributes":{"base":"","formatted_base":"","verbose_duty":""}},
+        ]}
+        row=("103","1011","","2026-01-01",None,json.dumps(measure))
+        (option,)=_xi_rate_options([row],json.dumps(body),TODAY)
+        self.assertEqual(option["expression_resolution"],"linked_but_empty")
+        self.assertEqual(option["applicability"],"unresolved")
+
+    def test_xi_103_with_conditional_amounts_is_conditional_not_unresolved(self):
+        """1516209821 XI erga-omnes: measure expression empty, conditions carry rates."""
+        measure={"type":"measure","id":"m1","relationships":{
+            "duty_expression":{"data":{"type":"duty_expression","id":"m1-duty_expression"}},
+            "measure_conditions":{"data":[{"type":"measure_condition","id":"c1"}]}}}
+        body={"included":[
+            measure,
+            {"type":"duty_expression","id":"m1-duty_expression",
+             "attributes":{"base":"","formatted_base":"","verbose_duty":""}},
+            {"type":"measure_condition","id":"c1","attributes":{
+                "condition_code":"B","action_code":"01","duty_expression":"0.00 %"}},
+        ]}
+        row=("103","1011","","2026-01-01",None,json.dumps(measure))
+        (option,)=_xi_rate_options([row],json.dumps(body),TODAY)
+        self.assertTrue(option["conditional"])
+        self.assertEqual(option["applicability"],"conditional")
+        self.assertEqual(option["condition_rates"][0]["expression"],"0.00 %")
+        self.assertEqual(option["unresolved_relationships"],[])
+
     def test_xi_china_default_uses_cn_specific_rate_and_country_exclusions(self):
         day=TODAY
         def row(geo, rate, start="2026-01-01", end=None, rels=None):
