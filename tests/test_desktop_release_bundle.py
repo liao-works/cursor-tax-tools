@@ -1,7 +1,7 @@
 """Data from accepted snapshots must never invent ambiguous or stale rates."""
 import unittest
 from datetime import date
-from src.target_duty.desktop_release_bundle import simple_rate, gb_default_rate, xi_rate, _default_rate_gap
+from src.target_duty.desktop_release_bundle import simple_rate, gb_default_rate, gb_china_rate, _gb_rate_options, xi_rate, _default_rate_gap
 
 class DesktopReleaseBundleTests(unittest.TestCase):
     def test_production_release_job_only_runs_after_exact_diff_and_has_write_permission(self):
@@ -99,6 +99,29 @@ class DesktopReleaseBundleTests(unittest.TestCase):
         self.assertIn('"projection_complete"',source)
         self.assertIn("Includes percentage, specific and compound duties",source)
         self.assertIn("Verified default-duty coverage",source)
+        self.assertIn('"total_default_duty_entries"',source)
+        self.assertIn('"gb_available_default_duty_codes"',source)
+        self.assertIn('"xi_available_default_duty_codes"',source)
+        self.assertIn("expected_gap_count",source)
+        self.assertIn('"audit":',source)
+
+    def test_gb_channel_islands_rate_does_not_replace_china_default_and_authorised_use_is_retained(self):
+        import json
+        from datetime import date
+        # The only active type-103 rate is specific to the Channel Islands,
+        # so it must not become a China/third-country default.
+        channel_islands=[("0%","#NA","#NA","#NA","1080")]
+        self.assertEqual(gb_china_rate(channel_islands,set()),"")
+        authorised_use=("105","1011","0%","#NA","#NA",
+                        "condition:B,certificate:N990,action:27|condition:B,action:08",
+                        "#NA","2021-01-01","#NA",
+                        {"measure__type__description":"Non preferential duty under authorised use",
+                         "measure__sid":"20000001"})
+        option=_gb_rate_options([authorised_use],date(2026,10,17),set())[0]
+        self.assertEqual(option["expression"],"0%")
+        self.assertTrue(option["china_applicable"])
+        self.assertTrue(option["conditional"])
+        self.assertEqual(option["applicability"],"authorised_use")
 
     def test_gb_unique_simple_rate(self):
         self.assertEqual(simple_rate([("6%","","","")]),"6%")
