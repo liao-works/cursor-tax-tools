@@ -324,6 +324,7 @@ jobs:
           path: |
             desktop/tariffs.db
             desktop/metadata.json
+            desktop/rate-gap-audit.json
           retention-days: 30
       - name: Publish versioned immutable data and latest-data only if actual bytes changed
         if: steps.source.outputs.ready == 'true'
