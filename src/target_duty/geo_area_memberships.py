@@ -271,6 +271,7 @@ def inspect_csv(payload: bytes, as_of: date, *, min_rows: int = 1_000,
             "geo_area_descriptions_source_sha256":description_report["source_sha256"],
             "geo_area_descriptions_row_count":description_report["row_count"],
             "geo_area_descriptions_active_rows":description_report["active_description_rows"],
+            "geo_area_descriptions_missing_description_rows":description_report["missing_description_rows"],
             "geo_area_descriptions_source_columns":description_report["source_columns"],
             "geo_area_descriptions_source_header":description_report["source_header"],
         })
