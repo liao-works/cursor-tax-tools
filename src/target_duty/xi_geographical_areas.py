@@ -78,9 +78,11 @@ def inspect_payload(payload: bytes, as_of: date, *, min_areas: int = 50) -> dict
         return result
 
     china_areas = sorted(area_id for area_id in nodes if contains_china(area_id))
-    if "1011" not in china_areas:
-        raise ValueError("XI Erga Omnes area does not resolve to China in official membership tree")
-    groups = [area_id for area_id in china_areas if area_id != "CN"]
+    # 1011 (Erga Omnes) is a legal applicability scope, not necessarily a
+    # parent group in HMRC's contained-area tree. Its presence is required,
+    # but it must not be required to contain CN as a child in that tree.
+    # Runtime tariff selection handles 1011 explicitly as the worldwide fallback.
+    groups = [area_id for area_id in china_areas if area_id not in ("CN", "1011")]
     return {
         "kind": "hmrc-official-xi-geographical-area-tree-v1",
         "as_of": as_of.isoformat(),
@@ -91,6 +93,7 @@ def inspect_payload(payload: bytes, as_of: date, *, min_areas: int = 50) -> dict
             for area_id, node in sorted(nodes.items())
         },
         "area_ids_containing_china": china_areas,
+        "erga_omnes_area_id": "1011",
         "china_applicable_group_ids": groups,
         "china_applicable_group_count": len(groups),
         "source_sha256": hashlib.sha256(payload).hexdigest(),
