@@ -20,6 +20,16 @@ class Stage3WorkflowSafetyTests(unittest.TestCase):
         self.assertIn("github.event_name == 'workflow_run'",w)
         self.assertNotIn("--allow-partial",w)
 
+    def test_release_publishes_gap_audit_and_refreshes_metadata_without_database_change(self):
+        w=(WF/"gb-ni-exact-full-source-diff.yml").read_text()
+        publisher=w.split("  publish-desktop-data:",1)[1]
+        self.assertIn("desktop/rate-gap-audit.json",publisher)
+        self.assertIn("PREVIOUS_META_FINGERPRINT",publisher)
+        self.assertIn("NEW_META_FINGERPRINT",publisher)
+        self.assertIn("gh release upload latest-data desktop/metadata.json desktop/rate-gap-audit.json --clobber",publisher)
+        self.assertIn("unambiguous active China-applicable type 103 duties",publisher)
+        self.assertIn("rate-gap-audit.json",publisher)
+
     def test_exact_ni_expirations_from_full_conditions_only(self):
         w=(WF/"xi-known-expiry-refetch.yml").read_text()
         for needle in ("workflow_dispatch:","original_conditions_run_id",
