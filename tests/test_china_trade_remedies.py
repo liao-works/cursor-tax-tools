@@ -160,6 +160,47 @@ class ChinaTradeRemedyTests(unittest.TestCase):
         self.assertTrue(options[0]["conditional"])
         self.assertTrue(options[0]["china_applicable"])
 
+    def test_xi_multiple_expressions_nested_conditions_and_unresolved_codes_are_preserved(self):
+        doc={"included":[
+            {"type":"duty_expression","id":"d1","attributes":{"base":"7.5 %","verbose_duty":"7.5 percent"}},
+            {"type":"duty_expression","id":"d2","attributes":{"base":"12 GBP / 100 kg"}},
+            {"type":"measure_condition_permutation_group","id":"g1","attributes":{},
+             "relationships":{"measure_conditions":{"data":[{"type":"measure_condition","id":"c1"}]}}},
+            {"type":"measure_condition","id":"c1","attributes":{"description":"Export licence required"}},
+        ]}
+        node={"type":"measure","id":"m1","relationships":{
+            "duty_expression":{"data":[
+                {"type":"duty_expression","id":"d1"},
+                {"type":"duty_expression","id":"d2"}]},
+            "measure_condition_permutation_groups":{"data":[
+                {"type":"measure_condition_permutation_group","id":"g1"}]},
+            "additional_code":{"data":{"type":"additional_code","id":"missing-code"}},
+        }}
+        options=_xi_rate_options(
+            [("103","1011","", "2026-01-01","",json.dumps(node))],
+            json.dumps(doc),TODAY)
+        self.assertEqual(len(options),1)
+        option=options[0]
+        self.assertEqual(option["expression"],"")
+        self.assertEqual(option["expression_resolution"],"multiple")
+        self.assertEqual([x["expression"] for x in option["expression_options"]],
+                         ["7.5 %","12 GBP / 100 kg"])
+        self.assertEqual(option["additional_code_ids"],["missing-code"])
+        self.assertTrue(option["conditional"])
+        self.assertEqual(option["applicability"],"unresolved")
+        self.assertIn("Export licence required",option["conditions"])
+        self.assertTrue(any(x["relationship"]=="additional_code"
+                            for x in option["unresolved_relationships"]))
+
+    def test_projection_completeness_metadata_is_derived_from_counts(self):
+        from pathlib import Path
+        source=(Path(__file__).resolve().parents[1]/
+                "src"/"target_duty"/"desktop_release_bundle.py").read_text()
+        self.assertNotIn('"gb_rate_option_projection_complete":True',source)
+        self.assertNotIn('"xi_rate_option_projection_complete":True',source)
+        self.assertIn('counts["gb_rate_source_rows"]==counts["gb_rate_projected_rows"]',source)
+        self.assertIn('counts["xi_rate_source_rows"]==counts["xi_rate_projected_rows"]',source)
+
     def test_conditional_row_without_expression_is_still_retained(self):
         rows=[("103","1011","","","","certificate required","","2026-01-01","",json.dumps({
             "measure__sid":"3","measure__type__description":"Third country duty"}))]
