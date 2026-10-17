@@ -156,7 +156,7 @@ def download_table(version, table, destination):
                 "table": table, "version": version, "url": url, "final_url": final_url,
                 "sha256": digest.hexdigest(), "bytes": size, "row_count": row_count,
                 "columns": headers,
-            }, rows
+            }, None
         except (OSError, urllib.error.URLError, TimeoutError, ValueError) as exc:
             last_error = exc
             partial.unlink(missing_ok=True)
