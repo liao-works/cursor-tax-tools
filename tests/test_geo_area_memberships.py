@@ -29,6 +29,25 @@ class GeoAreaMembershipTests(unittest.TestCase):
         self.assertNotIn("G002", result["active_china_group_ids"])
         self.assertNotIn("G003", result["active_china_group_ids"])
 
+    def test_current_official_dbt_geo_group_schema_is_supported(self):
+        # Current DBT v4.0.1629 uses these official CSV headers.
+        rows = [
+            "trackedmodel_ptr_id,geo_group_id,member_id,validity_start,validity_end",
+            "1,1011,CN,2020-01-01,#NA",
+            "2,G001,CN,2025-01-01,#NA",
+            "3,G001,US,2020-01-01,#NA",
+            "4,G002,CN,2020-01-01,2026-10-15",
+            "5,G003,CN,2026-10-18,#NA",
+        ]
+        payload = ("\\n".join(rows) + "\\n").encode()
+        result = inspect_csv(payload, date(2026, 10, 17), min_rows=1)
+        self.assertEqual(result["source_columns"], {
+            "group": "geo_group_id", "member": "member_id",
+            "start": "validity_start", "end": "validity_end",
+        })
+        self.assertEqual(result["active_china_group_ids"], ["1011", "G001"])
+        self.assertEqual(result["row_count"], 5)
+
     def test_no_active_china_membership_fails_closed(self):
         payload = (
             "geographical_area__id,member__id,membership__effective_start_date,membership__effective_end_date\n"
