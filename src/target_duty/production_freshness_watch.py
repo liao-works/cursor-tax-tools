@@ -18,7 +18,9 @@ from pathlib import Path
 API="https://api.github.com/repos/liao-works/cursor-tax-tools/releases/tags/"
 REQUIRED={"tariffs.db","metadata.json"}
 VERSION=re.compile(r"data-[A-Za-z0-9.-]{1,100}\Z")
-MAX_BYTES=60*1024*1024
+# Full GB/XI source snapshots are ~500MB and grow slowly; the audit downloads
+# latest-data AND the pinned immutable copy into memory for byte comparison.
+MAX_BYTES=1024*1024*1024
 
 
 def when(value: str) -> datetime:
