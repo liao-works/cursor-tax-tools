@@ -65,6 +65,20 @@ class DesktopReleaseBundleTests(unittest.TestCase):
         self.assertIn('gb_rate_source_rows"] != counts["gb_rate_projected_rows"]', source)
         self.assertIn('xi_rate_source_rows"] != counts["xi_rate_projected_rows"]', source)
 
+    def test_release_builder_replays_same_version_geo_reference_tables(self):
+        from pathlib import Path
+        source=(Path(__file__).resolve().parents[1]/
+                "src"/"target_duty"/"desktop_release_bundle.py").read_text()
+        workflow=(Path(__file__).resolve().parents[1]/".github"/"workflows"/
+                  "gb-ni-exact-full-source-diff.yml").read_text()
+        self.assertIn('area_payload=geo_areas_payload',source)
+        self.assertIn('descriptions_payload=geo_area_descriptions_payload',source)
+        self.assertIn('"dbt-official-geo-area-memberships-v2"',source)
+        self.assertIn('geo_meta.get("geo_areas_source_sha256")',source)
+        self.assertIn('geo_meta.get("geo_area_descriptions_source_sha256")',source)
+        self.assertIn('--geo-areas gb/gb-weekly-geo-areas.csv',workflow)
+        self.assertIn('--geo-area-descriptions gb/gb-weekly-geo-area-descriptions.csv',workflow)
+
     def test_metadata_separates_default_duty_and_source_option_coverage(self):
         from pathlib import Path
         source=(Path(__file__).resolve().parents[1]/
