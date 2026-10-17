@@ -245,6 +245,57 @@ def discover(*, previous_pin: str | None = None,
     return result
 
 
+def discover_pinned_version(version: str, *, opener: Callable | None = None) -> dict:
+    """Validate one explicit immutable version's tables and CSVW schema.
+
+    Operator escape hatch for the publication window in which a newly
+    registered version is not yet complete (`unsupported_newest_tables`).
+    The pinned version must independently prove the same required tables and
+    column schema as a newest-version discovery, otherwise it stays blocked.
+    """
+    version_key(version)
+    result = {
+        "kind": KIND,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "source": "official-DBT-data-API-metadata",
+        "dataset": "uk-tariff-2021-01-01",
+        "replayed_previous_version": version,
+        "newest_official_version": version,
+        "newest_version_tables": None,
+        "newer_than_replayed": False,
+        "version_discovered": True,
+        "required_tables_present": False,
+        "schema_compatibility_proven": False,
+        "full_data_replayed_for_newest": False,
+        "freshness_proven": False,
+        "publish_eligible": False,
+        "production_eligible": False,
+        "state": "source_unavailable",
+        "error": None,
+    }
+    tables_url = BASE + "/versions/" + version + "/tables?format=json"
+    result["table_inventory_url"] = tables_url
+    tables = parse_tables(_get(tables_url, opener=opener))
+    result["newest_version_tables"] = tables
+    missing = sorted(REQUIRED_TABLES - set(tables))
+    result["missing_required_tables"] = missing
+    result["required_tables_present"] = not missing
+    if missing:
+        result["state"] = "unsupported_newest_tables"
+        return result
+    schema_url = BASE + "/versions/" + version + "/metadata?format=csvw"
+    result["csvw_metadata_url"] = schema_url
+    schema = inspect_csvw(_get(schema_url, opener=opener))
+    result.update(schema)
+    result["schema_compatibility_proven"] = schema["source_column_schema_compatible"]
+    result["state"] = (
+        "ready_for_full_data_replay"
+        if schema["source_column_schema_compatible"]
+        else "unsupported_newest_columns"
+    )
+    return result
+
+
 def resolve_requested_version(requested: str, *, opener: Callable | None = None) -> str:
     """Return an immutable DBT pin or fail closed for an unavailable latest.
 
@@ -269,11 +320,16 @@ def resolve_requested_version(requested: str, *, opener: Callable | None = None)
 def main() -> None:
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--previous-pin",default="v4.0.1626")
+    p.add_argument("--pinned-version",default=None,
+                   help="Validate one explicit immutable version instead of the newest")
     p.add_argument("--output",default="dbt-version-discovery.json")
     p.add_argument("--require-available",action="store_true",
                    help="Block if source metadata or required tables unavailable")
     args=p.parse_args()
-    result=discover(previous_pin=args.previous_pin)
+    if args.pinned_version:
+        result=discover_pinned_version(args.pinned_version)
+    else:
+        result=discover(previous_pin=args.previous_pin)
     Path(args.output).write_text(
         json.dumps(result,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
     print(json.dumps(result,ensure_ascii=False,indent=2))
