@@ -45,34 +45,23 @@ jobs:
             python -m src.target_duty.dbt_version_discovery \
               --pinned-version "$VERSION_PIN" \
               --output gb-weekly-version-discovery.json --require-available
-            python - <<'PY'
-            import json,re
-            from pathlib import Path
-            info=json.loads(Path("gb-weekly-version-discovery.json").read_text())
-            version=info.get("newest_official_version")
-            if (info.get("state")!="ready_for_full_data_replay"
-                    or not isinstance(version,str)
-                    or not re.fullmatch(r"v[0-9]+(?:\.[0-9]+)*",version)):
-                raise SystemExit("Pinned official DBT version failed table/schema validation")
-            Path("gb-weekly-pin.txt").write_text(version+"\n")
-            print("PINNED OFFICIAL GB SOURCE (operator pin)",version)
-            PY
+            echo "PINNED OFFICIAL GB SOURCE (operator pin) $VERSION_PIN"
           else
             python -m src.target_duty.dbt_version_discovery \
               --output gb-weekly-version-discovery.json --require-available
-            python - <<'PY'
-            import json,re
-            from pathlib import Path
-            info=json.loads(Path("gb-weekly-version-discovery.json").read_text())
-            version=info.get("newest_official_version")
-            if (info.get("state")!="ready_for_full_data_replay"
-                    or not isinstance(version,str)
-                    or not re.fullmatch(r"v[0-9]+(?:\.[0-9]+)*",version)):
-                raise SystemExit("Official DBT latest version not safe for full replay")
-            Path("gb-weekly-pin.txt").write_text(version+"\n")
-            print("PINNED OFFICIAL GB SOURCE",version)
-            PY
           fi
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          info=json.loads(Path("gb-weekly-version-discovery.json").read_text())
+          version=info.get("newest_official_version")
+          if (info.get("state")!="ready_for_full_data_replay"
+                  or not isinstance(version,str)
+                  or not re.fullmatch(r"v[0-9]+(?:\.[0-9]+)*",version)):
+              raise SystemExit("Official DBT version not safe for full replay")
+          Path("gb-weekly-pin.txt").write_text(version+"\n")
+          print("REPLAY OFFICIAL GB SOURCE",version)
+          PY
           date -u +%F > gb-weekly-as-of.txt
       - name: Fetch ALL official GB declarable commodity rows at same pinned version
         shell: bash
