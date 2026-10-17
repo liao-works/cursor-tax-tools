@@ -75,10 +75,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m src.target_duty.geo_area_memberships \\
-            --version "$(cat gb-weekly-pin.txt)" \\
-            --as-of "$(cat gb-weekly-as-of.txt)" \\
-            --output gb-weekly-geo-area-memberships.csv \\
+          python -m src.target_duty.geo_area_memberships \
+            --version "$(cat gb-weekly-pin.txt)" \
+            --as-of "$(cat gb-weekly-as-of.txt)" \
+            --output gb-weekly-geo-area-memberships.csv \
             --report gb-weekly-geo-area-memberships.json
       - name: Independently replay EVERY original GB measure into isolated review database
         shell: bash
