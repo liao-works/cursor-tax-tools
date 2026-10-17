@@ -7,6 +7,7 @@ all Chinese goods. These charges are separate from the standard MFN duty.
 """
 from __future__ import annotations
 
+import html
 import json
 import re
 from datetime import date
@@ -55,121 +56,343 @@ def _effective_status(start: str, end: str, as_of: date) -> str:
     return "active"
 
 
-def gb_remedies(rows: list[tuple], as_of: date, china_groups: set[str] | None = None) -> list[dict]:
-    """Project every source remedy row and classify validity; summary uses active only."""
-    result = []
-    for kind, geo, expr, extra, conditions, excluded, start, end, raw in rows:
+def gb_remedies(rows, as_of:date, china_groups=None):
+    """Keep China-applicable GB trade-remedy measures and their source evidence."""
+    result=[]
+    for kind,geo,expr,additional,conditions,excluded,start,end,raw in rows:
         if kind not in TYPES:
             continue
-        if not _eligible_geo(_value(geo), _value(excluded), china_groups):
+        if not _eligible_geo(_value(geo),_value(excluded),china_groups):
             continue
-        record = json.loads(raw) if isinstance(raw, str) else raw
-        if not isinstance(record, dict):
-            raise ValueError("Malformed GB original measure JSON")
+        status=_effective_status(start,end,as_of)
+        record=json.loads(raw) if isinstance(raw,str) else (raw or {})
+        expression=_value(expr)
+        code=_value(additional)
+        desc=_value(record.get("measure__additional_code__description"))
+        condition_text=_value(conditions)
+        regulation_id=_value(record.get("measure__regulation__id"))
+        regulation_url=_value(record.get("measure__regulation__url"))
+        footnotes=_value(record.get("measure__footnotes"))
         result.append({
-            "type": TYPES[kind], "measure_type": kind,
-            "region": "GB", "geography": _value(geo),
-            "expression": _value(expr), "additional_code": _value(extra),
-            "additional_description": _value(record.get("measure__additional_code__description")),
-            "conditions": _value(conditions),
-            "effective_start": _value(start), "effective_end": _value(end),
-            "effective_status": _effective_status(start, end, as_of),
-            "source_id": _value(record.get("measure__sid")),
+            "region":"GB",
+            "type":"anti_dumping" if kind in ("551","552") else "countervailing",
+            "measure_type":kind,
+            "geography":_value(geo),
+            "geography_description":_value(record.get("measure__geographical_area__description")),
+            "expression":expression,
+            "expression_resolution":"source_value" if expression else "source_blank",
+            "expression_options":([{"id":"","type":"source_scalar","expression":expression,
+                                    "resolved":True,"link_resolved":True}] if expression else []),
+            "expression_count":1 if expression else 0,
+            "additional_code":code,
+            "additional_code_ids":[code] if code else [],
+            "additional_description":desc,
+            "conditions":condition_text,
+            "condition_details":[],
+            "condition_rates":[],
+            "condition_groups":[],
+            "excluded_areas":_value(excluded),
+            "footnotes":footnotes,
+            "footnote_ids":[],
+            "regulation_id":regulation_id,
+            "regulation_url":regulation_url,
+            "legal_acts":[],
+            "source_relationship_ids":{},
+            "unresolved_relationships":[],
+            "applicability":"china_applicable",
+            "source_id":_value(record.get("measure__sid")),
+            "effective_start":_value(start),
+            "effective_end":_value(end),
+            "effective_status":status,
         })
+    return result
+
+
+def _plain_text(value):
+    if value is None:
+        return ""
+    text=html.unescape(str(value))
+    text=re.sub(r"(?i)<br\s*/?>"," ",text)
+    text=re.sub(r"<[^>]*>","",text)
+    return " ".join(text.split()).strip()
+
+
+def _relationship_id_map(rel):
+    result={}
+    for name,entry in sorted((rel or {}).items()):
+        data=entry.get("data") if isinstance(entry,dict) else None
+        refs=[data] if isinstance(data,dict) else (data if isinstance(data,list) else [])
+        ids=[_value(ref.get("id")) for ref in refs if isinstance(ref,dict) and _value(ref.get("id"))]
+        if ids:
+            result[name]=list(dict.fromkeys(ids))
     return result
 
 
 def _relationship_refs(rel: dict, name: str) -> list[dict]:
-    entry = (rel.get(name) or {}).get("data")
-    if isinstance(entry, dict):
+    entry=(rel.get(name) or {}).get("data")
+    if isinstance(entry,dict):
         return [entry]
-    if isinstance(entry, list):
-        return [e for e in entry if isinstance(e, dict)]
+    if isinstance(entry,list):
+        return [item for item in entry if isinstance(item,dict)]
     return []
 
 
-def xi_remedies(rows: list[tuple], as_of: date, original_body: bytes, china_groups: set[str] | None = None, area_descriptions: dict[str, str] | None = None) -> list[dict]:
-    """XI measures use JSON:API linked expressions, conditions and extra codes."""
-    doc = json.loads(original_body)
-    included = {(str(n.get("type")), str(n.get("id"))): n
-                for n in doc.get("included", []) if isinstance(n, dict)}
-    result = []
-    for kind, geo, expr, start, end, raw in rows:
+def xi_remedies(rows, as_of:date, original_body:bytes, china_groups=None, area_descriptions=None):
+    """Preserve XI trade-remedy expressions, condition rates, and unresolved source links."""
+    doc=json.loads(original_body.decode("utf-8"))
+    included={(x.get("type"),str(x.get("id"))):x for x in doc.get("included",[])
+              if isinstance(x,dict) and x.get("id") is not None}
+    area_descriptions=area_descriptions or {}
+    known_area_ids={"CN","1011","WORLD","XI","GB"}|set(china_groups or ())|set(area_descriptions)
+    result=[]
+    for kind,geo,expr,start,end,raw in rows:
         if kind not in TYPES:
             continue
-        node = json.loads(raw)
-        rel = node.get("relationships") or {}
-        # Relationship exclusions must not hide CN; a missing referenced
-        # geography cannot justify projecting a general China rate.
-        excluded = set()
-        unresolved_exclusion = False
-        for name in ("excluded_countries", "excluded_geographical_areas"):
-            for r in _relationship_refs(rel, name):
-                ref = included.get((str(r.get("type")), str(r.get("id"))))
-                if ref is None:
-                    ref_id = str(r.get("id", ""))
-                    if ref_id.upper() in ("CN", "CHN", "CHINA"):
-                        excluded.add("CN")
-                    elif (ref_id in (area_descriptions or {})
-                          or ref_id in set(china_groups or ())
-                          or (len(ref_id) == 2 and ref_id.isalpha())):
+        node=json.loads(raw) if isinstance(raw,str) else (raw or {})
+        rel=node.get("relationships") or {}
+        excluded=set()
+        unresolved_exclusion=False
+        unresolved=[]
+        def mark_unresolved(relationship, ref):
+            ref_id=_value(ref.get("id")) if isinstance(ref,dict) else _value(ref)
+            item={"relationship":relationship,"id":ref_id}
+            if item not in unresolved:
+                unresolved.append(item)
+        for key in ("excluded_countries","excluded_geographical_areas"):
+            for ref in _relationship_refs(rel,key):
+                ref_id=_value(ref.get("id"))
+                linked=included.get((ref.get("type"),ref_id))
+                if linked is None:
+                    if ref_id:
                         excluded.add(ref_id)
-                    else:
-                        unresolved_exclusion = True
+                    if ref_id not in known_area_ids:
+                        unresolved_exclusion=True
+                        mark_unresolved(key,ref)
                     continue
-                attrs = ref.get("attributes") or {}
-                values = [attrs.get(key) for key in
-                          ("code", "country_code", "geographical_area_id", "area_id", "id")]
-                tokens = {token.strip().upper() for value in values if value
-                          for token in re.split(r"[|,;\s]+", str(value)) if token.strip()}
-                description = str(attrs.get("description") or attrs.get("name") or "").strip().lower()
-                if description in ("china", "people's republic of china", "people’s republic of china"):
-                    tokens.add("CN")
-                if not tokens:
-                    unresolved_exclusion = True
-                excluded.update(tokens)
-        if unresolved_exclusion or not _eligible_geo(_value(geo), "|".join(excluded), china_groups):
+                attrs=linked.get("attributes") or {}
+                area=_value(attrs.get("code")) or ref_id
+                if area:
+                    excluded.add(area)
+        geography=_value(geo)
+        if not _eligible_geo(geography,"",china_groups):
             continue
-        linked_expr = _relationship_refs(rel, "duty_expression")
-        if len(linked_expr) > 1:
-            expr = ""  # Multiple expressions are not safely a single rate.
-        elif linked_expr:
-            ref = linked_expr[0]
-            linked = included.get((str(ref.get("type")), str(ref.get("id"))))
-            if linked is not None:
-                attrs = linked.get("attributes") or {}
-                expr = attrs.get("base") or attrs.get("verbose_duty") or expr
-        extras = []
-        descriptions = []
-        for name in ("additional_code", "additional_codes"):
-            for ref in _relationship_refs(rel, name):
-                linked = included.get((str(ref.get("type")), str(ref.get("id"))), {})
-                attrs = linked.get("attributes") or {}
-                extras.append(_value(attrs.get("code") or attrs.get("additional_code") or ref.get("id")))
-                descriptions.append(_value(attrs.get("description") or attrs.get("formatted_description")))
-        conds = any(_relationship_refs(rel, k) for k in
-                    ("measure_conditions", "measure_condition_permutation_groups"))
+        if not _eligible_geo(geography,"|".join(sorted(excluded)),china_groups):
+            continue
+        applicability="unresolved" if unresolved_exclusion else "china_applicable"
+
+        source_relationship_ids=_relationship_id_map(rel)
+        expression_refs=_relationship_refs(rel,"duty_expression")
+        expression_options=[]
+        linked_expression_values=[]
+        for ref in expression_refs:
+            ref_id=_value(ref.get("id"))
+            linked=included.get((ref.get("type"),ref_id))
+            if linked is None:
+                expression_options.append({"id":ref_id,"type":_value(ref.get("type")) or "duty_expression",
+                                           "expression":"","resolved":False,"link_resolved":False})
+                mark_unresolved("duty_expression",ref)
+                linked_expression_values.append("")
+                continue
+            attrs=linked.get("attributes") or {}
+            value=_plain_text(attrs.get("base") or attrs.get("formatted_base") or
+                              attrs.get("verbose_duty") or attrs.get("duty_amount"))
+            expression_options.append({"id":ref_id,"type":_value(ref.get("type")) or "duty_expression",
+                                       "expression":value,"resolved":bool(value),"link_resolved":True})
+            linked_expression_values.append(value)
+        source_expression=_plain_text(_value(expr))
+        if len(expression_refs)>1:
+            expression=""
+            expression_resolution="multiple"
+        elif len(expression_refs)==1:
+            expression=linked_expression_values[0] if linked_expression_values else ""
+            if not expression_options[0]["link_resolved"]:
+                expression_resolution="unresolved_link"
+            elif expression:
+                expression_resolution="resolved_single"
+            else:
+                expression_resolution="linked_but_empty"
+        elif source_expression:
+            expression=source_expression
+            expression_resolution="source_scalar"
+            expression_options=[{"id":"","type":"source_scalar","expression":expression,
+                                 "resolved":True,"link_resolved":True}]
+        else:
+            expression=""
+            expression_resolution="source_blank"
+
+        group_refs=_relationship_refs(rel,"measure_condition_permutation_groups")
+        condition_refs=list(_relationship_refs(rel,"measure_conditions"))
+        condition_group_ids={}
+        condition_groups=[]
+        for group_ref in group_refs:
+            group_id=_value(group_ref.get("id"))
+            group=included.get((group_ref.get("type"),group_id))
+            if group is None:
+                mark_unresolved("measure_condition_permutation_groups",group_ref)
+                condition_groups.append({"id":group_id,"resolved":False,"condition_code":"","condition_ids":[]})
+                continue
+            attrs=group.get("attributes") or {}
+            members=_relationship_refs(group.get("relationships") or {},"measure_conditions")
+            member_ids=[]
+            for member in members:
+                member_id=_value(member.get("id"))
+                if member_id:
+                    member_ids.append(member_id)
+                    condition_group_ids.setdefault(member_id,[]).append(group_id)
+                    if not any(_value(existing.get("id"))==member_id for existing in condition_refs):
+                        condition_refs.append(member)
+                    if included.get((member.get("type"),member_id)) is None:
+                        mark_unresolved("measure_conditions",member)
+            condition_groups.append({
+                "id":group_id,"resolved":True,
+                "condition_code":_value(attrs.get("condition_code")),
+                "condition_ids":list(dict.fromkeys(member_ids)),
+            })
+        unique_condition_refs=[]
+        seen_conditions=set()
+        for ref in condition_refs:
+            key=(str(ref.get("type")),str(ref.get("id")))
+            if key not in seen_conditions:
+                seen_conditions.add(key)
+                unique_condition_refs.append(ref)
+        condition_details=[]
+        for ref in unique_condition_refs:
+            condition_id=_value(ref.get("id"))
+            linked=included.get((ref.get("type"),condition_id))
+            if linked is None:
+                mark_unresolved("measure_conditions",ref)
+                condition_details.append({
+                    "id":condition_id,"resolved":False,"condition_code":"","condition":"",
+                    "action_code":"","action":"","certificate_code":"","certificate_description":"",
+                    "duty_expression":"","condition_duty_amount":"","condition_monetary_unit_code":"",
+                    "condition_measurement_unit_code":"","condition_measurement_unit_qualifier_code":"",
+                    "requirement":"","group_ids":condition_group_ids.get(condition_id,[]),
+                })
+                continue
+            attrs=linked.get("attributes") or {}
+            condition_details.append({
+                "id":condition_id,"resolved":True,
+                "condition_code":_value(attrs.get("condition_code")),
+                "condition":_plain_text(attrs.get("condition") or attrs.get("description")),
+                "action_code":_value(attrs.get("action_code")),
+                "action":_plain_text(attrs.get("action")),
+                "certificate_code":_value(attrs.get("document_code") or attrs.get("certificate_code")),
+                "certificate_description":_plain_text(attrs.get("certificate_description")),
+                "duty_expression":_plain_text(attrs.get("duty_expression")),
+                "condition_duty_amount":_value(attrs.get("condition_duty_amount")),
+                "condition_monetary_unit_code":_value(attrs.get("condition_monetary_unit_abbreviation") or
+                                                       attrs.get("condition_monetary_unit_code")),
+                "condition_measurement_unit_code":_value(attrs.get("condition_measurement_unit_code")),
+                "condition_measurement_unit_qualifier_code":_value(attrs.get("condition_measurement_unit_qualifier_code")),
+                "requirement":_plain_text(attrs.get("requirement")),
+                "component_sequence_number":attrs.get("component_sequence_number"),
+                "group_ids":condition_group_ids.get(condition_id,[]),
+            })
+        condition_rates=[]
+        for condition in condition_details:
+            if condition.get("duty_expression"):
+                condition_rates.append({
+                    "condition_id":condition["id"],
+                    "group_ids":condition.get("group_ids",[]),
+                    "condition_code":condition.get("condition_code",""),
+                    "condition":condition.get("condition",""),
+                    "action_code":condition.get("action_code",""),
+                    "action":condition.get("action",""),
+                    "certificate_code":condition.get("certificate_code",""),
+                    "certificate_description":condition.get("certificate_description",""),
+                    "expression":condition["duty_expression"],
+                    "requirement":condition.get("requirement",""),
+                })
+
+        additional_details=[]
+        for ref in _relationship_refs(rel,"additional_code"):
+            ref_id=_value(ref.get("id"))
+            linked=included.get((ref.get("type"),ref_id))
+            if linked is None:
+                mark_unresolved("additional_code",ref)
+                additional_details.append({"id":ref_id,"code":ref_id,"description":"","resolved":False})
+                continue
+            attrs=linked.get("attributes") or {}
+            code=_value(attrs.get("code") or attrs.get("additional_code")) or ref_id
+            desc=_plain_text(attrs.get("description") or attrs.get("formatted_description"))
+            additional_details.append({"id":ref_id,"code":code,"description":desc,"resolved":True})
+        additional_codes=list(dict.fromkeys(x["code"] for x in additional_details if x.get("code")))
+        additional_descriptions=list(dict.fromkeys(x["description"] for x in additional_details if x.get("description")))
+
+        footnote_details=[]
+        for ref in _relationship_refs(rel,"footnotes"):
+            ref_id=_value(ref.get("id"))
+            linked=included.get((ref.get("type"),ref_id))
+            if linked is None:
+                mark_unresolved("footnotes",ref)
+                footnote_details.append({"id":ref_id,"code":ref_id,"resolved":False})
+                continue
+            attrs=linked.get("attributes") or {}
+            footnote_details.append({"id":ref_id,"code":_value(attrs.get("code")) or ref_id,"resolved":True})
+        footnote_codes=list(dict.fromkeys(x["code"] for x in footnote_details if x.get("code")))
+
+        legal_acts=[]
+        for ref in _relationship_refs(rel,"legal_acts"):
+            ref_id=_value(ref.get("id"))
+            linked=included.get((ref.get("type"),ref_id))
+            if linked is None:
+                mark_unresolved("legal_acts",ref)
+                legal_acts.append({"id":ref_id,"regulation_id":ref_id,"regulation_url":"","resolved":False})
+                continue
+            attrs=linked.get("attributes") or {}
+            legal_acts.append({
+                "id":ref_id,
+                "regulation_id":_value(attrs.get("regulation_code") or attrs.get("code")) or ref_id,
+                "regulation_url":_value(attrs.get("regulation_url") or attrs.get("url")),
+                "description":_plain_text(attrs.get("description") or attrs.get("title")),
+                "resolved":True,
+            })
+        regulation_ids=list(dict.fromkeys(x["regulation_id"] for x in legal_acts if x.get("regulation_id")))
+        regulation_urls=list(dict.fromkeys(x["regulation_url"] for x in legal_acts if x.get("regulation_url")))
+        conditions="见官方措施条件" if unique_condition_refs or group_refs else ""
+        unresolved.sort(key=lambda item:(item["relationship"],item["id"]))
         result.append({
-            "type": TYPES[kind], "measure_type": kind,
-            "region": "XI", "geography": _value(geo),
-            "geography_description": str((area_descriptions or {}).get(_value(geo), "")),
-            "expression": _value(expr),
-            "additional_code": ",".join(sorted(set(c for c in extras if c))),
-            "additional_description": "; ".join(d for d in descriptions if d),
-            "conditions": "见官方措施条件" if conds else "",
-            "effective_start": _value(start), "effective_end": _value(end),
-            "effective_status": _effective_status(start, end, as_of),
-            "source_id": _value(node.get("id")),
+            "region":"XI",
+            "type":"anti_dumping" if kind in ("551","552") else "countervailing",
+            "measure_type":kind,
+            "geography":geography,
+            "geography_description":_value(area_descriptions.get(geography)),
+            "expression":expression,
+            "expression_resolution":expression_resolution,
+            "expression_options":expression_options,
+            "expression_count":len(expression_options),
+            "additional_code":"|".join(additional_codes),
+            "additional_code_ids":list(dict.fromkeys(x["id"] for x in additional_details if x.get("id"))),
+            "additional_description":"|".join(additional_descriptions),
+            "additional_code_details":additional_details,
+            "conditions":conditions,
+            "condition_details":condition_details,
+            "condition_rates":condition_rates,
+            "condition_groups":condition_groups,
+            "excluded_areas":"|".join(sorted(excluded)),
+            "footnotes":"|".join(footnote_codes),
+            "footnote_ids":list(dict.fromkeys(x["id"] for x in footnote_details if x.get("id"))),
+            "regulation_id":"|".join(regulation_ids),
+            "regulation_url":"|".join(regulation_urls),
+            "legal_acts":legal_acts,
+            "source_relationship_ids":source_relationship_ids,
+            "unresolved_relationships":unresolved,
+            "applicability":applicability,
+            "unresolved_exclusion":unresolved_exclusion,
+            "source_id":_value(node.get("id")),
+            "effective_start":_value(start),
+            "effective_end":_value(end),
+            "effective_status":_effective_status(start,end,as_of),
         })
     return result
-
 
 def summary(measures: list[dict], kind: str) -> str:
     """Display only an unambiguous rate, a clearly labelled residual, or a
     company-dependent indication. No measures -> blank (not zero duty).
     """
     applicable = [r for r in measures if r["type"] == kind
-                  and r.get("effective_status", "active") == "active"]
+                  and r.get("effective_status", "active") == "active"
+                  and r.get("applicability", "china_applicable") == "china_applicable"]
     if not applicable:
         return ""
     # Prefer definitive over provisional when both exist for the same item.

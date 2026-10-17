@@ -15,7 +15,11 @@ def gb(kind="552", geo="CN", expr="42.3%", extra="A999", desc="All other exporte
        conditions="", excluded="", start="2026-01-01", end="", code="7323990000"):
     return (kind,geo,expr,extra,conditions,excluded,start,end,json.dumps({
         "commodity__code":code,"measure__sid":"123",
-        "measure__additional_code__description":desc}))
+        "measure__additional_code__description":desc,
+        "measure__geographical_area__description":"China",
+        "measure__footnotes":"CD946",
+        "measure__regulation__id":"R0261/25",
+        "measure__regulation__url":"https://www.legislation.gov.uk/eur/2025/261"}))
 
 
 def xi(kind="554", geo="CN", expression="12%", start="2026-01-01", end=None, rels=None):
@@ -32,6 +36,10 @@ class ChinaTradeRemedyTests(unittest.TestCase):
         self.assertEqual(len(records),4)  # active, expired and future source rows are all retained
         self.assertEqual({r["effective_status"] for r in records},{"active","expired","future"})
         self.assertEqual(records[0]["additional_code"],"A999")
+        self.assertEqual(records[0]["applicability"],"china_applicable")
+        self.assertEqual(records[0]["regulation_id"],"R0261/25")
+        self.assertEqual(records[0]["regulation_url"],"https://www.legislation.gov.uk/eur/2025/261")
+        self.assertEqual(records[0]["footnotes"],"CD946")
         self.assertEqual(summary(records,"anti_dumping"),"42.3%（其他企业，A999）")
         self.assertEqual(summary(records,"countervailing"),"18%")
 
@@ -85,6 +93,63 @@ class ChinaTradeRemedyTests(unittest.TestCase):
         self.assertEqual(out[0]["expression"],"13.25 %")
         self.assertEqual(out[0]["additional_code"],"B999")
         self.assertEqual(summary(out,"countervailing"),"13.25 %（其他企业，B999）")
+
+    def test_xi_condition_duty_expressions_are_preserved_when_parent_expression_is_blank(self):
+        doc={"included":[
+            {"type":"duty_expression","id":"blank","attributes":{"base":"","formatted_base":"","verbose_duty":""}},
+            {"type":"additional_code","id":"add-89ED","attributes":{"code":"89ED","description":"EcoCeres Group"}},
+            {"type":"measure_condition_permutation_group","id":"group-A","attributes":{"condition_code":"A"},
+             "relationships":{"measure_conditions":{"data":[
+                 {"type":"measure_condition","id":"condition-10"},
+                 {"type":"measure_condition","id":"condition-35"}]}}},
+            {"type":"measure_condition","id":"condition-10","attributes":{
+                "condition_code":"A","condition":"A: Presentation of an anti-dumping/countervailing document",
+                "action_code":"01","action":"Apply the amount of the action",
+                "document_code":"D008","certificate_description":"Invoice with a signed declaration",
+                "duty_expression":"<span>10.00</span> %","requirement":"Invoice with signed declaration"}},
+            {"type":"measure_condition","id":"condition-35","attributes":{
+                "condition_code":"A","condition":"A: Presentation of an anti-dumping/countervailing document",
+                "action_code":"01","action":"Apply the amount of the action",
+                "duty_expression":"<span>35.60</span> %"}},
+            {"type":"legal_act","id":"R2502610","attributes":{
+                "regulation_code":"R0261/25","regulation_url":"https://www.legislation.gov.uk/eur/2025/261",
+                "description":"Definitive anti-dumping measure"}},
+            {"type":"footnote","id":"CD946","attributes":{"code":"CD946"}},
+        ]}
+        rels={"duty_expression":{"data":{"type":"duty_expression","id":"blank"}},
+              "additional_code":{"data":{"type":"additional_code","id":"add-89ED"}},
+              "measure_condition_permutation_groups":{"data":[{"type":"measure_condition_permutation_group","id":"group-A"}]},
+              "measure_conditions":{"data":[{"type":"measure_condition","id":"condition-10"},
+                                            {"type":"measure_condition","id":"condition-35"}]},
+              "legal_acts":{"data":[{"type":"legal_act","id":"R2502610"}]},
+              "footnotes":{"data":[{"type":"footnote","id":"CD946"}]},
+              "geographical_area":{"data":[{"type":"geographical_area","id":"CN"}]}}
+        found=xi_remedies([xi(kind="552",geo="CN",expression="",rels=rels)],TODAY,
+                          json.dumps(doc).encode())
+        self.assertEqual(len(found),1)
+        row=found[0]
+        self.assertEqual(row["expression"],"")
+        self.assertEqual(row["expression_resolution"],"linked_but_empty")
+        self.assertEqual([x["expression"] for x in row["condition_rates"]],["10.00 %","35.60 %"])
+        self.assertEqual(row["condition_groups"][0]["condition_ids"],["condition-10","condition-35"])
+        self.assertEqual(row["additional_code"],"89ED")
+        self.assertEqual(row["regulation_id"],"R0261/25")
+        self.assertEqual(row["footnotes"],"CD946")
+        self.assertEqual(summary(found,"anti_dumping"),"按企业/条件适用（见详情）")
+
+    def test_xi_unresolved_exclusion_is_preserved_but_not_counted_as_a_confirmed_rate(self):
+        doc={"included":[
+            {"type":"duty_expression","id":"d","attributes":{"base":"18 %"}},
+        ]}
+        rels={"duty_expression":{"data":{"type":"duty_expression","id":"d"}},
+              "excluded_geographical_areas":{"data":[{"type":"geographical_area","id":"unknown-area"}]}}
+        found=xi_remedies([xi(kind="552",geo="CN",expression="",rels=rels)],TODAY,
+                          json.dumps(doc).encode())
+        self.assertEqual(len(found),1)
+        self.assertEqual(found[0]["applicability"],"unresolved")
+        self.assertEqual(summary(found,"anti_dumping"),"")
+        self.assertTrue(any(x["relationship"]=="excluded_geographical_areas"
+                            for x in found[0]["unresolved_relationships"]))
 
     def test_xi_official_other_c999_is_an_exporter_residual_not_an_unknown_rate(self):
         # Real XI JSON:API records describe residual code C999 as simply "Other".
