@@ -66,6 +66,15 @@ class ProductionFreshnessTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"too far apart"):
             validate(latest,meta,db,pinned,pindb,now=NOW)
 
+    def test_metadata_only_refresh_with_older_database_is_not_a_tear(self):
+        # The publisher re-uploads metadata (and the gap audit) alone when the
+        # database bytes are unchanged, pinning the version to the existing
+        # release; a newer metadata asset must not fail the watch.
+        latest,meta,db,pinned,pindb=fixture()
+        latest["assets"][1]["updated_at"]="2026-10-15T12:30:00Z"
+        r=validate(latest,meta,db,pinned,pindb,now=NOW)
+        self.assertTrue(r["fresh"])
+
     def test_unexpected_tag_or_metadata_version_rejected(self):
         latest,meta,db,pinned,pindb=fixture()
         pinned["tag_name"]="data-unrelated"
