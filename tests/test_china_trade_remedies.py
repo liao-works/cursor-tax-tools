@@ -1,11 +1,12 @@
 """Chinese-origin UK/XI trade remedies keep company codes and conditions."""
 import json
+import sqlite3
 import unittest
 from datetime import date
 from pathlib import Path
 
 from src.target_duty.china_trade_remedies import gb_remedies, xi_remedies, summary
-from src.target_duty.desktop_release_bundle import gb_default_rate, simple_rate, _gb_rate_options, _xi_rate_options
+from src.target_duty.desktop_release_bundle import (gb_default_rate, simple_rate, _gb_rate_options, _xi_rate_options, gb_china_rate, _china_applicable, _gb_rate_option_rows, _xi_rate_option_rows, xi_rate)
 
 TODAY = date(2026, 10, 16)
 
@@ -183,6 +184,96 @@ class ChinaTradeRemedyTests(unittest.TestCase):
         self.assertEqual(options[0]["condition_ids"],["condition-7"])
         self.assertEqual(options[0]["additional_code_ids"],["a"])
         self.assertIn("certificate required",options[0]["conditions"])
+
+    def test_china_specific_default_rate_precedes_erga_omnes(self):
+        rows=[
+            ("8%", "", "", "", "1011"),
+            ("5%", "", "", "", "CN"),
+        ]
+        self.assertEqual(gb_china_rate(rows), "5%")
+        self.assertEqual(gb_china_rate([rows[0], ("5%", "A123", "", "", "CN")]), "8%")
+        self.assertEqual(gb_china_rate([("5%", "", "", "", "CN"),
+                                        ("6%", "", "", "", "CN")]), "")
+        self.assertEqual(gb_china_rate([("8%", "", "", "US|CA", "1011")]), "8%")
+        self.assertEqual(gb_china_rate([("8%", "", "", "CHN|US", "1011")]), "")
+        self.assertTrue(_china_applicable("CN", "SCN"))
+        self.assertFalse(_china_applicable("1011", "US|CN"))
+
+    def test_gb_rate_option_projection_keeps_all_date_states_and_other_measure_types(self):
+        db=sqlite3.connect(":memory:")
+        db.execute("""CREATE TABLE measures (
+            region TEXT, code TEXT, measure_type TEXT, geography TEXT,
+            expression TEXT, additional_code TEXT, conditions TEXT, excluded_areas TEXT,
+            effective_start TEXT, effective_end TEXT, raw_json TEXT, ordinal INTEGER)""")
+        rows=[
+            ("103","1011","8%","2026-01-01",None),
+            ("105","1011","0%","2025-01-01","2026-10-15"),
+            ("106","1011","3%","2026-10-17",None),
+            ("103","CN","",None,None),
+            ("552","CN","22%","2026-01-01",None),
+        ]
+        for i,(kind,geo,rate,start,end) in enumerate(rows):
+            raw=json.dumps({"measure__sid":str(i+1),
+                "measure__type__description":"official measure "+kind})
+            db.execute("INSERT INTO measures VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                ("GB","0101210000",kind,geo,rate,"","","",start,end,raw,i))
+        source=_gb_rate_option_rows(db,"0101210000")
+        options=_gb_rate_options(source,TODAY)
+        self.assertEqual(len(source),4)  # 551/552 are kept in the remedy table instead.
+        self.assertEqual(len(options),4)
+        self.assertEqual([o["effective_status"] for o in options],
+                         ["active","expired","future","unknown"])
+        self.assertEqual(options[2]["measure_type"],"106")
+        self.assertEqual(options[2]["applicability"],"other_measure")
+        self.assertFalse(options[3]["expression_available"])
+        db.close()
+
+    def test_xi_rate_option_projection_keeps_all_date_states_and_other_measure_types(self):
+        db=sqlite3.connect(":memory:")
+        db.execute("""CREATE TABLE measures (
+            code TEXT, measure_type TEXT, geography_id TEXT, duty_expression TEXT,
+            effective_start TEXT, effective_end TEXT, raw_json TEXT, ordinal INTEGER)""")
+        rows=[
+            ("103","1011","8%","2026-01-01",None),
+            ("105","1011","0%","2025-01-01","2026-10-15"),
+            ("106","CN","3%","2026-10-17",None),
+            ("552","CN","22%","2026-01-01",None),
+        ]
+        for i,(kind,geo,rate,start,end) in enumerate(rows):
+            raw=json.dumps({"type":"measure","id":str(i+1),"relationships":{}})
+            db.execute("INSERT INTO measures VALUES (?,?,?,?,?,?,?,?)",
+                ("0101210000",kind,geo,rate,start,end,raw,i))
+        source=_xi_rate_option_rows(db,"0101210000")
+        options=_xi_rate_options(source,json.dumps({"included":[]}),TODAY)
+        self.assertEqual(len(source),3)
+        self.assertEqual(len(options),3)
+        self.assertEqual([o["effective_status"] for o in options],
+                         ["active","expired","future"])
+        self.assertEqual(options[2]["applicability"],"other_measure")
+        db.close()
+
+    def test_xi_china_default_uses_cn_specific_rate_and_country_exclusions(self):
+        day=TODAY
+        def row(geo, rate, start="2026-01-01", end=None, rels=None):
+            return ("103",geo,rate,start,end,json.dumps({"relationships":rels or {}}))
+        doc={"included":[
+            {"type":"geographical_area","id":"US","attributes":{"code":"US","description":"United States"}},
+            {"type":"geographical_area","id":"CN","attributes":{"code":"CN","description":"China"}},
+        ]}
+        self.assertEqual(xi_rate([row("1011","8%"),row("CN","5%")],day,
+                                 json.dumps(doc).encode()),"5%")
+        us_exclusion={"excluded_countries":{"data":[{"type":"geographical_area","id":"US"}]}}
+        self.assertEqual(xi_rate([row("1011","8%",rels=us_exclusion)],day,
+                                 json.dumps(doc).encode()),"8%")
+        cn_exclusion={"excluded_countries":{"data":[{"type":"geographical_area","id":"CN"}]}}
+        self.assertEqual(xi_rate([row("1011","8%",rels=cn_exclusion)],day,
+                                 json.dumps(doc).encode()),"")
+        conditional={"measure_conditions":{"data":[{"type":"measure_condition","id":"c"}]}}
+        self.assertEqual(xi_rate([row("1011","8%"),row("CN","5%",rels=conditional)],day,
+                                 json.dumps(doc).encode()),"8%")
+        unresolved={"excluded_countries":{"data":[{"type":"geographical_area","id":"unknown"}]}}
+        self.assertEqual(xi_rate([row("1011","8%",rels=unresolved)],day,
+                                 json.dumps(doc).encode()),"")
 
     def test_desktop_schema_wires_all_four_columns_and_detail(self):
         s=(Path(__file__).resolve().parents[1]/
