@@ -1,0 +1,267 @@
+{
+  "project_metadata": {
+    "name": "cursor-tax-tools",
+    "description": "英国海关编码税率查询工具",
+    "version": "2.0.0",
+    "timestamp": "2025-11-23T17:38:51Z",
+    "scan_timestamp": "2025-11-23T17:38:51",
+    "author": "猫娘 幽浮喵 (浮浮酱)",
+    "tech_stack": ["Python", "Tkinter", "SQLite", "aiohttp", "BeautifulSoup4"]
+  },
+  "scan_coverage": {
+    "total_files_estimated": 60,
+    "files_scanned": 42,
+    "coverage_percentage": 70.0,
+    "modules_identified": 8,
+    "modules_documented": 5,
+    "truncated": false,
+    "scan_strategy": "adaptive_root_simple_module_detailed"
+  },
+  "modules": {
+    "core": {
+      "path": "./",
+      "type": "root",
+      "description": "项目根目录，包含主要入口文件和全局配置",
+      "entry_files": ["launch_gui.py", "tariff_gui.py", "batch_gui.py"],
+      "key_files": ["README.md", "requirements.txt", ".gitignore"],
+      "test_files": ["test_*.py"],
+      "config_files": ["build_*.spec", "*.md"],
+      "documentation": ["CLAUDE.md"],
+      "coverage": {
+        "files_total": 20,
+        "files_scanned": 15,
+        "coverage_percentage": 75.0,
+        "missing_components": []
+      }
+    },
+    "database": {
+      "path": "./tariff_db.py",
+      "type": "module",
+      "description": "SQLite数据库操作封装，负责数据持久化",
+      "entry_files": ["tariff_db.py"],
+      "key_files": ["tariff_db_optimized.py", "datas/tariffs.db"],
+      "test_files": ["test_optimized_db.py", "simple_db_test.py"],
+      "coverage": {
+        "files_total": 4,
+        "files_scanned": 3,
+        "coverage_percentage": 75.0,
+        "missing_components": ["数据库迁移脚本"]
+      }
+    },
+    "api": {
+      "path": "./tariff_api.py",
+      "type": "module",
+      "description": "关税查询和匹配的核心业务逻辑",
+      "entry_files": ["tariff_api.py"],
+      "test_files": [],
+      "coverage": {
+        "files_total": 1,
+        "files_scanned": 1,
+        "coverage_percentage": 100.0,
+        "missing_components": []
+      }
+    },
+    "gui": {
+      "path": "./tariff_gui.py",
+      "type": "module",
+      "description": "主要图形用户界面，多标签页设计",
+      "entry_files": ["tariff_gui.py", "batch_gui.py", "enhanced_gui.py", "launch_gui.py"],
+      "key_files": ["create_icon.py", "create_template.py"],
+      "test_files": [],
+      "coverage": {
+        "files_total": 6,
+        "files_scanned": 4,
+        "coverage_percentage": 66.7,
+        "missing_components": ["GUI单元测试"]
+      }
+    },
+    "scraper": {
+      "path": "./scraper.py",
+      "type": "module",
+      "description": "英国政府网站数据爬虫，异步处理",
+      "entry_files": ["scraper.py", "scraper_optimized.py"],
+      "key_files": ["web_search.py"],
+      "test_files": ["test_scraper_import.py", "test_fixed_scraper.py", "simple_scraper_test.py"],
+      "coverage": {
+        "files_total": 6,
+        "files_scanned": 3,
+        "coverage_percentage": 50.0,
+        "missing_components": ["scraper详细分析"]
+      }
+    },
+    "automation": {
+      "path": "./scripts/",
+      "type": "module",
+      "description": "自动化脚本和GitHub Actions工作流支持",
+      "entry_files": ["scripts/actions/run_scraper.py", "scripts/clients/smart_update_client.py"],
+      "key_files": ["scripts/tools/scraper_config.json"],
+      "test_files": ["scripts/monitoring/performance_monitor.py"],
+      "config_files": [".github/workflows/build.yml"],
+      "coverage": {
+        "files_total": 15,
+        "files_scanned": 9,
+        "coverage_percentage": 60.0,
+        "missing_components": ["GitHub Actions工作流详情"]
+      }
+    },
+    "batch_processing": {
+      "path": "./batch_processor.py",
+      "type": "module",
+      "description": "Excel批量处理和文件管理",
+      "entry_files": ["batch_processor.py"],
+      "key_files": ["batch_gui.py"],
+      "test_files": ["test_data.py"],
+      "coverage": {
+        "files_total": 3,
+        "files_scanned": 2,
+        "coverage_percentage": 66.7,
+        "missing_components": []
+      }
+    },
+    "smart_update": {
+      "path": "./smart_update_client.py",
+      "type": "module",
+      "description": "智能远程数据更新客户端",
+      "entry_files": ["smart_update_client.py", "scripts/clients/smart_update_client.py"],
+      "test_files": ["test_remote_update.py"],
+      "coverage": {
+        "files_total": 3,
+        "files_scanned": 2,
+        "coverage_percentage": 66.7,
+        "missing_components": ["更新策略配置"]
+      }
+    }
+  },
+  "quality_metrics": {
+    "code_complexity": {
+      "tariff_gui.py": "high (1620 lines)",
+      "scraper.py": "medium-high",
+      "tariff_api.py": "medium",
+      "batch_processor.py": "medium"
+    },
+    "documentation_coverage": {
+      "root_module": "complete",
+      "api_module": "complete",
+      "gui_module": "complete",
+      "database_module": "complete",
+      "automation_module": "complete",
+      "overall_percentage": 83.3
+    },
+    "test_coverage": {
+      "estimated_percentage": 40,
+      "unit_test_files": 8,
+      "integration_test_files": 3,
+      "performance_test_files": 1
+    }
+  },
+  "missing_or_skipped": {
+    "directories": [
+      {
+        "path": "output/",
+        "reason": "用户输出目录，包含临时Excel文件",
+        "type": "runtime_output"
+      },
+      {
+        "path": "__pycache__/",
+        "reason": "Python字节码缓存目录",
+        "type": "cache"
+      },
+      {
+        "path": ".git/",
+        "reason": "Git版本控制目录",
+        "type": "version_control"
+      }
+    ],
+    "file_types": [
+      {
+        "pattern": "*.pyc",
+        "reason": "Python编译缓存文件",
+        "count": 15
+      },
+      {
+        "pattern": "*.log",
+        "reason": "日志文件",
+        "count": 0
+      },
+      {
+        "pattern": "*.tmp",
+        "reason": "临时文件",
+        "count": 0
+      }
+    ],
+    "large_files": [
+      {
+        "path": "datas/tariffs.db",
+        "reason": "SQLite数据库文件，约7MB",
+        "action": "记录路径未读取内容"
+      }
+    ]
+  },
+  "gaps_and_next_steps": {
+    "high_priority": [
+      {
+        "item": "详细分析scraper.py模块的爬虫逻辑",
+        "path": "./scraper.py",
+        "estimated_effort": "medium",
+        "impact": "high"
+      },
+      {
+        "item": "完成GitHub Actions工作流配置分析",
+        "path": "./.github/workflows/",
+        "estimated_effort": "low",
+        "impact": "medium"
+      }
+    ],
+    "medium_priority": [
+      {
+        "item": "分析优化版数据库模块tariff_db_optimized.py",
+        "path": "./tariff_db_optimized.py",
+        "estimated_effort": "medium",
+        "impact": "medium"
+      },
+      {
+        "item": "完善GUI测试覆盖",
+        "path": "./tests/",
+        "estimated_effort": "high",
+        "impact": "medium"
+      }
+    ],
+    "low_priority": [
+      {
+        "item": "分析临时测试文件的功能",
+        "pattern": "test_*.py",
+        "estimated_effort": "low",
+        "impact": "low"
+      }
+    ]
+  },
+  "recommendations": {
+    "for_developers": [
+      "重点理解tariff_api.py的核心匹配算法",
+      "关注GUI多线程设计模式",
+      "熟悉智能更新机制的实现",
+      "了解数据库性能优化策略"
+    ],
+    "for_maintainers": [
+      "定期检查爬虫功能的稳定性",
+      "监控数据库文件大小和性能",
+      "关注GitHub Actions工作流执行状态",
+      "维护文档和测试的同步更新"
+    ],
+    "future_enhancements": [
+      "考虑添加API文档自动生成",
+      "增强测试覆盖率到80%+",
+      "优化数据库查询性能",
+      "改进用户体验和界面设计"
+    ]
+  },
+  "file_inventory": {
+    "python_files": 32,
+    "documentation_files": 20,
+    "config_files": 8,
+    "database_files": 2,
+    "total_files": 62,
+    "documented_files": 5,
+    "scanned_files": 42
+  }
+}

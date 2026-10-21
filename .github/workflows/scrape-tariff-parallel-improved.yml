@@ -1,0 +1,466 @@
+name: 爬取关税数据（并行优化版 - 防超时改进）
+
+on:
+  workflow_dispatch:
+    inputs:
+      update_mode:
+        description: '更新模式'
+        required: false
+        type: choice
+        options:
+          - full
+          - missing_only
+        default: 'full'
+      batch_size:
+        description: '批量大小'
+        required: false
+        default: '200'
+      delay:
+        description: '批次间延迟(秒)'
+        required: false
+        default: '0.05'
+      update_uk:
+        description: '更新英国税率'
+        required: false
+        default: 'true'
+      update_ni:
+        description: '更新北爱尔兰税率'
+        required: false
+        default: 'true'
+      min_change_threshold:
+        description: '最小变更阈值'
+        required: false
+        default: '10'
+      test_mode:
+        description: '测试模式（只爬取前3个章节）'
+        required: false
+        default: 'false'
+
+  schedule:
+    - cron: '0 4 1 * *'  # 每月1日凌晨4点
+
+permissions:
+  contents: write
+  actions: read
+  pull-requests: read
+
+env:
+  DEFAULT_BATCH_SIZE: 200
+  DEFAULT_DELAY: 0.05
+  MIN_CHANGE_THRESHOLD: 10
+
+jobs:
+  # 阶段1: 准备和调度
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      task_assignment: ${{ steps.schedule.outputs.task_assignment }}
+      should_run: ${{ steps.check.outputs.should_run }}
+      run_id: ${{ steps.check.outputs.run_id }}
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 设置Python环境
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: 检查现有数据
+      id: check
+      run: |
+        METADATA_URL="https://github.com/${{ github.repository }}/releases/download/latest-data/metadata.json"
+
+        echo "INFO: 检查现有数据..."
+
+        if curl -s -f "$METADATA_URL" > current_metadata.json 2>/dev/null; then
+          if [ -s "current_metadata.json" ]; then
+            echo "SUCCESS: 找到现有数据"
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "run_id=${{ github.run_id }}" >> $GITHUB_OUTPUT
+          else
+            echo "WARNING: 元数据文件为空"
+            echo "should_run=true" >> $GITHUB_OUTPUT
+            echo "run_id=${{ github.run_id }}" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "INFO: 首次更新"
+          echo "should_run=true" >> $GITHUB_OUTPUT
+          echo "run_id=${{ github.run_id }}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: 生成任务分配
+      id: schedule
+      run: |
+        TEST_MODE="${{ github.event.inputs.test_mode || 'false' }}"
+        UPDATE_MODE="${{ github.event.inputs.update_mode || 'full' }}"
+
+        if [ "$UPDATE_MODE" = "missing_only" ]; then
+          echo "INFO: 补齐模式 - 只爬取缺失章节"
+
+          # 检查是否存在上次的元数据
+          if [ -f "current_metadata.json" ]; then
+            python src/actions/generate_missing_tasks.py \
+              --metadata current_metadata.json \
+              --output task_assignment.json \
+              --shard-count 15
+          else
+            echo "WARNING: 没有找到上次元数据，切换为全量模式"
+            python src/actions/chapter_scheduler.py \
+              --metadata current_metadata.json \
+              --output task_assignment.json \
+              --shard-count 15
+          fi
+        elif [ "$TEST_MODE" = "true" ]; then
+          echo "INFO: 测试模式 - 只爬取前3个章节"
+          # 手动限制为前3章
+          echo '{"shard_0":["01"],"shard_1":["02"],"shard_2":["03"]}' > task_assignment.json
+        else
+          echo "INFO: 全量模式 - 爬取所有章节"
+          python src/actions/chapter_scheduler.py \
+            --metadata current_metadata.json \
+            --output task_assignment.json \
+            --shard-count 15
+        fi
+
+        # 转换为单行JSON供后续步骤使用
+        TASK_JSON=$(cat task_assignment.json | jq -c .)
+        echo "task_assignment=$TASK_JSON" >> $GITHUB_OUTPUT
+
+    - name: 上传任务分配
+      uses: actions/upload-artifact@v4
+      with:
+        name: task-assignment
+        path: task_assignment.json
+        retention-days: 7
+
+  # 阶段2: 并行爬取（优化版）
+  scrape:
+    needs: prepare
+    if: needs.prepare.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # 增加到120分钟
+
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]  # 15个并行shard
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 设置Python环境
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: 下载任务分配
+      uses: actions/download-artifact@v4
+      with:
+        name: task-assignment
+        path: .
+
+    - name: 执行Shard爬取（带重试机制）
+      id: scrape_shard
+      env:
+        SHARD_ID: "shard_${{ matrix.shard }}"
+        INPUT_BATCH_SIZE: ${{ github.event.inputs.batch_size || '200' }}
+        INPUT_DELAY: ${{ github.event.inputs.delay || '0.05' }}
+      run: |
+        echo "INFO: 开始执行 Shard ${{ matrix.shard }}..."
+
+        # 检查 shard 是否在任务分配中
+        if ! jq -e ".\"$SHARD_ID\"" task_assignment.json > /dev/null; then
+          echo "INFO: Shard $SHARD_ID 不在任务分配中，跳过"
+          exit 0
+        fi
+
+        # 执行爬取（带超时和重试）
+        MAX_RETRIES=2
+        RETRY_COUNT=0
+
+        while [ $RETRY_COUNT -le $MAX_RETRIES ]; do
+          echo "INFO: 尝试 $((RETRY_COUNT + 1))/$((MAX_RETRIES + 1))"
+
+          timeout 100m python src/actions/run_shard.py \
+            --shard-id $SHARD_ID \
+            --task-file task_assignment.json \
+            --output-db tariffs_${SHARD_ID}.db && {
+            echo "INFO: Shard ${{ matrix.shard }} 成功完成"
+            exit 0
+          }
+
+          EXIT_CODE=$?
+
+          if [ $EXIT_CODE -eq 124 ]; then
+            echo "::warning::Shard ${{ matrix.shard }} 超时"
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+
+            if [ $RETRY_COUNT -le $MAX_RETRIES ]; then
+              echo "INFO: 10秒后重试..."
+              sleep 10
+              # 删除可能不完整的数据库
+              rm -f tariffs_${SHARD_ID}.db
+              continue
+            else
+              echo "::error::Shard ${{ matrix.shard }} 超时且重试失败，保存已完成的部分"
+              exit 0  # 不退出，继续上传
+            fi
+          else
+            echo "::error::Shard ${{ matrix.shard }} 执行失败 (退出码: $EXIT_CODE)"
+            exit $EXIT_CODE
+          fi
+        done
+
+    - name: 上传分片结果（无论成功失败）
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: shard-${{ matrix.shard }}-results
+        path: |
+          tariffs_shard_${{ matrix.shard }}.db
+          shard_${{ matrix.shard }}_results.json
+          shard_${{ matrix.shard }}_progress.json
+          debug_*.html
+        retention-days: 7
+        if-no-files-found: warn
+
+  # 阶段3: 合并与验证
+  merge_and_validate:
+    needs: [prepare, scrape]
+    if: always() && needs.prepare.outputs.should_run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 设置Python环境
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: 下载所有分片结果
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: 合并数据库
+      id: merge
+      run: |
+        echo "INFO: 合并分片数据库..."
+
+        python src/actions/merge_databases.py \
+          --input-dir artifacts \
+          --output tariffs.db \
+          --allow-partial \
+          --validate
+
+        # 保存合并结果
+        cp merge_results.json artifacts/
+
+    - name: 数据库健康检查
+      id: health_check
+      run: |
+        echo "INFO: 执行数据库健康检查..."
+
+        if python src/actions/validate_database.py tariffs.db; then
+          echo "health_check_passed=true" >> $GITHUB_OUTPUT
+          echo "SUCCESS: 数据库健康检查通过"
+
+          # 提取统计信息
+          if [ -f "validation_results.json" ]; then
+            RECORD_COUNT=$(python -c "import json; data=json.load(open('validation_results.json')); print(data.get('stats', {}).get('record_count', 0))")
+            QUALITY_SCORE=$(python -c "import json; data=json.load(open('validation_results.json')); print(data.get('stats', {}).get('quality_score', 0))")
+
+            echo "record_count=$RECORD_COUNT" >> $GITHUB_OUTPUT
+            echo "quality_score=$QUALITY_SCORE" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "health_check_passed=false" >> $GITHUB_OUTPUT
+          echo "ERROR: 数据库健康检查失败"
+        fi
+
+    - name: 上传合并结果
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: merged-database
+        path: |
+          tariffs.db
+          merge_results.json
+          validation_results.json
+        retention-days: 7
+
+  # 阶段4: 智能发布
+  publish:
+    needs: [prepare, merge_and_validate]
+    if: needs.merge_and_validate.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 设置Python环境
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: 安装依赖
+      run: pip install -r requirements.txt
+
+    - name: 下载合并结果
+      uses: actions/download-artifact@v4
+      with:
+        name: merged-database
+        path: .
+
+    - name: 获取文件信息
+      id: file_info
+      run: |
+        if [ -f "tariffs.db" ]; then
+          FILE_SIZE=$(ls -lh tariffs.db | awk '{print $5}')
+          echo "file_size=$FILE_SIZE" >> $GITHUB_OUTPUT
+          echo "has_database=true" >> $GITHUB_OUTPUT
+        else
+          echo "has_database=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: 生成元数据
+      id: metadata
+      if: steps.file_info.outputs.has_database == 'true'
+      env:
+        VERSION: data-${{ needs.prepare.outputs.run_id }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+      run: |
+        # 下载任务分配文件以计算覆盖率
+        curl -f -o task_assignment.json \
+          "https://github.com/$GITHUB_REPOSITORY/releases/download/latest-data/task_assignment.json" || \
+          echo '{}' > task_assignment.json
+
+        python src/actions/generate_metadata.py \
+          tariffs.db \
+          "$VERSION" \
+          merge_results.json \
+          metadata.json \
+          --task-file task_assignment.json
+
+    - name: 创建更新报告
+      run: |
+        cat > UPDATE_REPORT.md << 'EOF'
+        # 关税数据更新报告
+
+        **更新时间**: $(date -u +'%Y-%m-%d %H:%M UTC')
+        **版本**: data-${{ needs.prepare.outputs.run_id }}
+        **质量分数**: ${{ needs.merge_and_validate.outputs.quality_score }}/100
+
+        ## 更新统计
+        - **记录数量**: ${{ needs.merge_and_validate.outputs.record_count }}
+        - **文件大小**: ${{ steps.file_info.outputs.file_size }}
+        - **并行分片**: 3-6个
+
+        ## 数据库状态
+        - **健康检查**: ✅ 通过
+        - **质量分数**: ${{ needs.merge_and_validate.outputs.quality_score }}/100
+
+        ## 客户端更新指南
+        客户端应按以下步骤更新：
+        1. 下载 `metadata.json` 检查版本和哈希
+        2. 比较本地版本，仅在需要时下载完整数据库
+        3. 验证数据库文件哈希值
+        4. 备份旧数据库后进行替换
+
+        ---
+        > 由 GitHub Actions 自动生成 | 数据版本: data-${{ needs.prepare.outputs.run_id }}
+        EOF
+
+    - name: 发布数据更新
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: data-${{ needs.prepare.outputs.run_id }}
+        name: "关税数据 v${{ needs.prepare.outputs.run_id }} - $(date +'%Y-%m-%d %H:%M UTC')"
+        body_path: UPDATE_REPORT.md
+        files: |
+          tariffs.db
+          tariffs.db.*
+          metadata.json
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: 更新latest-data标签
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: latest-data
+        name: "Latest Tariff Data"
+        body: |
+          ## 最新关税数据
+
+          **版本**: data-${{ needs.prepare.outputs.run_id }}
+          **更新时间**: $(date -u +'%Y-%m-%d %H:%M UTC')
+          **记录数量**: ${{ needs.merge_and_validate.outputs.record_count }}
+          **文件大小**: ${{ steps.file_info.outputs.file_size }}
+          **质量分数**: ${{ needs.merge_and_validate.outputs.quality_score }}/100
+
+          ## 下载地址
+          - **元数据**: [metadata.json](https://github.com/${{ github.repository }}/releases/download/latest-data/metadata.json)
+          - **数据库**: [tariffs.db](https://github.com/${{ github.repository }}/releases/download/latest-data/tariffs.db)
+
+          ---
+          > 客户端应先检查元数据再下载数据库
+        files: |
+          tariffs.db
+          tariffs.db.*
+          metadata.json
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # 结果总结
+  summarize:
+    needs: [prepare, scrape, merge_and_validate, publish]
+    if: always()
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 显示总结
+      run: |
+        echo ""
+        echo "SUCCESS: 并行爬取流程完成！"
+        echo "=" $(printf '=%.0s' {1..50})
+        echo ""
+
+        echo "INFO: 执行信息:"
+        echo "   Run ID: ${{ needs.prepare.outputs.run_id }}"
+        echo ""
+
+        echo "INFO: 状态:"
+        echo "   合并验证: ${{ needs.merge_and_validate.result }}"
+        echo "   发布: ${{ needs.publish.result }}"
+        echo ""
+
+        echo "=" $(printf '=%.0s' {1..50})

@@ -53,3 +53,6 @@ Desktop.ini
 output/
 app.ico
 templates/
+
+# Git worktrees
+.worktrees/

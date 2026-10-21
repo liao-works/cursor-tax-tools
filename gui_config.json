@@ -1,0 +1,4 @@
+{
+  "db_path": "tariffs.db",
+  "metadata_url": "https://github.com/CavinHuang/cursor-tax-tools/releases/download/latest-data/metadata.json"
+}

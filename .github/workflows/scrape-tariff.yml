@@ -1,0 +1,427 @@
+name: 爬取关税数据（修复版）
+
+on:
+  workflow_dispatch:
+    inputs:
+      batch_size:
+        description: '批量大小'
+        required: false
+        default: '100'
+      delay:
+        description: '批次间延迟(秒)'
+        required: false
+        default: '0.2'
+      update_uk:
+        description: '更新英国税率'
+        required: false
+        default: 'true'
+      update_ni:
+        description: '更新北爱尔兰税率'
+        required: false
+        default: 'true'
+      min_change_threshold:
+        description: '最小变更阈值'
+        required: false
+        default: '10'
+      timeout_minutes:
+        description: '超时时间(分钟)'
+        required: false
+        default: '120'
+
+  schedule:
+    - cron: '0 4 1 * *'  # 每月1日凌晨4点
+
+permissions:
+  contents: write
+  actions: read
+  pull-requests: read
+
+env:
+  DEFAULT_BATCH_SIZE: 100
+  DEFAULT_DELAY: 0.2
+  MIN_CHANGE_THRESHOLD: 10
+  DEFAULT_TIMEOUT: 120
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+
+    - name: 设置Python环境
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: 安装依赖
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: 检查现有数据
+      id: check_data
+      run: |
+        METADATA_URL="https://github.com/${{ github.repository }}/releases/download/latest-data/metadata.json"
+
+        echo "INFO: 检查现有数据..."
+
+        if curl -s -f "$METADATA_URL" > current_metadata.json 2>/dev/null; then
+          if [ -s "current_metadata.json" ]; then
+            echo "SUCCESS: 找到现有数据"
+            # 使用更安全的方法获取记录数
+            RECORDS=$(python -c "import json; data=json.load(open('current_metadata.json')); print(data.get('record_count', 0))" 2>/dev/null || echo 0)
+            echo "current_records=$RECORDS" >> $GITHUB_OUTPUT
+            echo "has_existing_data=true" >> $GITHUB_OUTPUT
+            echo "INFO: 现有记录数: $RECORDS"
+          else
+            echo "WARNING: 元数据文件为空"
+            echo "has_existing_data=false" >> $GITHUB_OUTPUT
+            echo "current_records=0" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "INFO: 首次更新"
+          echo "has_existing_data=false" >> $GITHUB_OUTPUT
+          echo "current_records=0" >> $GITHUB_OUTPUT
+        fi
+
+    - name: 执行数据爬取
+      id: scraping
+      env:
+        INPUT_UPDATE_UK: ${{ github.event.inputs.update_uk || 'true' }}
+        INPUT_UPDATE_NI: ${{ github.event.inputs.update_ni || 'true' }}
+        INPUT_BATCH_SIZE: ${{ github.event.inputs.batch_size || '100' }}
+        INPUT_DELAY: ${{ github.event.inputs.delay || '0.2' }}
+      run: |
+        echo "INFO: 开始数据爬取..."
+        START_TIME=$(date +%s)
+
+        # 执行爬虫脚本（使用功能更完整的 run_scraper.py）
+        python scripts/actions/run_scraper.py
+
+        # 计算处理时间
+        END_TIME=$(date +%s)
+        PROCESSING_TIME=$((END_TIME - START_TIME))
+        echo "processing_time_seconds=$PROCESSING_TIME" >> $GITHUB_OUTPUT
+
+        # 提取结果数据
+        if [ -f "update_results.json" ]; then
+          SUCCESSFUL=$(python -c "import json; data=json.load(open('update_results.json')); print(data.get('successful', 0))")
+          FAILED=$(python -c "import json; data=json.load(open('update_results.json')); print(data.get('failed', 0))")
+          UK_UPDATED=$(python -c "import json; data=json.load(open('update_results.json')); print(data.get('uk_updated', 0))")
+          NI_UPDATED=$(python -c "import json; data=json.load(open('update_results.json')); print(data.get('ni_updated', 0))")
+
+          echo "successful=$SUCCESSFUL" >> $GITHUB_OUTPUT
+          echo "failed=$FAILED" >> $GITHUB_OUTPUT
+          echo "uk_updated=$UK_UPDATED" >> $GITHUB_OUTPUT
+          echo "ni_updated=$NI_UPDATED" >> $GITHUB_OUTPUT
+          echo "scraping_completed=true" >> $GITHUB_OUTPUT
+
+          echo "INFO: 爬取结果:"
+          echo "   SUCCESS: 成功: $SUCCESSFUL"
+          echo "   ERROR: 失败: $FAILED"
+          echo "   UK: 英国更新: $UK_UPDATED"
+          echo "   NI: 北爱更新: $NI_UPDATED"
+        else
+          echo "ERROR: 爬取结果文件不存在"
+          echo "scraping_completed=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: 数据库健康检查
+      id: health_check
+      if: steps.scraping.outputs.scraping_completed == 'true'
+      run: |
+        echo "INFO: 执行数据库健康检查..."
+        echo "health_check_completed=true" >> $GITHUB_OUTPUT
+
+        # 执行验证脚本
+        if python scripts/actions/validate_database.py tariffs.db; then
+          echo "health_check_passed=true" >> $GITHUB_OUTPUT
+          echo "SUCCESS: 数据库健康检查通过"
+
+          # 提取统计信息
+          if [ -f "validation_results.json" ]; then
+            RECORD_COUNT=$(python -c "import json; data=json.load(open('validation_results.json')); print(data.get('stats', {}).get('record_count', 0))")
+            ERROR_COUNT=$(python -c "import json; data=json.load(open('validation_results.json')); print(data.get('stats', {}).get('error_count', 0))")
+            QUALITY_SCORE=$(python -c "import json; data=json.load(open('validation_results.json')); print(data.get('stats', {}).get('quality_score', 0))")
+
+            echo "record_count=$RECORD_COUNT" >> $GITHUB_OUTPUT
+            echo "error_count=$ERROR_COUNT" >> $GITHUB_OUTPUT
+            echo "quality_score=$QUALITY_SCORE" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "health_check_passed=false" >> $GITHUB_OUTPUT
+          echo "ERROR: 数据库健康检查失败"
+        fi
+
+    - name: 获取文件信息
+      id: file_info
+      run: |
+        echo "INFO: 获取文件信息..."
+
+        if [ -f "tariffs.db" ]; then
+          FILE_SIZE=$(ls -lh tariffs.db | awk '{print $5}')
+          FILE_SIZE_BYTES=$(stat -c%s tariffs.db)
+
+          echo "file_size=$FILE_SIZE" >> $GITHUB_OUTPUT
+          echo "file_size_bytes=$FILE_SIZE_BYTES" >> $GITHUB_OUTPUT
+          echo "has_database_file=true" >> $GITHUB_OUTPUT
+          echo "SUCCESS: 数据库文件: $FILE_SIZE"
+        else
+          echo "has_database_file=false" >> $GITHUB_OUTPUT
+          echo "ERROR: 数据库文件不存在"
+        fi
+
+    - name: 生成元数据
+      id: metadata
+      if: steps.file_info.outputs.has_database_file == 'true'
+      env:
+        VERSION: data-${{ github.run_number }}
+        GITHUB_REPOSITORY: CavinHuang/cursor-tax-tools
+      run: |
+        echo "INFO: 生成元数据..."
+
+        # 执行元数据生成脚本
+        python scripts/actions/generate_metadata.py tariffs.db "$VERSION" update_results.json metadata.json
+
+        if [ -f "metadata.json" ]; then
+          TOTAL_CHANGES=$(python -c "import json; data=json.load(open('metadata.json')); print(data.get('changes_summary', {}).get('total_updates', 0))")
+          echo "total_changes=$TOTAL_CHANGES" >> $GITHUB_OUTPUT
+          echo "metadata_generated=true" >> $GITHUB_OUTPUT
+
+          echo "INFO: 变更统计: $TOTAL_CHANGES"
+
+          # 显示元数据摘要
+          VERSION=$(python -c "import json; data=json.load(open('metadata.json')); print(data.get('version', 'N/A'))")
+          RECORD_COUNT=$(python -c "import json; data=json.load(open('metadata.json')); print(data.get('record_count', 0))")
+          FILE_HASH=$(python -c "import json; data=json.load(open('metadata.json')); print(data.get('file_hash', 'N/A')[:20])")
+          echo "INFO: 版本: $VERSION"
+          echo "INFO: 记录数: $RECORD_COUNT"
+          echo "INFO: 文件哈希: $FILE_HASH..."
+        else
+          echo "metadata_generated=false" >> $GITHUB_OUTPUT
+          echo "ERROR: 元数据生成失败"
+        fi
+
+    - name: 检查发布条件
+      id: publish_check
+      if: steps.metadata.outputs.metadata_generated == 'true'
+      run: |
+        MIN_THRESHOLD=${{ github.event.inputs.min_change_threshold || '10' }}
+        TOTAL_CHANGES=${{ steps.metadata.outputs.total_changes }}
+        HAS_EXISTING=${{ steps.check_data.outputs.has_existing_data }}
+        QUALITY_SCORE=${{ steps.health_check.outputs.quality_score }}
+
+        echo "INFO: 发布条件检查:"
+        echo "   INFO: 总变更: $TOTAL_CHANGES"
+        echo "   INFO: 变更阈值: $MIN_THRESHOLD"
+        echo "   INFO: 质量分数: $QUALITY_SCORE"
+        echo "   INFO: 现有数据: $HAS_EXISTING"
+
+        # 发布条件判断
+        HEALTH_PASSED=${{ steps.health_check.outputs.health_check_passed }}
+        SHOULD_PUBLISH=false
+        REASON=""
+
+        # 首先检查健康状态
+        if [ "$HEALTH_PASSED" != "true" ]; then
+          SHOULD_PUBLISH=false
+          REASON="数据库健康检查失败，不发布"
+        elif [ "$HAS_EXISTING" = "false" ]; then
+          SHOULD_PUBLISH=true
+          REASON="首次更新，需要发布"
+        elif [ "$TOTAL_CHANGES" -ge "$MIN_THRESHOLD" ]; then
+          SHOULD_PUBLISH=true
+          REASON="变更数量达到阈值"
+        elif [ "$QUALITY_SCORE" != "" ] && [ "$(python -c "print(1 if float('$QUALITY_SCORE') < 50 else 0)")" = "1" ]; then
+          SHOULD_PUBLISH=false
+          REASON="数据质量过低 ($QUALITY_SCORE < 50)"
+        else
+          SHOULD_PUBLISH=false
+          REASON="变更数量不足 ($TOTAL_CHANGES < $MIN_THRESHOLD)"
+        fi
+
+        echo "should_publish=$SHOULD_PUBLISH" >> $GITHUB_OUTPUT
+        echo "reason=$REASON" >> $GITHUB_OUTPUT
+
+        if [ "$SHOULD_PUBLISH" = "true" ]; then
+          echo "SUCCESS: 满足发布条件: $REASON"
+        else
+          echo "INFO: 跳过发布: $REASON"
+        fi
+
+    - name: 创建更新报告
+      if: steps.publish_check.outputs.should_publish == 'true'
+      run: |
+        cat > UPDATE_REPORT.md << EOF
+        # INFO: 关税数据更新报告
+
+        **更新时间**: $(date -u +'%Y-%m-%d %H:%M UTC')
+        **版本**: data-${{ github.run_number }}
+        **质量分数**: ${{ steps.health_check.outputs.quality_score }}/100
+
+        ## INFO: 更新统计
+        - SUCCESS: 成功更新: ${{ steps.scraping.outputs.successful }}
+        - ERROR: 更新失败: ${{ steps.scraping.outputs.failed }}
+        - UK: 英国税率: ${{ steps.scraping.outputs.uk_updated }}
+        - NI: 北爱尔兰税率: ${{ steps.scraping.outputs.ni_updated }}
+        - INFO: 总变更: ${{ steps.metadata.outputs.total_changes }}
+
+        ## INFO: 数据库状态
+        - INFO: 记录数量: ${{ steps.health_check.outputs.record_count }}
+        - INFO: 文件大小: ${{ steps.file_info.outputs.file_size }}
+        - ERROR: 错误记录: ${{ steps.health_check.outputs.error_count }}
+        - INFO: 处理时间: ${{ steps.scraping.outputs.processing_time_seconds }}秒
+        - INFO: 健康检查: SUCCESS: 通过
+
+        ## INFO: 客户端更新指南
+        客户端应按以下步骤更新：
+        1. 下载 \`metadata.json\` 检查版本和哈希
+        2. 比较本地版本，仅在需要时下载完整数据库
+        3. 验证数据库文件哈希值
+        4. 备份旧数据库后进行替换
+
+        ## INFO: 性能指标
+        - **吞吐量**: ${{ steps.scraping.outputs.successful }}/$(( ${{ steps.scraping.outputs.processing_time_seconds }} + 1 )) 记录/秒
+        - **成功率**: $(( 100 * ${{ steps.scraping.outputs.successful }} / ( ${{ steps.scraping.outputs.successful }} + ${{ steps.scraping.outputs.failed }} + 1 ) ))%
+
+        ---
+        > INFO: 由 GitHub Actions 自动生成 | 数据版本: data-${{ github.run_number }}
+        EOF
+
+    - name: 发布数据更新
+      if: steps.publish_check.outputs.should_publish == 'true'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: data-${{ github.run_number }}
+        name: "INFO: 关税数据 v${{ github.run_number }} - $(date +'%Y-%m-%d %H:%M UTC')"
+        body_path: UPDATE_REPORT.md
+        files: |
+          tariffs.db
+          metadata.json
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: 更新latest-data标签
+      if: steps.publish_check.outputs.should_publish == 'true'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: latest-data
+        name: "INFO: Latest Tariff Data"
+        body: |
+          ## INFO: 最新关税数据
+
+          **版本**: data-${{ github.run_number }}
+          **更新时间**: $(date -u +'%Y-%m-%d %H:%M UTC')
+          **记录数量**: ${{ steps.health_check.outputs.record_count }}
+          **文件大小**: ${{ steps.file_info.outputs.file_size }}
+          **质量分数**: ${{ steps.health_check.outputs.quality_score }}/100
+
+          ## INFO: 下载地址
+          - **元数据**: [metadata.json](https://github.com/${{ github.repository }}/releases/download/latest-data/metadata.json)
+          - **数据库**: [tariffs.db](https://github.com/${{ github.repository }}/releases/download/latest-data/tariffs.db)
+
+          ## INFO: 质量指标
+          - **数据完整性**: ${{ steps.health_check.outputs.quality_score }}/100
+          - **错误率**: ${{ steps.health_check.outputs.error_count }}/${{ steps.health_check.outputs.record_count }}
+          - **总变更**: ${{ steps.metadata.outputs.total_changes }}
+
+          ---
+          > INFO: 客户端应先检查元数据再下载数据库
+        files: |
+          tariffs.db
+          metadata.json
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: 结果总结
+      run: |
+        echo ""
+        echo "SUCCESS: 数据更新流程完成！"
+        echo "=" $(printf '=%.0s' {1..50})
+        echo ""
+
+        # 爬取状态
+        if [ "${{ steps.scraping.outputs.scraping_completed }}" = "true" ]; then
+          echo "SUCCESS: 爬取状态: 成功"
+          echo "INFO: 处理统计:"
+          echo "   - 成功: ${{ steps.scraping.outputs.successful }}"
+          echo "   - 失败: ${{ steps.scraping.outputs.failed }}"
+          echo "   - 英国更新: ${{ steps.scraping.outputs.uk_updated }}"
+          echo "   - 北爱更新: ${{ steps.scraping.outputs.ni_updated }}"
+          echo "INFO: 处理时间: ${{ steps.scraping.outputs.processing_time_seconds }}秒"
+        else
+          echo "ERROR: 爬取状态: 失败"
+        fi
+
+        # 健康检查状态
+        if [ "${{ steps.health_check.outputs.health_check_completed }}" = "true" ]; then
+          echo ""
+          echo "INFO: 健康检查:"
+          if [ "${{ steps.health_check.outputs.health_check_passed }}" = "true" ]; then
+            echo "   SUCCESS: 状态: 通过"
+            echo "   INFO: 质量分数: ${{ steps.health_check.outputs.quality_score }}/100"
+          else
+            echo "   ERROR: 状态: 失败"
+          fi
+        fi
+
+        # 数据库状态
+        if [ "${{ steps.health_check.outputs.health_check_passed }}" = "true" ]; then
+          echo ""
+          echo "INFO: 数据库状态:"
+          echo "   - 记录数量: ${{ steps.health_check.outputs.record_count }}"
+          echo "   - 文件大小: ${{ steps.file_info.outputs.file_size }}"
+          echo "   - 错误记录: ${{ steps.health_check.outputs.error_count }}"
+        fi
+
+        # 发布状态
+        if [ "${{ steps.publish_check.outputs.should_publish }}" = "true" ]; then
+          echo ""
+          echo "SUCCESS: 发布状态: 已发布"
+          echo "   - 版本: data-${{ github.run_number }}"
+          echo "   - 元数据: https://github.com/${{ github.repository }}/releases/download/latest-data/metadata.json"
+          echo "   - 发布原因: ${{ steps.publish_check.outputs.reason }}"
+        else
+          echo ""
+          echo "INFO: 发布状态: 跳过 (${{ steps.publish_check.outputs.reason }})"
+        fi
+
+        echo ""
+        echo "=" $(printf '=%.0s' {1..50})
+
+    - name: 错误处理
+      if: failure()
+      run: |
+        echo "ERROR: 工作流执行失败"
+        echo "INFO: 检查失败原因..."
+
+        # 上传日志文件用于调试
+        if [ -f "update_results.json" ]; then
+          echo "INFO: 爬取结果日志已保存"
+        fi
+
+        if [ -f "validation_results.json" ]; then
+          echo "INFO: 验证结果日志已保存"
+        fi
+
+    - name: 上传结果文件
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: tariff-update-results-${{ github.run_number }}
+        path: |
+          tariffs.db
+          metadata.json
+          update_results.json
+          validation_results.json
+          UPDATE_REPORT.md
+        retention-days: 7
+        if-no-files-found: warn

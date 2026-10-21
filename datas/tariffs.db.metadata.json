@@ -1,0 +1,52 @@
+{
+  "version": "data-15",
+  "timestamp": "2025-11-23T14:59:36.062857+00:00",
+  "last_modified": "2025-11-23T14:59:35.833764+00:00",
+  "file_size": 5824512,
+  "file_hash": "sha256:1553015cd3a516c00d83acc9837cbfc09762f756084bab09d612f13a7ae42d89",
+  "record_count": 16581,
+  "changes_summary": {
+    "total_updates": 16581,
+    "uk_updated": 16581,
+    "ni_updated": 0,
+    "new_records": 0,
+    "deleted_records": 0,
+    "modified_records": 16581
+  },
+  "update_statistics": {
+    "success_rate": 1.0,
+    "processing_time_minutes": 115.61868049701054,
+    "errors_count": 0,
+    "retry_count": 0
+  },
+  "quality_metrics": {
+    "records_with_description": 16577,
+    "records_with_uk_rate": 16481,
+    "records_with_ni_rate": 0,
+    "completeness_score": 0.9997587600265364
+  },
+  "data_ranges": {
+    "uk_rate_min": "0%",
+    "uk_rate_max": "25%",
+    "common_rates": [
+      "0.00%",
+      "items (p/st)",
+      "6.00%",
+      "4.00%",
+      "2.00%"
+    ],
+    "categories_count": 98
+  },
+  "client_instructions": {
+    "check_interval_hours": 24,
+    "auto_download_enabled": true,
+    "backup_before_update": true,
+    "verify_checksum": true,
+    "min_change_threshold": 10
+  },
+  "download_urls": {
+    "primary": "https://github.com/CavinHuang/cursor-tax-tools/releases/download/latest-data/tariffs.db",
+    "metadata": "https://github.com/CavinHuang/cursor-tax-tools/releases/download/latest-data/metadata.json",
+    "mirror": []
+  }
+}

@@ -44,6 +44,7 @@ jobs:
         pip install python-Levenshtein==0.21.1 pillow pyinstaller
         pip install aiohttp==3.8.5 beautifulsoup4==4.12.2 requests==2.31.0
         pip install jellyfish==1.0.1 unittest2>=1.1.0
+        pip install backoff==2.2.1  # 添加 backoff 依赖用于重试机制
 
     - name: Create template and icon
       shell: pwsh
@@ -61,13 +62,13 @@ jobs:
     - name: Build with PyInstaller
       shell: pwsh
       run: |
-        # 修改spec文件中的name
-        $content = Get-Content build_win.spec -Raw
-        $content = $content -replace "name='英国海关编码税率查询工具'", "name='$env:APP_NAME'"
-        [System.IO.File]::WriteAllText("build_win.spec", $content, [System.Text.Encoding]::UTF8)
-        # 运行PyInstaller
-        # pyinstaller build_win.spec
-        pyinstaller --onefile --noconsole ./tariff_gui.py --name "uk-tax-tools"
+        # 运行PyInstaller（命令行方式，添加 hidden-import 和 add-data 参数）
+        pyinstaller --onefile --noconsole `
+          --hidden-import backoff `
+          --hidden-import Levenshtein `
+          --add-data "templates;templates" `
+          --add-data "tariffs.db;." `
+          ./tariff_gui.py --name "$env:APP_NAME"
         # 检查构建结果
         if (-not (Test-Path "dist/$env:APP_NAME.exe")) {
             echo "Error: Executable not found"
@@ -76,7 +77,7 @@ jobs:
         }
 
     - name: Upload Build Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: build-artifact
         path: dist/${{ env.APP_NAME }}.exe
@@ -105,9 +106,10 @@ jobs:
         }
         # 创建发布目录
         mkdir release -ErrorAction SilentlyContinue
+        mkdir release/datas -ErrorAction SilentlyContinue
         Copy-Item "dist/$env:APP_NAME.exe" "release/"
         Copy-Item "templates" "release/" -Recurse
-        Copy-Item "tariffs.db" "release/"
+        Copy-Item "tariffs.db" "release/datas/"
         # 创建ZIP文件
         echo "Creating ZIP file..."
         cd release

@@ -1,0 +1,63 @@
+{
+  "version": "data-20957550201",
+  "timestamp": "2026-01-13T14:28:28.626551+00:00",
+  "last_modified": "2026-01-13T14:28:28.366664+00:00",
+  "file_size": 4509696,
+  "file_hash": "sha256:b1673cf11c289e99c257a7c3ae239a6122ba2262161ff694dfaaa4e388a9b8e8",
+  "record_count": 16559,
+  "coverage": {
+    "total_chapters": 0,
+    "completed_chapters": 0,
+    "missing_chapters": [],
+    "coverage_percentage": 0.0
+  },
+  "missing_details": {},
+  "changes_summary": {
+    "total_updates": 10,
+    "total_shards": 10,
+    "failed_shards": 0,
+    "total_shard_records": 16568,
+    "duplicate_records_removed": 9
+  },
+  "update_statistics": {
+    "success_rate": 0.0,
+    "processing_time_minutes": 0,
+    "errors_count": 0,
+    "retry_count": 0
+  },
+  "quality_metrics": {
+    "records_with_description": 16554,
+    "records_with_uk_rate": 16453,
+    "records_with_ni_rate": 16126,
+    "completeness_score": 0.9996980493991183
+  },
+  "data_ranges": {
+    "uk_rate_min": "0%",
+    "uk_rate_max": "25%",
+    "common_rates": [
+      "0.00%",
+      "6.00%",
+      "4.00%",
+      "2.00%",
+      "12.00%",
+      "8.00%",
+      "10.00%",
+      "14.00%",
+      "20.00%",
+      "16.00%"
+    ],
+    "categories_count": 97
+  },
+  "client_instructions": {
+    "check_interval_hours": 24,
+    "auto_download_enabled": true,
+    "backup_before_update": true,
+    "verify_checksum": true,
+    "min_change_threshold": 10
+  },
+  "download_urls": {
+    "primary": "https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/tariffs.db",
+    "metadata": "https://github.com/liao-works/cursor-tax-tools/releases/download/latest-data/metadata.json",
+    "mirror": []
+  }
+}

@@ -14,3 +14,13 @@ unittest2>=1.1.0
 numpy==1.24.3
 pandas==1.5.3
 openpyxl==3.1.2  # 用于Excel文件处理
+
+# Performance and retry utilities
+backoff==2.2.1
+psutil==5.9.5
+
+# Database and optimization
+sqlparse==0.4.4
+
+# 快照压缩发布（zstd）：客户端弱网下载量约为原始的 1/5
+zstandard>=0.19.0
