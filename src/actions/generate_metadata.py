@@ -29,6 +29,46 @@ def calculate_file_hash(file_path: str, algorithm: str = 'sha256') -> str:
         return f"{algorithm}:error"
 
 
+def compress_database(db_path: str) -> Optional[Dict]:
+    """生成 zstd 压缩快照（<db_path>.zst），返回客户端 compressed 元数据块。
+
+    客户端（liao-tools）在清单提供 compressed 块时优先下载压缩资产，
+    下载量约为原始快照的 1/5；块缺失时客户端按旧语义下载原始快照。
+    zstandard 不可用或压缩失败时返回 None，不影响本次发布。
+    """
+    zst_path = db_path + '.zst'
+    try:
+        import zstandard
+    except ImportError:
+        print("WARN: 未安装 zstandard，跳过压缩快照发布", file=sys.stderr)
+        return None
+
+    try:
+        # level 15：400MB 级数据库在 CI 上约 1 分钟，压缩比远高于默认级别
+        cctx = zstandard.ZstdCompressor(level=15)
+        with open(db_path, 'rb') as src, open(zst_path, 'wb') as dst:
+            cctx.copy_stream(src, dst)
+
+        stat_info = os.stat(zst_path)
+        block = {
+            'format': 'zstd',
+            'asset': os.path.basename(zst_path),
+            'file_size': stat_info.st_size,
+            'file_hash': calculate_file_hash(zst_path),
+        }
+        ratio = stat_info.st_size / max(os.path.getsize(db_path), 1)
+        print(f"SUCCESS: 压缩快照已生成: {zst_path}（压缩比 {ratio:.2f}）")
+        return block
+    except Exception as e:
+        print(f"压缩快照生成失败（不影响发布）: {e}", file=sys.stderr)
+        if os.path.exists(zst_path):
+            try:
+                os.remove(zst_path)
+            except OSError:
+                pass
+        return None
+
+
 def get_database_stats(db_path: str) -> Dict:
     """获取数据库统计信息"""
     try:
@@ -242,6 +282,9 @@ def generate_metadata(db_path: str = 'tariffs.db',
     # 数据库统计
     db_stats = get_database_stats(db_path)
 
+    # 压缩快照（客户端可选下载，压缩比决定弱网收益）
+    compressed_block = compress_database(db_path)
+
     # 更新结果（merge_results.json）
     update_results = load_update_results(results_path)
 
@@ -317,6 +360,11 @@ def generate_metadata(db_path: str = 'tariffs.db',
         'failed_codes': (update_results or {}).get('failed_codes', [])
     }
 
+    # 压缩快照块：file_size/file_hash 语义不变（始终指解压后的原始库），
+    # compressed 描述额外的 zstd 资产；None 时字段缺席 = 客户端走旧链路
+    if compressed_block:
+        metadata['compressed'] = compressed_block
+
     # 保存元数据
     try:
         with open(output_path, 'w', encoding='utf-8') as f:
@@ -326,6 +374,9 @@ def generate_metadata(db_path: str = 'tariffs.db',
         print(f"INFO: 版本: {metadata['version']}")
         print(f"INFO: 记录数: {metadata['record_count']:,}")
         print(f"INFO: 大小: {metadata['file_size'] / 1024 / 1024:.1f}MB")
+        if metadata.get('compressed'):
+            print(f"INFO: 压缩快照: {metadata['compressed']['asset']} "
+                  f"{metadata['compressed']['file_size'] / 1024 / 1024:.1f}MB")
         print(f"INFO: 哈希: {metadata['file_hash'][:32]}...")
 
         return metadata
