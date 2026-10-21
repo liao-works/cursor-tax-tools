@@ -404,7 +404,7 @@ jobs:
         body_path: UPDATE_REPORT.md
         files: |
           tariffs.db
-          tariffs.db.zst
+          tariffs.db.*
           metadata.json
         draft: false
         prerelease: false
@@ -433,7 +433,7 @@ jobs:
           > 客户端应先检查元数据再下载数据库
         files: |
           tariffs.db
-          tariffs.db.zst
+          tariffs.db.*
           metadata.json
         draft: false
         prerelease: false

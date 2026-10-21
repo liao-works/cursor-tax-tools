@@ -29,6 +29,33 @@ def calculate_file_hash(file_path: str, algorithm: str = 'sha256') -> str:
         return f"{algorithm}:error"
 
 
+def write_md5_sidecar(file_path: str) -> Optional[str]:
+    """生成 md5sum 兼容的 .md5 校验文件（内容: "<hex>  <文件名>"）。
+
+    除随 Release 发布供人工/脚本 `md5sum -c` 校验外，摘要同时写入
+    metadata（file_md5 / compressed.md5）供客户端做第二重完整性校验。
+    失败只告警，不阻断发布。
+    """
+    md5_path = file_path + '.md5'
+    try:
+        hash_md5 = hashlib.md5()
+        with open(file_path, 'rb') as f:
+            while chunk := f.read(1024 * 1024):
+                hash_md5.update(chunk)
+        digest = hash_md5.hexdigest()
+        with open(md5_path, 'w', encoding='utf-8') as f:
+            f.write(f"{digest}  {os.path.basename(file_path)}\n")
+        return digest
+    except Exception as e:
+        print(f"生成 MD5 校验文件失败（不影响发布）: {e}", file=sys.stderr)
+        if os.path.exists(md5_path):
+            try:
+                os.remove(md5_path)
+            except OSError:
+                pass
+        return None
+
+
 def compress_database(db_path: str) -> Optional[Dict]:
     """生成 zstd 压缩快照（<db_path>.zst），返回客户端 compressed 元数据块。
 
@@ -56,6 +83,9 @@ def compress_database(db_path: str) -> Optional[Dict]:
             'file_size': stat_info.st_size,
             'file_hash': calculate_file_hash(zst_path),
         }
+        md5_digest = write_md5_sidecar(zst_path)
+        if md5_digest:
+            block['md5'] = f"md5:{md5_digest}"
         ratio = stat_info.st_size / max(os.path.getsize(db_path), 1)
         print(f"SUCCESS: 压缩快照已生成: {zst_path}（压缩比 {ratio:.2f}）")
         return block
@@ -278,6 +308,8 @@ def generate_metadata(db_path: str = 'tariffs.db',
         'file_hash': calculate_file_hash(db_path),
         'last_modified': datetime.fromtimestamp(stat_info.st_mtime, tz=timezone.utc).isoformat(),
     }
+    # 原始库的 .md5 校验文件与摘要（客户端第二重校验）
+    file_md5 = write_md5_sidecar(db_path)
 
     # 数据库统计
     db_stats = get_database_stats(db_path)
@@ -364,6 +396,8 @@ def generate_metadata(db_path: str = 'tariffs.db',
     # compressed 描述额外的 zstd 资产；None 时字段缺席 = 客户端走旧链路
     if compressed_block:
         metadata['compressed'] = compressed_block
+    if file_md5:
+        metadata['file_md5'] = f"md5:{file_md5}"
 
     # 保存元数据
     try:
